@@ -2,7 +2,7 @@
 
 ## Current objective
 
-Improve global install/publish flow once the package is ready to publish.
+Dogfood plain-engine boot behavior with Claude Code/OpenCode/Codex read-only tasks.
 
 ## Scope
 
@@ -29,9 +29,11 @@ Improve global install/publish flow once the package is ready to publish.
 - CI now includes `bun run publish:dry-run` after pack dry-run.
 - README documents package/publish flow and warns not to run real publish until npm account/name/version are confirmed.
 
+- Implementation was committed and pushed to `origin/main`.
+
 ## Last completed step
 
-Verified release readiness locally.
+Committed and pushed global install/publish flow improvements.
 
 ## Files changed
 
@@ -73,7 +75,7 @@ None currently known.
 
 ## Next exact action
 
-Commit and push global install/publish flow improvements.
+Dogfood plain-engine boot behavior with Claude Code/OpenCode/Codex read-only tasks.
 
 ## Protected files / do not touch
 
