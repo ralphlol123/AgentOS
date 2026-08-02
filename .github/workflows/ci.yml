@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Bun package verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup pnpm for package-manager compatibility test
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+          run_install: false
+
+      - name: Install dependencies with Bun
+        run: bun install --frozen-lockfile
+
+      - name: Build
+        run: bun run build
+
+      - name: Type check
+        run: bun run check
+
+      - name: Unit tests
+        run: bun run test
+
+      - name: Smoke test
+        run: bun run smoke
+
+      - name: Package-manager compatibility
+        run: bun run test:package-managers
+
+      - name: Pack dry run
+        run: bun pm pack --dry-run

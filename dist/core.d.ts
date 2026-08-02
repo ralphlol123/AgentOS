@@ -5,11 +5,11 @@ export declare function initAgentOS(options?: any): Promise<{
     planned: string[];
     text: string;
 } | {
-    planned?: undefined;
     mode: any;
     workspaceKind: string;
     repos: any[];
     text: string;
+    planned?: undefined;
 }>;
 export declare function statusAgentOS(options?: any): Promise<{
     ok: boolean;

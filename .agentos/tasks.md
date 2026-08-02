@@ -8,10 +8,14 @@
 - [x] Capture current command surface and core product rules.
 - [x] Verify dogfood context with `agentos doctor`, `agentos status`, full package tests, smoke tests, package-manager tests, and pack dry-run.
 - [x] Commit and push the AgentOS dogfood context.
+- [x] Add Bun-based GitHub Actions CI workflow.
+- [x] Add `bun.lock` and make Bun the preferred dogfood package manager while preserving npm/pnpm/Bun compatibility tests.
+- [x] Validate workflow YAML with PyYAML and actionlint.
+- [x] Execute the workflow's equivalent local steps with Bun.
 
 ## Now
 
-- [ ] Add GitHub Actions CI for build/test/smoke/package-manager checks.
+- [ ] Commit and push the Bun-based CI changes.
 
 ## Next
 

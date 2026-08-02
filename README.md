@@ -60,11 +60,29 @@ agentos prompt [claude|codex|opencode|hermes]
 Local development:
 
 ```bash
+# preferred dogfood path
+bun install
+bun run build
+bun run check
+bun run test
+bun run smoke
+bun run test:package-managers
+bun pm pack --dry-run
+
+# npm still works
 npm run build
 npm test
 npm run smoke
 npm run test:package-managers
 node dist/cli.js init --existing --dry-run
+```
+
+## CI
+
+```bash
+# GitHub Actions uses Bun as the primary dogfood package manager.
+# The package-manager compatibility test still verifies npm, pnpm, and Bun installs.
+.github/workflows/ci.yml
 ```
 
 ## Install / global usage

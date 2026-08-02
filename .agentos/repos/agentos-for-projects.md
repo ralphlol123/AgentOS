@@ -3,17 +3,18 @@
 Path: `.`
 Type: Node/TypeScript CLI package
 Framework: Node CLI, TypeScript ESM
-Primary package manager: npm
+Primary dogfood package manager: Bun
 Supported consumer package managers: npm, pnpm, Bun
 
 ## Commands
 
-- Build: `npm run build`
-- Type check: `npm run check`
-- Unit tests: `npm test`
-- Smoke test: `npm run smoke`
-- Package-manager compatibility: `npm run test:package-managers`
-- Pack verification: `npm pack --dry-run`
+- Install: `bun install --frozen-lockfile`
+- Build: `bun run build`
+- Type check: `bun run check`
+- Unit tests: `bun run test`
+- Smoke test: `bun run smoke`
+- Package-manager compatibility: `bun run test:package-managers`
+- Pack verification: `bun pm pack --dry-run`
 
 ## Scope rules
 

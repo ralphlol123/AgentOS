@@ -6,16 +6,15 @@ Last updated: 2026-08-02
 
 - AgentOS doctor: OK
 - AgentOS status: OK
-- Package tests: OK
-- Smoke tests: OK
+- Workflow YAML parse: OK
+- actionlint: OK
+- Bun install/build/check/test/smoke/package-manager compatibility/pack dry-run: OK
 - Package-manager compatibility: npm/pnpm/Bun OK
-- Pack dry-run: OK
-- Git remote: `main` pushed and verified
 
 ## Current phase
 
-Dogfood context installed, verified, committed, and pushed.
+Bun-based GitHub Actions CI added and locally verified. Pending commit/push.
 
 ## Next recommended work
 
-Add GitHub Actions CI for AgentOS package verification.
+Add `agentos doctor --json` for machine-readable status.

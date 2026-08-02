@@ -15,17 +15,18 @@ repos:
     path: .
     type: cli-package
     framework: node-typescript-cli
-    package_manager: npm
+    package_manager: bun
     supported_package_managers:
+      - bun
       - npm
       - pnpm
-      - bun
-    build_command: npm run build
-    dev_command: npm run check
-    test_command: npm test
-    smoke_command: npm run smoke
-    package_manager_test_command: npm run test:package-managers
-    pack_command: npm pack --dry-run
+    install_command: bun install --frozen-lockfile
+    build_command: bun run build
+    dev_command: bun run check
+    test_command: bun run test
+    smoke_command: bun run smoke
+    package_manager_test_command: bun run test:package-managers
+    pack_command: bun pm pack --dry-run
 
 agents:
   implementation: backend-engineer

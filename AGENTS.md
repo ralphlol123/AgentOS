@@ -3,7 +3,7 @@
 AgentOS for Projects bootloader.
 
 Workspace: single-repo
-Repos: agentos-for-projects=. (cli-package/node-typescript-cli/npm; compatible with npm, pnpm, Bun)
+Repos: agentos-for-projects=. (cli-package/node-typescript-cli/Bun dogfood; compatible with npm, pnpm, Bun)
 
 Read first: `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`, `.agentos/knowledge.md`, relevant `.agentos/repos/*`, `.agentos/agents/*`, `.agentos/engines/*`.
 
