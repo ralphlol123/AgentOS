@@ -31,6 +31,8 @@ console.log('\n--- status from root ---');
 console.log(run(['status']));
 console.log('\n--- doctor from root ---');
 console.log(run(['doctor']));
+console.log('\n--- compact dry-run from root ---');
+console.log(run(['compact', '--dry-run']));
 console.log('\n--- status from subrepo ---');
 console.log(run(['status'], join(root, 'photobooth-fe')));
 console.log('\n--- project.yaml excerpt ---');

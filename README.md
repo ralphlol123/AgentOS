@@ -39,6 +39,7 @@ It supports:
 - root `CLAUDE.md` Claude Code adapter
 - subrepo pointer files for multi-repo projects
 - status, handoff, and doctor checks
+- deterministic live-context compaction: `agentos compact [--dry-run]`
 - generated engine prompts: `agentos prompt [claude|codex|opencode|hermes]`
 - doctor diagnostics for duplicate task sections, stale handoff/task hints, repo git branch/ahead-behind state, untracked adapter files, missing commands, and configured port usage
 
@@ -49,6 +50,7 @@ agentos init [--new|--existing] [--dry-run]
 agentos status
 agentos handoff
 agentos doctor [--fix]
+agentos compact [--dry-run]
 agentos prompt [claude|codex|opencode|hermes]
 ```
 
@@ -62,6 +64,15 @@ node dist/cli.js init --existing --dry-run
 ```
 
 ## Usage examples
+
+Compact live AgentOS context without losing history:
+
+```bash
+agentos compact --dry-run
+agentos compact
+```
+
+`compact` archives old `.agentos/handoff.md` and `.agentos/tasks.md` under `.agentos/runs/`, then rewrites the live files into short deterministic sections. It does not compact `.agentos/memory.md`.
 
 Existing multi-repo project:
 

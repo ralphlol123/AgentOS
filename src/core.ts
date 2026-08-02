@@ -115,6 +115,48 @@ export async function promptAgentOS(options: any = {}) {
   return { ok: true, engine, text: prompt };
 }
 
+export async function compactAgentOS(options: any = {}) {
+  const root = await findAgentOSRoot(options.cwd ?? process.cwd());
+  if (!root) return { ok: false, text: 'AgentOS compact: FAIL\nNo .agentos directory found.' };
+
+  const handoffPath = join(root, '.agentos/handoff.md');
+  const tasksPath = join(root, '.agentos/tasks.md');
+  const runsDir = join(root, '.agentos/runs');
+  const oldHandoff = await safeRead(handoffPath);
+  const oldTasks = await safeRead(tasksPath);
+  const before = oldHandoff.length + oldTasks.length;
+  const compactHandoff = renderCompactHandoff(oldHandoff, oldTasks);
+  const compactTasks = renderCompactTasks(oldTasks, oldHandoff);
+  const after = compactHandoff.length + compactTasks.length;
+  const archiveName = `compact-archive-${timestampForFilename(new Date())}.md`;
+  const archivePath = join(runsDir, archiveName);
+
+  const lines = [
+    `AgentOS compact${options.dryRun ? ' dry run' : ''}`,
+    `Root: ${root}`,
+    '',
+    'Live context:',
+    `- handoff.md: ${oldHandoff.length} chars -> ${compactHandoff.length} chars`,
+    `- tasks.md: ${oldTasks.length} chars -> ${compactTasks.length} chars`,
+    `- total: ${before} chars -> ${after} chars (${before > 0 ? Math.round(((before - after) / before) * 1000) / 10 : 0}% smaller)`,
+    '',
+    `${options.dryRun ? 'Would archive' : 'Archived'}: .agentos/runs/${archiveName}`,
+    `${options.dryRun ? 'Would rewrite' : 'Rewrote'}: .agentos/handoff.md`,
+    `${options.dryRun ? 'Would rewrite' : 'Rewrote'}: .agentos/tasks.md`,
+  ];
+
+  if (!options.dryRun) {
+    await mkdir(runsDir, { recursive: true });
+    await writeFile(archivePath, renderCompactArchive({ oldHandoff, oldTasks, compactHandoff, compactTasks }), 'utf8');
+    await writeFile(handoffPath, compactHandoff, 'utf8');
+    await writeFile(tasksPath, compactTasks, 'utf8');
+    const doctor = await doctorAgentOS({ cwd: root });
+    lines.push('', doctor.text);
+  }
+
+  return { ok: true, dryRun: Boolean(options.dryRun), archivePath, before, after, text: lines.join('\n') };
+}
+
 export async function handoffAgentOS(options: any = {}) {
   const root = await findAgentOSRoot(options.cwd ?? process.cwd());
   if (!root) return { ok: false, text: 'No AgentOS root found.' };
@@ -732,6 +774,139 @@ function engineSpecificRules(engine) {
     `- Hermes should load relevant skills before coding/review/verification work.`,
   ];
   return [];
+}
+
+
+function renderCompactHandoff(handoff, tasks) {
+  const currentObjective = extractSection(handoff, 'Current objective') || firstUncheckedTask(tasks) || 'No active objective recorded.';
+  const scope = extractSection(handoff, 'Scope') || 'Use `.agentos/project.yaml` for workspace/repo scope. Declare task repo scope before editing.';
+  const currentState = extractSection(handoff, 'Current state') || 'See `.agentos/tasks.md` for current task state.';
+  const lastCompleted = extractSection(handoff, 'Last completed step') || latestCheckedTask(tasks) || 'No completed step recorded.';
+  const filesChanged = extractSection(handoff, 'Files changed') || 'No file-change summary recorded.';
+  const testsRun = extractSection(handoff, 'Tests run') || 'No verification recorded.';
+  const known = extractSection(handoff, 'Known failures') || extractSection(handoff, 'Known warnings') || 'None recorded.';
+  const nextAction = extractSection(handoff, 'Next exact action') || firstUncheckedTask(tasks) || 'Choose the next AgentOS-managed task.';
+  const openDecisions = extractSection(handoff, 'Open decisions') || '- None recorded.';
+  return `# Handoff
+
+## Current objective
+
+${trimSection(currentObjective)}
+
+## Scope
+
+${trimSection(scope)}
+
+## Current state
+
+${trimSection(currentState)}
+
+## Last completed step
+
+${trimSection(lastCompleted)}
+
+## Files changed
+
+${trimSection(filesChanged)}
+
+## Tests run
+
+${trimSection(testsRun)}
+
+## Known warnings / failures
+
+${trimSection(known)}
+
+## Next exact action
+
+${trimSection(nextAction)}
+
+## Open decisions
+
+${trimSection(openDecisions)}
+`;
+}
+
+function renderCompactTasks(tasks, handoff) {
+  const done = uniqueTaskLines(extractSection(tasks, 'Done')).filter(isCheckedTask).slice(-12);
+  const nowCandidates = uniqueTaskLines(extractSection(tasks, 'Now')).filter(isUncheckedTask);
+  const nextCandidates = uniqueTaskLines(extractSection(tasks, 'Next')).filter(isUncheckedTask);
+  const laterCandidates = uniqueTaskLines(extractSection(tasks, 'Later')).filter(isUncheckedTask);
+  const fallbackNow = firstUncheckedTask(tasks) || extractSection(handoff, 'Next exact action') || 'Choose the next AgentOS-managed task.';
+  const now = nowCandidates[0] || checkboxLine(fallbackNow);
+  const next = nextCandidates.filter((line) => line !== now).slice(0, 8);
+  const later = laterCandidates.filter((line) => line !== now && !next.includes(line)).slice(0, 8);
+  return `# Tasks
+
+## Done
+
+${done.length ? done.join('\n') : '- [x] AgentOS context initialized.'}
+
+## Now
+
+${now}
+
+## Next
+
+${next.length ? next.join('\n') : '- [ ] Run `agentos doctor` before the next handoff.'}
+
+## Later
+
+${later.length ? later.join('\n') : '- [ ] Add more AgentOS improvements as needed.'}
+`;
+}
+
+function renderCompactArchive({ oldHandoff, oldTasks, compactHandoff, compactTasks }) {
+  return `# AgentOS Compact Archive
+
+Created: ${new Date().toISOString()}
+
+This archive preserves pre-compaction live state. The live files were rewritten deterministically; no LLM summarization was used.
+
+## Previous handoff.md
+
+${oldHandoff.trim() || '(empty)'}
+
+## Previous tasks.md
+
+${oldTasks.trim() || '(empty)'}
+
+## Compact handoff.md written
+
+${compactHandoff.trim()}
+
+## Compact tasks.md written
+
+${compactTasks.trim()}
+`;
+}
+
+function uniqueTaskLines(section) {
+  const seen = new Set();
+  const lines = String(section || '').split(/\r?\n/).map((line) => line.trim()).filter((line) => /^- \[[ xX]\]/.test(line));
+  const result = [];
+  for (const line of lines) {
+    const key = line.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(line);
+  }
+  return result;
+}
+function isCheckedTask(line) { return /^- \[[xX]\]/.test(line); }
+function isUncheckedTask(line) { return /^- \[ \]/.test(line); }
+function firstUncheckedTask(text) { return uniqueTaskLines(text).find(isUncheckedTask); }
+function latestCheckedTask(text) { return uniqueTaskLines(text).filter(isCheckedTask).pop(); }
+function checkboxLine(text) {
+  const line = oneLine(String(text).replace(/^- \[[ xX]\]\s*/, ''), 180) || 'Choose the next AgentOS-managed task.';
+  return `- [ ] ${line}`;
+}
+function trimSection(text, max = 1600) {
+  const value = String(text || '').trim() || '- Not recorded.';
+  return value.length > max ? `${value.slice(0, max - 1).trimEnd()}…` : value;
+}
+function timestampForFilename(date) {
+  return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
 }
 
 function firstYamlValue(text, key) { return text.match(new RegExp(`^${key}:\\s*(.+)$`, 'm'))?.[1]?.trim(); }

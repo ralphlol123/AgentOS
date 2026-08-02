@@ -24,6 +24,21 @@ export declare function promptAgentOS(options?: any): Promise<{
     engine: string;
     text: string;
 }>;
+export declare function compactAgentOS(options?: any): Promise<{
+    ok: boolean;
+    text: string;
+    dryRun?: undefined;
+    archivePath?: undefined;
+    before?: undefined;
+    after?: undefined;
+} | {
+    ok: boolean;
+    dryRun: boolean;
+    archivePath: string;
+    before: number;
+    after: number;
+    text: string;
+}>;
 export declare function handoffAgentOS(options?: any): Promise<{
     ok: boolean;
     text: string;

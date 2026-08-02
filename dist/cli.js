@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { doctorAgentOS, handoffAgentOS, initAgentOS, promptAgentOS, statusAgentOS } from './core.js';
+import { compactAgentOS, doctorAgentOS, handoffAgentOS, initAgentOS, promptAgentOS, statusAgentOS } from './core.js';
 async function main() {
     const [, , command = 'help', ...args] = process.argv;
     const flags = parseFlags(args);
@@ -24,6 +24,12 @@ async function main() {
         }
         if (command === 'doctor') {
             const result = await doctorAgentOS({ cwd: process.cwd(), fix: flags.fix });
+            console.log(result.text);
+            process.exitCode = result.ok ? 0 : 1;
+            return;
+        }
+        if (command === 'compact') {
+            const result = await compactAgentOS({ cwd: process.cwd(), dryRun: flags['dry-run'] });
             console.log(result.text);
             process.exitCode = result.ok ? 0 : 1;
             return;
@@ -53,7 +59,7 @@ function parseFlags(args) {
     return flags;
 }
 function printHelp() {
-    console.log(`AgentOS for Projects v0.1\n\nUsage:\n  agentos init [--new|--existing] [--dry-run]\n  agentos status\n  agentos handoff\n  agentos doctor [--fix]\n  agentos prompt [claude|codex|opencode|hermes]\n\nCore rule:\n  One AgentOS per product/workspace.\n  Many repos inside it.\n  Each task declares which repo(s) are in scope.`);
+    console.log(`AgentOS for Projects v0.1\n\nUsage:\n  agentos init [--new|--existing] [--dry-run]\n  agentos status\n  agentos handoff\n  agentos doctor [--fix]\n  agentos compact [--dry-run]\n  agentos prompt [claude|codex|opencode|hermes]\n\nCore rule:\n  One AgentOS per product/workspace.\n  Many repos inside it.\n  Each task declares which repo(s) are in scope.`);
 }
 main();
 //# sourceMappingURL=cli.js.map

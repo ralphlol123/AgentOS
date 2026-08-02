@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
-import { initAgentOS, statusAgentOS, handoffAgentOS, doctorAgentOS, promptAgentOS } from '../dist/core.js';
+import { initAgentOS, statusAgentOS, handoffAgentOS, doctorAgentOS, promptAgentOS, compactAgentOS } from '../dist/core.js';
 
 async function exists(path) {
   try {
@@ -164,4 +164,97 @@ test('doctor --fix adds OpenCode engine adapter to older workspaces', async () =
   assert.equal(fixed.ok, true);
   assert.equal(await exists(join(root, '.agentos/engines/opencode.md')), true);
   assert.match(await readFile(projectPath, 'utf8'), /- opencode/);
+});
+
+
+test('compact archives verbose handoff/tasks and rewrites compact live state', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true });
+  await writeFile(join(root, '.agentos/handoff.md'), `# Handoff
+
+## Current objective
+
+Build agentos compact.
+
+## Scope
+
+AgentOS package only.
+
+## Current state
+
+Verbose history line 1.
+Verbose history line 2.
+Verbose history line 3.
+
+## Last completed step
+
+Pushed TypeScript MVP.
+
+## Files changed
+
+src/core.ts
+src/cli.ts
+
+## Tests run
+
+npm test passed.
+
+## Known failures
+
+None.
+
+## Next exact action
+
+Implement deterministic compaction.
+
+## Open decisions
+
+- Link Obsidian later.
+`);
+  await writeFile(join(root, '.agentos/tasks.md'), `# Tasks
+
+## Done
+
+- [x] Initialize AgentOS.
+- [x] Push TypeScript MVP.
+
+## Now
+
+- [ ] Implement deterministic compaction.
+
+## Now
+
+- [ ] Duplicate stale now item.
+
+## Next
+
+- [ ] Add Obsidian link command.
+
+## Later
+
+- [ ] Add CI.
+`);
+
+  const dry = await compactAgentOS({ cwd: root, dryRun: true });
+  assert.equal(dry.ok, true);
+  assert.match(dry.text, /AgentOS compact dry run/);
+  assert.match(dry.text, /Would archive/);
+  assert.equal(await exists(dry.archivePath), false);
+
+  const result = await compactAgentOS({ cwd: root });
+  assert.equal(result.ok, true);
+  assert.match(result.text, /Archived: \.agentos\/runs\/compact-archive-/);
+  assert.match(result.text, /AgentOS doctor: OK/);
+  assert.equal(await exists(result.archivePath), true);
+  assert.ok(result.after < result.before);
+
+  const handoff = await readFile(join(root, '.agentos/handoff.md'), 'utf8');
+  const tasks = await readFile(join(root, '.agentos/tasks.md'), 'utf8');
+  const archive = await readFile(result.archivePath, 'utf8');
+  assert.match(handoff, /Build agentos compact/);
+  assert.match(handoff, /Implement deterministic compaction/);
+  assert.match(tasks, /## Now/);
+  assert.equal((tasks.match(/^## Now$/gm) || []).length, 1);
+  assert.match(archive, /Previous handoff.md/);
+  assert.match(archive, /Duplicate stale now item/);
 });
