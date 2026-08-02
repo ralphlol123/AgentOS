@@ -3,10 +3,20 @@ import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { compactAgentOS, doctorAgentOS, handoffAgentOS, initAgentOS, linkObsidianAgentOS, promptAgentOS, statusAgentOS } from './core.js';
 
+const VERSION = '0.1.0';
+
 async function main() {
   const [, , command = 'help', ...args] = process.argv;
   const flags = parseFlags(args);
   try {
+    if (command === 'help' || command === '--help' || command === '-h') {
+      printHelp();
+      return;
+    }
+    if (command === 'version' || command === '--version' || command === '-v') {
+      console.log(VERSION);
+      return;
+    }
     if (command === 'init') {
       const mode = flags.new ? 'new' : flags.existing ? 'existing' : undefined;
       const result = await initAgentOS({ cwd: process.cwd(), mode, dryRun: flags['dry-run'], yes: flags.yes || flags.y });
@@ -106,7 +116,7 @@ async function askDefault(rl: any, question: string, defaultValue: string) {
 }
 
 function printHelp() {
-  console.log(`AgentOS for Projects v0.1\n\nUsage:\n  agentos init [--new|--existing] [--dry-run]\n  agentos status\n  agentos handoff\n  agentos doctor [--fix]\n  agentos compact [--dry-run]\n  agentos link-obsidian [--vault <path> --dest <folder> --link <note> --create]\n  agentos prompt [claude|codex|opencode|hermes]\n\nCore rule:\n  One AgentOS per product/workspace.\n  Many repos inside it.\n  Each task declares which repo(s) are in scope.`);
+  console.log(`AgentOS for Projects v${VERSION}\n\nUsage:\n  agentos init [--new|--existing] [--dry-run]\n  agentos status\n  agentos handoff\n  agentos doctor [--fix]\n  agentos compact [--dry-run]\n  agentos link-obsidian [--vault <path> --dest <folder> --link <note> --create]\n  agentos prompt [claude|codex|opencode|hermes]\n\nCore rule:\n  One AgentOS per product/workspace.\n  Many repos inside it.\n  Each task declares which repo(s) are in scope.`);
 }
 
 main();

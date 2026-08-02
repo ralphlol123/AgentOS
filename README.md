@@ -63,8 +63,50 @@ Local development:
 npm run build
 npm test
 npm run smoke
+npm run test:package-managers
 node dist/cli.js init --existing --dry-run
 ```
+
+## Install / global usage
+
+AgentOS ships as a Node CLI bin named `agentos`. It works with npm, pnpm, and Bun.
+
+From a local checkout:
+
+```bash
+# npm
+npm install -g /path/to/agentos-for-projects
+
+# pnpm
+pnpm add -g /path/to/agentos-for-projects
+
+# bun
+bun add -g /path/to/agentos-for-projects
+```
+
+For development symlinks:
+
+```bash
+# npm
+npm link
+
+# pnpm
+pnpm link --global
+
+# bun
+bun link
+bun link agentos-for-projects
+```
+
+After installing, verify:
+
+```bash
+which agentos
+agentos init --existing --dry-run
+agentos doctor
+```
+
+Package-manager compatibility is tested by installing the packed tarball into temporary projects with npm, pnpm, and Bun and executing the `agentos` bin.
 
 ## Usage examples
 

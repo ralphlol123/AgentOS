@@ -10,6 +10,8 @@
     "build": "tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/cli.js',0o755)\"",
     "test": "npm run build && node --test",
     "smoke": "npm run build && node ./test/smoke.js",
+    "test:package-managers": "npm run build && node ./test/package-managers.js",
+    "prepack": "npm run build",
     "check": "tsc -p tsconfig.json --noEmit"
   },
   "keywords": [
