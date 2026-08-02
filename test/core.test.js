@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
-import { initAgentOS, statusAgentOS, handoffAgentOS, doctorAgentOS, promptAgentOS, compactAgentOS } from '../dist/core.js';
+import { initAgentOS, statusAgentOS, handoffAgentOS, doctorAgentOS, promptAgentOS, compactAgentOS, linkObsidianAgentOS } from '../dist/core.js';
 
 async function exists(path) {
   try {
@@ -257,4 +257,48 @@ Implement deterministic compaction.
   assert.equal((tasks.match(/^## Now$/gm) || []).length, 1);
   assert.match(archive, /Previous handoff.md/);
   assert.match(archive, /Duplicate stale now item/);
+});
+
+
+test('link-obsidian creates link-only knowledge config and default notes', async () => {
+  const root = await tempProject();
+  const vault = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true });
+
+  const result = await linkObsidianAgentOS({ cwd: root, vault, dest: 'Projects/AgentOS', create: true });
+  assert.equal(result.ok, true);
+  assert.match(result.text, /AgentOS link-obsidian/);
+  assert.match(result.text, /Mode: link-only/);
+
+  const knowledge = await readFile(join(root, '.agentos/knowledge.md'), 'utf8');
+  const project = await readFile(join(root, '.agentos/project.yaml'), 'utf8');
+  assert.match(knowledge, /Do not bulk-load/);
+  assert.match(knowledge, /\[\[Projects\/AgentOS\/.*Overview\]\]/);
+  assert.match(project, /knowledge:/);
+  assert.match(project, /mode: link-only/);
+  assert.equal(await exists(join(vault, result.linked[0])), true);
+
+  const doctor = await doctorAgentOS({ cwd: root });
+  assert.equal(doctor.ok, true);
+});
+
+test('link-obsidian dry-run does not create missing notes', async () => {
+  const root = await tempProject();
+  const vault = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true });
+  const result = await linkObsidianAgentOS({ cwd: root, vault, dest: 'Projects/AgentOS', create: true, dryRun: true });
+  assert.equal(result.ok, true);
+  assert.match(result.text, /dry run/);
+  assert.equal(await exists(join(vault, result.linked[0])), false);
+});
+
+
+test('link-obsidian treats --link folder as default note destination', async () => {
+  const root = await tempProject();
+  const vault = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true });
+  const result = await linkObsidianAgentOS({ cwd: root, vault, dest: 'Projects/Unused', link: 'Projects/LinkedFolder', create: true });
+  assert.equal(result.ok, true);
+  assert.match(result.linked[0], /^Projects\/LinkedFolder\//);
+  assert.equal(await exists(join(vault, result.linked[0])), true);
 });

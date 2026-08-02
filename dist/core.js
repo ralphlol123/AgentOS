@@ -11,6 +11,7 @@ const REQUIRED_FILES = [
     '.agentos/decisions.md',
     '.agentos/tasks.md',
     '.agentos/status.md',
+    '.agentos/knowledge.md',
     'AGENTS.md',
     'CLAUDE.md',
 ];
@@ -40,6 +41,7 @@ export async function initAgentOS(options = {}) {
     await writeIfMissing(join(cwd, AGENTOS_DIR, 'decisions.md'), decisionsMd());
     await writeIfMissing(join(cwd, AGENTOS_DIR, 'tasks.md'), tasksMd({ mode }));
     await writeIfMissing(join(cwd, AGENTOS_DIR, 'status.md'), statusMd({ mode, workspaceKind }));
+    await writeIfMissing(join(cwd, AGENTOS_DIR, 'knowledge.md'), knowledgeMd());
     await writeIfMissing(join(cwd, AGENTOS_DIR, 'runs', 'README.md'), runsReadmeMd());
     if (mode === 'new') {
         await writeIfMissing(join(cwd, AGENTOS_DIR, 'product.md'), productMd({ projectName }));
@@ -142,6 +144,65 @@ export async function compactAgentOS(options = {}) {
     }
     return { ok: true, dryRun: Boolean(options.dryRun), archivePath, before, after, text: lines.join('\n') };
 }
+export async function linkObsidianAgentOS(options = {}) {
+    const root = await findAgentOSRoot(options.cwd ?? process.cwd());
+    if (!root)
+        return { ok: false, text: 'AgentOS link-obsidian: FAIL\nNo .agentos directory found.' };
+    const project = await safeRead(join(root, '.agentos/project.yaml'));
+    const projectName = firstYamlValue(project, 'name') ?? basename(root);
+    const rawVault = String(options.vault || '').trim();
+    if (!rawVault)
+        return { ok: false, text: 'AgentOS link-obsidian: FAIL\nMissing --vault <path>.' };
+    const vault = resolve(rawVault);
+    const destination = normalizeVaultRelativePath(options.dest || `Projects/${title(projectName).replace(/\s+/g, ' ')}`);
+    const rawLink = options.link ? normalizeVaultRelativePath(options.link) : '';
+    const create = Boolean(options.create);
+    const dryRun = Boolean(options.dryRun);
+    if (!await exists(vault))
+        return { ok: false, text: `AgentOS link-obsidian: FAIL\nVault path does not exist: ${vault}` };
+    const linked = rawLink ? (rawLink.toLowerCase().endsWith('.md') ? [rawLink] : defaultObsidianNotes(rawLink, projectName)) : defaultObsidianNotes(destination, projectName);
+    const missing = [];
+    for (const note of linked) {
+        const notePath = join(vault, note);
+        if (!await exists(notePath))
+            missing.push(note);
+    }
+    if (missing.length && !create) {
+        return { ok: false, text: `AgentOS link-obsidian: FAIL\nMissing linked notes. Re-run with --create to create them:\n${missing.map((n) => `- ${n}`).join('\n')}` };
+    }
+    const knowledge = knowledgeMd({ vault, destination, linked });
+    const projectPatched = ensureObsidianProjectConfig(project, { vault, destination, linked });
+    const lines = [
+        `AgentOS link-obsidian${dryRun ? ' dry run' : ''}`,
+        `Root: ${root}`,
+        `Vault: ${vault}`,
+        `Destination: ${destination}`,
+        'Mode: link-only',
+        '',
+        `${dryRun ? 'Would write' : 'Wrote'}: .agentos/knowledge.md`,
+        `${dryRun ? 'Would patch' : 'Patched'}: .agentos/project.yaml`,
+        `${dryRun ? 'Would ensure' : 'Ensured'} Obsidian notes:
+${linked.map((n) => `- ${n}`).join('\n')}`,
+        '',
+        'Safety: AgentOS links specific notes only. It does not bulk-load the Obsidian vault.',
+    ];
+    if (!dryRun) {
+        await mkdir(join(root, '.agentos'), { recursive: true });
+        await writeFile(join(root, '.agentos/knowledge.md'), knowledge, 'utf8');
+        await writeFile(join(root, '.agentos/project.yaml'), projectPatched, 'utf8');
+        for (const note of linked) {
+            const notePath = join(vault, note);
+            if (!await exists(notePath)) {
+                await mkdir(dirname(notePath), { recursive: true });
+                await writeFile(notePath, obsidianNoteTemplate(note, projectName, linked), 'utf8');
+            }
+        }
+        await fixAgentOSAdapters(root);
+        const doctor = await doctorAgentOS({ cwd: root });
+        lines.push('', doctor.text);
+    }
+    return { ok: true, vault, destination, linked, text: lines.join('\n') };
+}
 export async function handoffAgentOS(options = {}) {
     const root = await findAgentOSRoot(options.cwd ?? process.cwd());
     if (!root)
@@ -157,8 +218,9 @@ export async function handoffAgentOS(options = {}) {
             '3. .agentos/memory.md',
             '4. .agentos/handoff.md',
             '5. .agentos/tasks.md',
-            '6. relevant .agentos/agents/<role>.md',
-            '7. relevant .agentos/engines/<engine>.md',
+            '6. .agentos/knowledge.md when linked notes are relevant',
+            '7. relevant .agentos/agents/<role>.md',
+            '8. relevant .agentos/engines/<engine>.md',
             '',
             `Project: ${firstYamlValue(project, 'name') ?? basename(root)}`,
             '',
@@ -182,6 +244,7 @@ export async function doctorAgentOS(options = {}) {
     const agents = await safeRead(join(root, 'AGENTS.md'));
     const claude = await safeRead(join(root, 'CLAUDE.md'));
     const hermes = await safeRead(join(root, '.hermes.md'));
+    const knowledge = await safeRead(join(root, '.agentos/knowledge.md'));
     const project = await safeRead(join(root, '.agentos/project.yaml'));
     const repos = parseReposFromProjectYaml(project);
     if (!agents.includes('AgentOS for Projects'))
@@ -204,6 +267,8 @@ export async function doctorAgentOS(options = {}) {
         warnings.push('.agentos/project.yaml missing workspace_kind');
     if (!hermes.includes('AgentOS for Projects'))
         warnings.push('Optional .hermes.md adapter is missing or does not mention AgentOS');
+    if (!knowledge.includes('Do not bulk-load'))
+        warnings.push('.agentos/knowledge.md missing link-only safety rule');
     if (!project.includes('- opencode'))
         warnings.push('.agentos/project.yaml engines.allowed does not list opencode');
     if (!await exists(join(root, '.agentos/engines/opencode.md')))
@@ -375,6 +440,7 @@ async function fixAgentOSAdapters(root) {
     const project = await safeRead(projectPath);
     const repos = parseReposFromProjectYaml(project);
     await ensureProjectYamlEngine(projectPath, 'opencode');
+    await writeIfMissing(join(root, '.agentos/knowledge.md'), knowledgeMd());
     for (const engine of defaultEngines()) {
         await writeIfMissing(join(root, '.agentos/engines', `${engine.id}.md`), engineMd(engine));
     }
@@ -635,7 +701,7 @@ function agentsBootloader({ workspaceKind, repos }) {
         `Workspace: ${workspaceKind}`,
         `Repos: ${repos.map((r) => `${r.name}=${r.path} (${r.type}/${r.framework}/${r.packageManager})`).join('; ') || 'none'}`,
         '',
-        'Read first: `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`, relevant `.agentos/repos/*`, `.agentos/agents/*`, `.agentos/engines/*`.',
+        'Read first: `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`, `.agentos/knowledge.md`, relevant `.agentos/repos/*`, `.agentos/agents/*`, `.agentos/engines/*`.',
         '',
         'Rules: declare role + repo scope before editing; edit only in scope; never touch secrets/.env/migrations/prod config without approval; do not commit/push unless explicitly asked; verify; update handoff/tasks before stopping.',
         '',
@@ -645,7 +711,7 @@ function claudeAdapter() {
     return [
         '# CLAUDE.md',
         '',
-        'AgentOS for Projects. Read `AGENTS.md`, `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`, relevant `.agentos/repos/*`, `.agentos/agents/*`, and `.agentos/engines/claude-code.md` before acting.',
+        'AgentOS for Projects. Read `AGENTS.md`, `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`, `.agentos/knowledge.md`, relevant `.agentos/repos/*`, `.agentos/agents/*`, and `.agentos/engines/claude-code.md` before acting.',
         '',
         'Rules: declare role + repo scope before editing; edit only in scope; backend only if in scope; no secrets/.env/migrations/prod config without approval; no commit/push unless explicitly asked; verify; update handoff/tasks before stopping.',
         '',
@@ -658,7 +724,7 @@ function subrepoAgentsPointer(repo) {
         '# AGENTS.md',
         '',
         `AgentOS child repo: ${repo.name} (${repo.path}).`,
-        'Parent context: `../AGENTS.md`, `../.agentos/project.yaml`, `../.agentos/memory.md`, `../.agentos/handoff.md`, `../.agentos/tasks.md`, relevant `../.agentos/agents/*`, `../.agentos/engines/*`, and `../.agentos/repos/' + repo.name + '.md`.',
+        'Parent context: `../AGENTS.md`, `../.agentos/project.yaml`, `../.agentos/memory.md`, `../.agentos/handoff.md`, `../.agentos/tasks.md`, `../.agentos/knowledge.md`, relevant `../.agentos/agents/*`, `../.agentos/engines/*`, and `../.agentos/repos/' + repo.name + '.md`.',
         'Rules: do not treat this repo as the whole product; declare scope; edit only in scope; no commit/push unless asked; update parent handoff/tasks.',
         '',
     ].join('\n');
@@ -668,7 +734,7 @@ function subrepoClaudePointer(repo) {
         '# CLAUDE.md',
         '',
         `AgentOS child repo: ${repo.name} (${repo.path}).`,
-        'Before acting read `../CLAUDE.md`, `../AGENTS.md`, `../.agentos/project.yaml`, `../.agentos/handoff.md`, `../.agentos/tasks.md`, relevant `../.agentos/agents/*`, and `../.agentos/repos/' + repo.name + '.md`.',
+        'Before acting read `../CLAUDE.md`, `../AGENTS.md`, `../.agentos/project.yaml`, `../.agentos/handoff.md`, `../.agentos/tasks.md`, `../.agentos/knowledge.md`, relevant `../.agentos/agents/*`, and `../.agentos/repos/' + repo.name + '.md`.',
         'Declare scope; edit only in scope; no commit/push unless asked; update parent handoff/tasks.',
         '',
     ].join('\n');
@@ -677,7 +743,7 @@ function hermesAdapter() {
     return [
         '# Hermes Agent Adapter',
         '',
-        'AgentOS for Projects. Read `AGENTS.md`, `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`, relevant `.agentos/repos/*` and `.agentos/agents/*` before work.',
+        'AgentOS for Projects. Read `AGENTS.md`, `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`, `.agentos/knowledge.md`, relevant `.agentos/repos/*` and `.agentos/agents/*` before work.',
         'Hermes rules: load relevant skills; verify real file/git/terminal/browser state; do not trust subagent reports without checking; update handoff/tasks when state changes.',
         '',
     ].join('\n');
@@ -687,6 +753,11 @@ function handoffMd({ mode, workspaceKind, repos }) {
 }
 function memoryMd({ mode, workspaceKind }) {
     return `# Memory\n\nStable project facts only. Do not dump execution logs here.\n\n- AgentOS initialized in ${mode} mode.\n- Workspace kind: ${workspaceKind}.\n- Core rule: one AgentOS per product/workspace; many repos inside it; each task declares repo scope.\n`;
+}
+function knowledgeMd(options = {}) {
+    const linked = options.linked || [];
+    const obsidian = options.vault ? `\n## Obsidian\n\nVault: \`${options.vault}\`\nDestination: \`${options.destination}\`\nMode: \`link-only\`\n\nLinked notes:\n${linked.map((note) => `- [[${note.replace(/\.md$/, '')}]]`).join('\n') || '- None linked yet.'}\n` : '';
+    return `# Knowledge\n\nLong-term knowledge links for this project.\n\nRules:\n- Do not bulk-load external vaults or folders.\n- Read only linked notes relevant to the current task.\n- Keep runtime context small; use handoff/tasks for current state.\n${obsidian}`;
 }
 function decisionsMd() { return '# Decisions\n\nDurable decisions go here with date, reason, alternatives, and status.\n'; }
 function tasksMd({ mode }) { return `# Tasks\n\n## Now\n\n- [ ] ${mode === 'new' ? 'Define MVP scope before scaffolding code.' : 'Choose the first AgentOS-managed task.'}\n\n## Next\n\n- [ ] Run \`agentos status\` and \`agentos doctor\`.\n\n## Later\n\n- [ ] Add run logs under \`.agentos/runs/\` as work happens.\n`; }
@@ -947,6 +1018,34 @@ function trimSection(text, max = 1600) {
 }
 function timestampForFilename(date) {
     return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+}
+function defaultObsidianNotes(destination, projectName) {
+    const base = normalizeVaultRelativePath(destination);
+    return [
+        `${base}/${title(projectName)} Overview.md`,
+        `${base}/${title(projectName)} Architecture.md`,
+        `${base}/${title(projectName)} Decisions.md`,
+        `${base}/${title(projectName)} Roadmap.md`,
+    ];
+}
+function normalizeVaultRelativePath(value) {
+    return String(value || '').replace(/^['"]|['"]$/g, '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/g, '');
+}
+function obsidianNoteTemplate(note, projectName, linked) {
+    const titleText = basename(note, '.md');
+    const isOverview = /overview/i.test(titleText);
+    const body = isOverview
+        ? `## Purpose\n\nLong-term knowledge for ${projectName}.\n\n## Key links\n\n${linked.filter((n) => n !== note).map((n) => `- [[${n.replace(/\.md$/, '')}]]`).join('\n')}`
+        : `## Notes\n\nAdd durable knowledge here. Keep execution logs in AgentOS runs/handoff, not this note.\n`;
+    return `# ${titleText}\n\n${body}\n`;
+}
+function ensureObsidianProjectConfig(project, { vault, destination, linked }) {
+    const block = `knowledge:\n  obsidian:\n    mode: link-only\n    vault: ${vault}\n    destination: ${destination}\n    linked:\n${linked.map((n) => `      - ${n}`).join('\n')}\n`;
+    const trimmed = String(project || '').trimEnd();
+    if (/^knowledge:\n(?:[ \t].*\n?)*/m.test(trimmed)) {
+        return `${trimmed.replace(/^knowledge:\n(?:[ \t].*\n?)*/m, block)}\n`;
+    }
+    return `${trimmed}\n\n${block}`;
 }
 function firstYamlValue(text, key) { return text.match(new RegExp(`^${key}:\\s*(.+)$`, 'm'))?.[1]?.trim(); }
 function extractSection(text, heading) {

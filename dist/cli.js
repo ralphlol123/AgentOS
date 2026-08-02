@@ -1,5 +1,7 @@
 #!/usr/bin/env node
-import { compactAgentOS, doctorAgentOS, handoffAgentOS, initAgentOS, promptAgentOS, statusAgentOS } from './core.js';
+import { createInterface } from 'node:readline/promises';
+import { stdin as input, stdout as output } from 'node:process';
+import { compactAgentOS, doctorAgentOS, handoffAgentOS, initAgentOS, linkObsidianAgentOS, promptAgentOS, statusAgentOS } from './core.js';
 async function main() {
     const [, , command = 'help', ...args] = process.argv;
     const flags = parseFlags(args);
@@ -34,6 +36,13 @@ async function main() {
             process.exitCode = result.ok ? 0 : 1;
             return;
         }
+        if (command === 'link-obsidian') {
+            const setup = await resolveObsidianOptions(flags);
+            const result = await linkObsidianAgentOS({ cwd: process.cwd(), ...setup });
+            console.log(result.text);
+            process.exitCode = result.ok ? 0 : 1;
+            return;
+        }
         if (command === 'prompt') {
             const engine = args.find((arg) => !arg.startsWith('-')) || 'generic';
             const result = await promptAgentOS({ cwd: process.cwd(), engine });
@@ -50,16 +59,55 @@ async function main() {
 }
 function parseFlags(args) {
     const flags = {};
-    for (const arg of args) {
-        if (arg.startsWith('--'))
-            flags[arg.slice(2)] = true;
+    for (let i = 0; i < args.length; i += 1) {
+        const arg = args[i];
+        if (arg.startsWith('--')) {
+            const raw = arg.slice(2);
+            if (raw.includes('=')) {
+                const [key, ...rest] = raw.split('=');
+                flags[key] = rest.join('=');
+            }
+            else if (args[i + 1] && !args[i + 1].startsWith('-')) {
+                flags[raw] = args[i + 1];
+                i += 1;
+            }
+            else {
+                flags[raw] = true;
+            }
+        }
         else if (arg.startsWith('-'))
             flags[arg.slice(1)] = true;
     }
     return flags;
 }
+async function resolveObsidianOptions(flags) {
+    const provided = Boolean(flags.vault && flags.dest) || flags['dry-run'];
+    if (provided && (flags.vault || !process.stdin.isTTY)) {
+        return { vault: flags.vault, dest: flags.dest, link: flags.link, create: flags.create ?? true, dryRun: flags['dry-run'] };
+    }
+    const rl = createInterface({ input, output });
+    try {
+        console.log('AgentOS Obsidian Link Setup');
+        console.log('Mode: link-only. AgentOS will not bulk-load your vault.');
+        const vaultDefault = String(flags.vault || process.env.OBSIDIAN_VAULT_PATH || '/mnt/c/_/Obsidian/Ralph');
+        const vault = await askDefault(rl, 'Path to your Obsidian vault', vaultDefault);
+        const destDefault = String(flags.dest || 'Projects/AgentOS');
+        const dest = await askDefault(rl, 'Where should AgentOS project knowledge live inside the vault?', destDefault);
+        const link = await askDefault(rl, 'Existing note/folder to link? Leave blank to create default project notes', String(flags.link || ''));
+        const createAnswer = await askDefault(rl, 'Create missing notes/folders?', flags.create === false ? 'n' : 'Y');
+        return { vault, dest, link: link || undefined, create: !/^n(o)?$/i.test(createAnswer), dryRun: flags['dry-run'] };
+    }
+    finally {
+        rl.close();
+    }
+}
+async function askDefault(rl, question, defaultValue) {
+    const suffix = defaultValue ? ` [${defaultValue}]` : '';
+    const answer = await rl.question(`${question}${suffix}: `);
+    return answer.trim() || defaultValue;
+}
 function printHelp() {
-    console.log(`AgentOS for Projects v0.1\n\nUsage:\n  agentos init [--new|--existing] [--dry-run]\n  agentos status\n  agentos handoff\n  agentos doctor [--fix]\n  agentos compact [--dry-run]\n  agentos prompt [claude|codex|opencode|hermes]\n\nCore rule:\n  One AgentOS per product/workspace.\n  Many repos inside it.\n  Each task declares which repo(s) are in scope.`);
+    console.log(`AgentOS for Projects v0.1\n\nUsage:\n  agentos init [--new|--existing] [--dry-run]\n  agentos status\n  agentos handoff\n  agentos doctor [--fix]\n  agentos compact [--dry-run]\n  agentos link-obsidian [--vault <path> --dest <folder> --link <note> --create]\n  agentos prompt [claude|codex|opencode|hermes]\n\nCore rule:\n  One AgentOS per product/workspace.\n  Many repos inside it.\n  Each task declares which repo(s) are in scope.`);
 }
 main();
 //# sourceMappingURL=cli.js.map

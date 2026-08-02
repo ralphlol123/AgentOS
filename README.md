@@ -40,6 +40,7 @@ It supports:
 - subrepo pointer files for multi-repo projects
 - status, handoff, and doctor checks
 - deterministic live-context compaction: `agentos compact [--dry-run]`
+- interactive/link-only Obsidian knowledge setup: `agentos link-obsidian`
 - generated engine prompts: `agentos prompt [claude|codex|opencode|hermes]`
 - doctor diagnostics for duplicate task sections, stale handoff/task hints, repo git branch/ahead-behind state, untracked adapter files, missing commands, and configured port usage
 
@@ -51,6 +52,7 @@ agentos status
 agentos handoff
 agentos doctor [--fix]
 agentos compact [--dry-run]
+agentos link-obsidian [--vault <path> --dest <folder> --link <note> --create]
 agentos prompt [claude|codex|opencode|hermes]
 ```
 
@@ -64,6 +66,23 @@ node dist/cli.js init --existing --dry-run
 ```
 
 ## Usage examples
+
+Link Obsidian as a long-term knowledge library:
+
+```bash
+agentos link-obsidian
+```
+
+By default this launches an interactive setup. For automation:
+
+```bash
+agentos link-obsidian \
+  --vault /mnt/c/_/Obsidian/Ralph \
+  --dest "Projects/AgentOS" \
+  --create
+```
+
+The link is safe by design: AgentOS creates `.agentos/knowledge.md`, creates/links specific notes, patches `.agentos/project.yaml`, and tells agents not to bulk-load the vault.
 
 Compact live AgentOS context without losing history:
 

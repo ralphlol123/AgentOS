@@ -39,6 +39,19 @@ export declare function compactAgentOS(options?: any): Promise<{
     after: number;
     text: string;
 }>;
+export declare function linkObsidianAgentOS(options?: any): Promise<{
+    ok: boolean;
+    text: string;
+    vault?: undefined;
+    destination?: undefined;
+    linked?: undefined;
+} | {
+    ok: boolean;
+    vault: string;
+    destination: string;
+    linked: string[];
+    text: string;
+}>;
 export declare function handoffAgentOS(options?: any): Promise<{
     ok: boolean;
     text: string;
