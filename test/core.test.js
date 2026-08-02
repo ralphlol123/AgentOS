@@ -32,6 +32,7 @@ test('init --new creates a single-workspace AgentOS project brain', async () => 
   const agents = await readFile(join(root, 'AGENTS.md'), 'utf8');
   assert.match(agents, /AgentOS for Projects bootloader/);
   assert.match(agents, /declare role \+ repo scope/);
+  assert.doesNotMatch(agents, /Repos: none/);
 });
 
 test('init --existing detects a multi-repo workspace from child package.json files', async () => {
@@ -177,6 +178,45 @@ test('existing AGENTS.md and CLAUDE.md are patched with backups, not overwritten
   assert.equal(await exists(join(root, 'CLAUDE.md.agentos.bak')), true);
 });
 
+test('doctor --fix replaces stale adapter context without duplicate bootloaders', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true });
+  await writeFile(join(root, 'AGENTS.md'), '# AGENTS.md\n\nAgentOS for Projects bootloader.\n\nWorkspace: single-repo\nRepos: none\n\nRead first: `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`.\n');
+  await writeFile(join(root, 'CLAUDE.md'), '# CLAUDE.md\n\nAgentOS for Projects. Read `AGENTS.md`, `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`, `.agentos/knowledge.md`, `.agentos/skills.md`, relevant `.agentos/repos/*`, `.agentos/agents/*`, and `.agentos/engines/claude-code.md` before acting.\n');
+  await writeFile(join(root, '.hermes.md'), '# Hermes Agent Adapter\n\nAgentOS for Projects. Read `AGENTS.md`, `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`, `.agentos/knowledge.md`, `.agentos/skills.md`, relevant `.agentos/repos/*` and `.agentos/agents/*` before work.\nHermes rules: load relevant skills; verify real state.\n');
+
+  await doctorAgentOS({ cwd: root, fix: true });
+
+  for (const file of ['CLAUDE.md', '.hermes.md']) {
+    const content = await readFile(join(root, file), 'utf8');
+    assert.equal((content.match(/^# /gm) || []).length, 1);
+    assert.doesNotMatch(content, /agents\/\*/);
+    assert.match(content, /only relevant|only the repo/);
+  }
+  const agents = await readFile(join(root, 'AGENTS.md'), 'utf8');
+  assert.doesNotMatch(agents, /Repos: none/);
+  assert.match(agents, /current repo \(single-repo workspace\)|app=\./);
+});
+
+test('doctor --fix refreshes stale child pointers with selective context wording', async () => {
+  const root = await tempProject();
+  await mkdirp(join(root, 'frontend'));
+  await writeFile(join(root, 'frontend/package.json'), JSON.stringify({ scripts: { build: 'vite build' }, dependencies: { vite: '^5.0.0' } }, null, 2));
+  await mkdirp(join(root, 'backend'));
+  await writeFile(join(root, 'backend/package.json'), JSON.stringify({ scripts: { build: 'nest build' }, dependencies: { '@nestjs/core': '^10.0.0' } }, null, 2));
+  await initAgentOS({ cwd: root, mode: 'existing', yes: true });
+  await writeFile(join(root, 'frontend/AGENTS.md'), '# AGENTS.md\n\nAgentOS child repo: frontend (./frontend).\nParent context: `../AGENTS.md`, `../.agentos/project.yaml`, `../.agentos/memory.md`, `../.agentos/handoff.md`, `../.agentos/tasks.md`, `../.agentos/knowledge.md`, `../.agentos/skills.md`, relevant `../.agentos/agents/*`, `../.agentos/engines/*`, and `../.agentos/repos/frontend.md`.\n');
+  await writeFile(join(root, 'frontend/CLAUDE.md'), '# CLAUDE.md\n\nAgentOS child repo: frontend (./frontend).\nBefore acting read `../CLAUDE.md`, `../AGENTS.md`, `../.agentos/project.yaml`, `../.agentos/handoff.md`, `../.agentos/tasks.md`, `../.agentos/knowledge.md`, `../.agentos/skills.md`, relevant `../.agentos/agents/*`, and `../.agentos/repos/frontend.md`.\n');
+
+  await doctorAgentOS({ cwd: root, fix: true });
+
+  for (const file of ['frontend/AGENTS.md', 'frontend/CLAUDE.md']) {
+    const content = await readFile(join(root, file), 'utf8');
+    assert.doesNotMatch(content, /agents\/\*/);
+    assert.match(content, /only when relevant/);
+  }
+});
+
 test('status, handoff, and doctor summarize a healthy initialized workspace', async () => {
   const root = await tempProject();
   await initAgentOS({ cwd: root, mode: 'new', yes: true });
@@ -252,6 +292,30 @@ test('prompt renders engine-specific AgentOS task prefix', async () => {
   assert.match(prompt.text, /engines\/opencode.md/);
   assert.match(prompt.text, /no commit\/push unless asked/);
   assert.match(prompt.text, /Now:/);
+  assert.match(prompt.text, /only the assigned repo\/agent\/engine context needed/);
+  assert.doesNotMatch(prompt.text, /agents\/\*/);
+});
+
+test('generated adapters steer engines toward selective context loading', async () => {
+  const root = await tempProject();
+  await mkdirp(join(root, 'frontend'));
+  await writeFile(join(root, 'frontend/package.json'), JSON.stringify({ scripts: { build: 'vite build' }, dependencies: { vite: '^5.0.0' } }, null, 2));
+  await mkdirp(join(root, 'backend'));
+  await writeFile(join(root, 'backend/package.json'), JSON.stringify({ scripts: { build: 'nest build' }, dependencies: { '@nestjs/core': '^10.0.0' } }, null, 2));
+  await initAgentOS({ cwd: root, mode: 'existing', yes: true });
+
+  const files = [
+    'AGENTS.md',
+    'CLAUDE.md',
+    '.hermes.md',
+    'frontend/AGENTS.md',
+    'frontend/CLAUDE.md',
+  ];
+  for (const file of files) {
+    const content = await readFile(join(root, file), 'utf8');
+    assert.match(content, /only|relevant/);
+    assert.doesNotMatch(content, /agents\/\*/);
+  }
 });
 
 

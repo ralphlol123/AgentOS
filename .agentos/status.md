@@ -4,38 +4,32 @@ Last updated: 2026-08-03
 
 ## Health
 
-- AgentOS doctor: OK after Phase 1 agent model changes.
-- AgentOS status: OK.
-- Full Bun/release verification: OK.
-- Package-manager compatibility: npm/pnpm/Bun OK.
-- npm publish dry-run: OK.
-- Photobooth dry-run with new detected profile: OK.
-- Photobooth rollout/update to new detected profile and on-demand skills index: OK, verified.
-- Claude Code plain-engine read-only smoke in Photobooth: OK, passed.
+- AgentOS doctor/status: OK before optimization.
+- Phase 1 agent model: shipped and pushed.
+- Photobooth rollout: verified, including Claude Code plain-engine read-only smoke.
+- Phase 2 `agentos run`: ON HOLD per Ralph.
 
-## Phase 1 agent model
+## Token-efficiency hardening
 
-Implemented:
+Goal: reduce unnecessary context loading without changing AgentOS features.
 
-- default minimal delivery team: `implementation`, `qa`, `code-reviewer`, `release-manager`
-- default `detected` profile: minimal team plus repo-evidence specialists
-- detected specialists currently limited to `frontend-engineer` and `backend-engineer`
-- custom comma-list aliases such as `frontend,qa,release`
-- unknown custom aliases fail loudly instead of silently dropping roles
-- `.agentos/project.yaml` shape: `agents.profile`, `agents.capabilities`, `agents.enabled`
-- generated `.agentos/skills.md` with `Policy: on-demand`
-- doctor warnings for missing skills index, missing agent files, capability/enabled mismatches, and stale extra agent files
+Changed:
 
-## Claude Code review
-
-- Claude Code reviewed the updated Phase 1 diff after fixes.
-- Verdict: PASS, no merge blockers.
-- Non-blocking note: `doctor --fix` warns about orphaned agent files instead of auto-deleting them, which is intentionally safer.
+- Generated root adapters now load core AgentOS files first, then only relevant repo/agent/engine/skill files.
+- Generated child pointers avoid wildcard role/engine reads and point at the specific repo note first.
+- Generated `agentos prompt` text avoids `repos/*`, `agents/*`, and `engines/*` wildcard wording.
+- `doctor --fix` now treats stale wildcard adapter text as stale and replaces it instead of appending a duplicate AgentOS section.
+- Added regression tests for selective context loading and no duplicate adapter bootloaders.
+- Compacted this repo's live `.agentos/handoff.md` + `.agentos/tasks.md`; archive kept in `.agentos/runs/`.
 
 ## Current phase
 
-Phase 1 is verified, committed, pushed, and remote HEAD is verified. Photobooth rollout to the new detected profile and on-demand skills index is done and verified, including a passing Claude Code plain-engine read-only smoke test.
+Token-efficiency hardening is verified and reviewed. No CLI features or command semantics were intentionally changed.
 
-## Phase 2
+Verification:
 
-`agentos run` is ON HOLD / deferred — Ralph confirmed it is not needed at the moment. Next AgentOS action: hold on `agentos run`; wait for a new concrete AgentOS priority, or optionally maintain rollout docs / gather real-world feedback.
+- Full Bun verification passed with 27 tests / 0 fail.
+- npm/pnpm/Bun package-manager compatibility passed.
+- `bun run release:check`, npm publish dry-run, and `bun pm pack --dry-run` passed.
+- `doctor --json`, `doctor`, and `status` passed.
+- Claude Code review returned PASS after fixes for root/child stale wildcard adapter detection.

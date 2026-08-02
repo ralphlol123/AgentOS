@@ -510,10 +510,11 @@ async function runCommand(command, args, cwd) {
 async function fixAgentOSAdapters(root) {
     const projectPath = join(root, '.agentos/project.yaml');
     const project = await safeRead(projectPath);
-    const repos = parseReposFromProjectYaml(project);
+    const childRepos = parseReposFromProjectYaml(project);
+    const allRepos = parseReposFromProjectYaml(project, { includeRoot: true });
     await ensureProjectYamlEngine(projectPath, 'opencode');
     await writeIfMissing(join(root, '.agentos/knowledge.md'), knowledgeMd());
-    const agentSelection = agentSelectionFromProject(project, repos);
+    const agentSelection = agentSelectionFromProject(project, childRepos);
     await ensureProjectYamlAgents(projectPath, agentSelection);
     await writeIfMissing(join(root, '.agentos/skills.md'), skillsMd(agentSelection));
     for (const agent of agentSelection.agents) {
@@ -522,10 +523,10 @@ async function fixAgentOSAdapters(root) {
     for (const engine of defaultEngines()) {
         await writeIfMissing(join(root, '.agentos/engines', `${engine.id}.md`), engineMd(engine));
     }
-    await ensureAgentOSSection(join(root, 'AGENTS.md'), agentsBootloader({ workspaceKind: firstYamlValue(project, 'workspace_kind') ?? 'unknown', repos }));
+    await ensureAgentOSSection(join(root, 'AGENTS.md'), agentsBootloader({ workspaceKind: firstYamlValue(project, 'workspace_kind') ?? 'unknown', repos: allRepos }));
     await ensureAgentOSSection(join(root, 'CLAUDE.md'), claudeAdapter());
     await ensureAgentOSSection(join(root, '.hermes.md'), hermesAdapter());
-    for (const repo of repos) {
+    for (const repo of childRepos) {
         await ensureAgentOSSection(join(root, repo.path, 'AGENTS.md'), subrepoAgentsPointer(repo));
         await ensureAgentOSSection(join(root, repo.path, 'CLAUDE.md'), subrepoClaudePointer(repo));
         await ensureChildRepoGitignore(join(root, repo.path));
@@ -589,14 +590,22 @@ function adapterLooksCurrent(content, section) {
         'This repo is part of a parent AgentOS for Projects workspace.',
         'AgentOS child repo:',
         'This project uses AgentOS for Projects.',
+        'Repos: none',
+        '.agentos/repos/*',
+        '.agentos/agents/*',
+        '.agentos/engines/*',
+        '../.agentos/agents/*',
+        '../.agentos/engines/*',
     ];
     if (content.includes('undefined/undefined/undefined'))
         return false;
     if (content.includes('AgentOS child repo:') && section.startsWith('# CLAUDE.md'))
-        return content.includes('../.agentos/handoff.md') && !content.includes('---');
+        return content.includes('../.agentos/handoff.md') && !content.includes('---') && !content.includes('../.agentos/agents/*');
     if (content.includes('AgentOS child repo:') && section.startsWith('# AGENTS.md'))
-        return content.includes('../.agentos/repos/') && !content.includes('---');
+        return content.includes('../.agentos/repos/') && !content.includes('---') && !content.includes('../.agentos/agents/*') && !content.includes('../.agentos/engines/*');
     if (stale.some((token) => content.includes(token)))
+        return false;
+    if (section.startsWith('# AGENTS.md') && content.includes('Repos: current repo (single-repo workspace)') && !section.includes('Repos: current repo (single-repo workspace)'))
         return false;
     if (section.startsWith('# CLAUDE.md') && !content.includes('.agentos/engines/claude-code.md'))
         return false;
@@ -609,6 +618,7 @@ function adapterLooksCurrent(content, section) {
 function replaceAgentOSSection(content, section) {
     const markers = [
         'AgentOS for Projects bootloader.',
+        'AgentOS for Projects.',
         'AgentOS child repo:',
         'This workspace uses **AgentOS for Projects**.',
         'This project uses **AgentOS for Projects**.',
@@ -625,7 +635,7 @@ function replaceAgentOSSection(content, section) {
     const prefix = headingStart > 0 ? content.slice(0, headingStart).trimEnd() + '\n\n---\n\n' : '';
     return `${prefix}${section}`;
 }
-function parseReposFromProjectYaml(project) {
+function parseReposFromProjectYaml(project, options = {}) {
     const data = parseProjectYaml(project);
     const repos = data.repos && typeof data.repos === 'object' ? data.repos : {};
     return Object.entries(repos).map(([name, raw]) => {
@@ -647,7 +657,7 @@ function parseReposFromProjectYaml(project) {
             commands,
             ports,
         };
-    }).filter((r) => r.path && r.path !== '.');
+    }).filter((r) => r.path && (options.includeRoot || r.path !== '.'));
 }
 async function inferMode(cwd) {
     if (await exists(join(cwd, 'package.json')) || await exists(join(cwd, 'README.md')))
@@ -784,19 +794,23 @@ function agentsBootloader({ workspaceKind, repos }) {
         'AgentOS for Projects bootloader.',
         '',
         `Workspace: ${workspaceKind}`,
-        `Repos: ${repos.map((r) => `${r.name}=${r.path} (${r.type}/${r.framework}/${r.packageManager})`).join('; ') || 'none'}`,
+        `Repos: ${repoSummary(repos)}`,
         '',
-        'Read first: `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`, `.agentos/knowledge.md`, `.agentos/skills.md`, relevant `.agentos/repos/*`, `.agentos/agents/*`, `.agentos/engines/*`.',
+        'Read first: `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`. Then load `.agentos/knowledge.md`, `.agentos/skills.md`, and only the repo/agent/engine files relevant to the assigned task.',
         '',
         'Rules: declare role + repo scope before editing; edit only in scope; never touch secrets/.env/migrations/prod config without approval; do not commit/push unless explicitly asked; verify; update handoff/tasks before stopping.',
         '',
     ].join('\n');
 }
+function repoSummary(repos) {
+    const summary = repos.map((r) => `${r.name}=${r.path} (${r.type}/${r.framework}/${r.packageManager})`).join('; ');
+    return summary || 'current repo (single-repo workspace)';
+}
 function claudeAdapter() {
     return [
         '# CLAUDE.md',
         '',
-        'AgentOS for Projects. Read `AGENTS.md`, `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`, `.agentos/knowledge.md`, `.agentos/skills.md`, relevant `.agentos/repos/*`, `.agentos/agents/*`, and `.agentos/engines/claude-code.md` before acting.',
+        'AgentOS for Projects. Read `AGENTS.md`, `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`, and `.agentos/engines/claude-code.md` first. Then load `.agentos/knowledge.md`, `.agentos/skills.md`, and only relevant repo/agent files for the task.',
         '',
         'Rules: declare role + repo scope before editing; edit only in scope; backend only if in scope; no secrets/.env/migrations/prod config without approval; no commit/push unless explicitly asked; verify; update handoff/tasks before stopping.',
         '',
@@ -809,7 +823,7 @@ function subrepoAgentsPointer(repo) {
         '# AGENTS.md',
         '',
         `AgentOS child repo: ${repo.name} (${repo.path}).`,
-        'Parent context: `../AGENTS.md`, `../.agentos/project.yaml`, `../.agentos/memory.md`, `../.agentos/handoff.md`, `../.agentos/tasks.md`, `../.agentos/knowledge.md`, `../.agentos/skills.md`, relevant `../.agentos/agents/*`, `../.agentos/engines/*`, and `../.agentos/repos/' + repo.name + '.md`.',
+        'Parent context: `../AGENTS.md`, `../.agentos/project.yaml`, `../.agentos/memory.md`, `../.agentos/handoff.md`, `../.agentos/tasks.md`, `../.agentos/repos/' + repo.name + '.md`; then load skills/agent/engine files only when relevant.',
         'Rules: do not treat this repo as the whole product; declare scope; edit only in scope; no commit/push unless asked; update parent handoff/tasks.',
         '',
     ].join('\n');
@@ -819,7 +833,7 @@ function subrepoClaudePointer(repo) {
         '# CLAUDE.md',
         '',
         `AgentOS child repo: ${repo.name} (${repo.path}).`,
-        'Before acting read `../CLAUDE.md`, `../AGENTS.md`, `../.agentos/project.yaml`, `../.agentos/handoff.md`, `../.agentos/tasks.md`, `../.agentos/knowledge.md`, `../.agentos/skills.md`, relevant `../.agentos/agents/*`, and `../.agentos/repos/' + repo.name + '.md`.',
+        'Before acting read `../CLAUDE.md`, `../AGENTS.md`, `../.agentos/project.yaml`, `../.agentos/handoff.md`, `../.agentos/tasks.md`, `../.agentos/repos/' + repo.name + '.md`; then load skills/agent files only when relevant.',
         'Declare scope; edit only in scope; no commit/push unless asked; update parent handoff/tasks.',
         '',
     ].join('\n');
@@ -828,7 +842,7 @@ function hermesAdapter() {
     return [
         '# Hermes Agent Adapter',
         '',
-        'AgentOS for Projects. Read `AGENTS.md`, `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`, `.agentos/knowledge.md`, `.agentos/skills.md`, relevant `.agentos/repos/*` and `.agentos/agents/*` before work.',
+        'AgentOS for Projects. Read `AGENTS.md`, `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md` first. Then load `.agentos/skills.md`, `.agentos/knowledge.md`, and only relevant repo/agent files for the task.',
         'Hermes rules: load relevant skills; verify real file/git/terminal/browser state; do not trust subagent reports without checking; update handoff/tasks when state changes.',
         '',
     ].join('\n');
@@ -954,7 +968,7 @@ function agentConfigObject(agentSelection) {
         enabled: agentSelection.enabled,
     };
 }
-function agentMd(agent) { return `# ${title(agent.id)}\n\nMandate: ${agent.mandate}\n\n## Responsibilities in\n\n- Work only inside declared task scope.\n- Read AgentOS project, memory, handoff, tasks, skills, repo, and role context before acting.\n- Report files changed, verification run, failures, and next action before stopping.\n\n## Responsibilities out\n\n- Do not touch secrets, .env files, production config, migrations, or unrelated repos without explicit approval.\n- Do not commit or push unless explicitly assigned.\n\n## Skills\n\nUse .agentos/skills.md as an on-demand index. Load only skills relevant to this role and task.\n`; }
+function agentMd(agent) { return `# ${title(agent.id)}\n\nMandate: ${agent.mandate}\n\n## Responsibilities in\n\n- Work only inside declared task scope.\n- Read AgentOS project, memory, handoff, and tasks first; then load only relevant skills, repo, role, and engine context.\n- Report files changed, verification run, failures, and next action before stopping.\n\n## Responsibilities out\n\n- Do not touch secrets, .env files, production config, migrations, or unrelated repos without explicit approval.\n- Do not commit or push unless explicitly assigned.\n\n## Skills\n\nUse .agentos/skills.md as an on-demand index. Load only skills relevant to this role and task.\n`; }
 function defaultEngines() { return ['claude-code', 'codex', 'opencode', 'hermes', 'chatgpt'].map((id) => ({ id })); }
 function engineMd(engine) { return `# ${title(engine.id)} Adapter\n\nRead AGENTS.md + .agentos context first. Before stopping: handoff current state, files changed, tests, failures, next action.\n`; }
 function repoMd(repo) { return `# ${title(repo.name)} Repo\n\nPath: \`${repo.path}\`; type: ${repo.type}; framework: ${repo.framework}; package manager: ${repo.packageManager}.\nCommands: dev=\`${repo.devCommand || 'unknown'}\`; build=\`${repo.buildCommand || 'unknown'}\`; test=\`${repo.testCommand || 'unknown'}\`${repo.testE2eCommand ? `; e2e=\`${repo.testE2eCommand}\`` : ''}${repo.generateCommand ? `; generate=\`${repo.generateCommand}\`` : ''}${repo.previewCommand ? `; preview=\`${repo.previewCommand}\`` : ''}.\nScope: edit only when task includes \`${repo.name}\`.\n`; }
@@ -1032,7 +1046,7 @@ function renderEnginePrompt({ engine, root, project, handoff, tasks }) {
     return [
         'Follow AgentOS for Projects.',
         `Project: ${projectName}; root: ${root}; kind: ${workspaceKind}; engine: ${engine}.`,
-        `Read: AGENTS.md; ${engineAdapterLine(engine)}; .agentos/project.yaml; memory.md; handoff.md; tasks.md; skills.md; relevant repos/*, agents/*, engines/*.`,
+        `Read: AGENTS.md; ${engineAdapterLine(engine)}; .agentos/project.yaml; memory.md; handoff.md; tasks.md. Then load skills.md plus only the assigned repo/agent/engine context needed for the task.`,
         'Rules: declare role + scope before editing; edit only in scope; no secrets/.env/migrations/prod config without approval; no commit/push unless asked; verify; update handoff/tasks if state changes.',
         ...engineSpecificRules(engine),
         `Current objective: ${oneLine(currentObjective)}`,

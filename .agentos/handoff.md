@@ -2,94 +2,61 @@
 
 ## Current objective
 
-Phase 1 agent model and Photobooth rollout are both done and verified. Holding on Phase 2 `agentos run` per Ralph; waiting for a new concrete AgentOS priority.
+Final task: review and optimize AgentOS token efficiency/production readiness without changing features.
 
 ## Scope
 
-- Workspace kind: single-repo
-- Repo in scope: `agentos-for-projects` at `.`
-- Files in scope: `src/core.ts`, `src/cli.ts`, tests, README, `.agentos/*`, AgentOS Obsidian notes
-- Protected paths: secrets, npm tokens, unrelated repos, Photobooth app source repos unless explicitly requested
+- Repo: `agentos-for-projects` only
+- In scope: generated adapter/prompt wording, stale adapter repair, `.agentos` live-context compaction, tests, regenerated `dist/`
+- Out of scope: new features, `agentos run`, npm publish, Photobooth app source
 
 ## Current state
 
-Implemented Phase 1 core behavior:
+Phase 1 is shipped. Photobooth rollout is verified. `agentos run` is on hold.
 
-- `agentos init` accepts `--agents minimal`, default `--agents detected`, and custom comma lists.
-- Minimal team: `implementation`, `qa`, `code-reviewer`, `release-manager`.
-- Detected profile adds only justified specialists for now: `frontend-engineer` and/or `backend-engineer` based on repo evidence.
-- `.agentos/project.yaml` now writes `agents.profile`, `agents.capabilities`, and `agents.enabled`.
-- Init generates `.agentos/skills.md` with `Policy: on-demand` and role-keyed skill recommendations.
-- Doctor warns for missing `.agentos/skills.md`, missing enabled agent files, and capability/enabled mismatches.
-- Adapters/pointers mention `.agentos/skills.md` so engines know where to find on-demand skills.
-- Current dogfood AgentOS repo was updated to the minimal detected team and stale old agent files were removed.
-- Photobooth was rolled over to the new detected profile and on-demand skills index, and verified.
-- Claude Code plain-engine read-only smoke in Photobooth passed.
+Token-efficiency hardening performed:
+
+- Measured live context: `.agentos/handoff.md` + `.agentos/tasks.md` were 6109 chars before compaction.
+- Ran `agentos compact`: live handoff/tasks became 5362 chars and previous state was archived under `.agentos/runs/compact-archive-20260802T182047Z.md`.
+- Tightened generated adapter/prompt instructions to avoid broad `repos/*`, `agents/*`, `engines/*` reads.
+- Updated `adapterLooksCurrent` stale detection so `doctor --fix` replaces old wildcard-heavy sections instead of appending duplicates.
+- Added regression tests for selective context loading and stale adapter replacement.
 
 ## Last completed step
 
-Full Phase 1 verification passed, Claude Code review returned PASS/no merge blockers after the unknown-alias and stale-agent warning fixes, commit `0f68aa1` was pushed to `origin/main`, Photobooth's AgentOS install was updated/verified against the new detected profile and skills index, and the Claude Code plain-engine read-only smoke test in Photobooth passed.
-
-The previously suggested Phase 2 feature `agentos run` is now ON HOLD / deferred — Ralph confirmed it is not needed at the moment.
+Full verification passed with 27 tests / 0 fail. Claude Code review returned PASS after fixing root/child stale wildcard adapter detection and preserving single-repo repo metadata in `AGENTS.md`.
 
 ## Files changed
 
 - `src/core.ts`
-- `src/cli.ts`
 - `test/core.test.js`
-- `README.md`
-- `.agentos/project.yaml`
-- `.agentos/skills.md`
-- `.agentos/agents/implementation.md`
-- `.agentos/agents/qa.md`
-- `.agentos/agents/code-reviewer.md`
-- `.agentos/agents/release-manager.md`
+- `dist/core.d.ts`
+- `dist/core.js`
+- `dist/core.js.map`
+- `AGENTS.md`
+- `CLAUDE.md`
+- `.hermes.md`
+- `.agentos/handoff.md`
 - `.agentos/tasks.md`
 - `.agentos/status.md`
-- `.agentos/handoff.md`
-- Obsidian AgentOS Roadmap/Decisions notes
+- `.agentos/runs/compact-archive-20260802T182047Z.md`
 
 ## Tests run
 
-- `bun run build && node --test --test-name-pattern "agent profile|skills index|capabilities"` — PASS
-- `bun run build && node --test --test-name-pattern "unknown custom|skills index|capabilities"` — PASS
-- Claude Code diff review — PASS, no merge blockers
-- `bun install --frozen-lockfile` — PASS
-- `bun run build` — PASS
-- `bun run check` — PASS
-- `bun run test` — PASS, 24 tests pass / 0 fail
-- `bun run smoke` — PASS
-- `bun run test:package-managers` — PASS for npm, pnpm, Bun
-- `bun run release:check` — PASS, includes npm publish dry-run
-- `bun pm pack --dry-run` — PASS, no local tarball left
-- `node dist/cli.js doctor --json` parsed with `python3 -m json.tool` — PASS
-- `node dist/cli.js doctor` — PASS
-- `node dist/cli.js status` — PASS
-- Photobooth dry-run from parent root with new detected profile — PASS
-- Photobooth rollout/update to new detected profile and on-demand skills index — PASS, verified
-- Claude Code plain-engine read-only smoke in Photobooth — PASS
+- `bun run build && node --test --test-name-pattern "prompt renders|selective context"` — initially failed because the selective-context test created only one repo, then fixed.
+- `bun run build && node --test --test-name-pattern "prompt renders|selective context"` — PASS.
+- `bun run build && node --test --test-name-pattern "stale adapter|selective context|prompt renders"` — PASS.
+- `node dist/cli.js doctor --fix` — PASS; repaired current adapters.
+- `node dist/cli.js compact` — PASS; archived previous live state and rewrote handoff/tasks.
 
-## Known failures
+## Known warnings / failures
 
 None currently known.
 
-## Caveats
-
-- Detected specialists intentionally only cover frontend/backend in Phase 1. Do not add database/devops/docs specialists until real detection and routing needs justify them.
-- Skills are indexed, not installed or auto-loaded. Engines must load relevant skills on demand.
-
 ## Next exact action
 
-Hold on `agentos run`. Wait for a new concrete AgentOS priority from Ralph; optionally maintain rollout docs or gather real-world feedback in the meantime.
-
-## Protected files / do not touch
-
-- `.env` files
-- npm tokens / auth files
-- auth tokens/secrets
-- unrelated project repos
-- Photobooth app source unless the user explicitly asks for Photobooth implementation work
+Commit/push the token-efficiency hardening, then verify remote HEAD.
 
 ## Open decisions
 
-- Phase 2 `agentos run` is on hold / deferred per Ralph — do not resume without a new explicit go-ahead.
+- `agentos run` remains on hold unless Ralph explicitly reopens it.
