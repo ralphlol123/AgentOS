@@ -12,7 +12,7 @@ Last updated: 2026-08-02
 - `bun run release:check`: OK
 - Package-manager compatibility: npm/pnpm/Bun OK
 - Global `agentos` command reinstalled and verified
-- Git remote: `main` pushed and verified before this smoke
+- Git remote: `main` pushed and verified
 
 ## Plain-engine boot smoke
 
@@ -28,4 +28,4 @@ Plain-engine boot behavior is good enough for read-only context discovery in thi
 
 ## Next recommended work
 
-Commit/push findings, then decide whether to reinstall AgentOS in Photobooth or test one tiny write-path AgentOS task first.
+Decide whether to reinstall AgentOS in Photobooth now or first run one tiny controlled write-path AgentOS smoke in this repo.

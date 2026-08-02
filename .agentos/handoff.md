@@ -2,7 +2,7 @@
 
 ## Current objective
 
-Dogfood plain-engine boot behavior with Claude Code/OpenCode/Codex read-only tasks.
+Decide next: reinstall AgentOS in Photobooth or first run one tiny controlled write-path AgentOS smoke in this repo.
 
 ## Scope
 
@@ -34,7 +34,7 @@ Dogfood plain-engine boot behavior with Claude Code/OpenCode/Codex read-only tas
 
 ## Last completed step
 
-Plain-engine boot smoke passed for Claude Code, OpenCode, and Codex in read-only mode.
+Plain-engine boot smoke passed for Claude Code, OpenCode, and Codex in read-only mode; evidence committed and pushed.
 
 ## Files changed
 
@@ -64,7 +64,7 @@ None for read-only boot.
 
 ## Next exact action
 
-Commit and push plain-engine boot findings.
+Decide whether to reinstall AgentOS in Photobooth now or first run one tiny controlled write-path AgentOS smoke in this repo.
 
 ## Protected files / do not touch
 
