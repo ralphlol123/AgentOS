@@ -2,7 +2,7 @@
 
 ## Current objective
 
-Finish Phase 1 agent model: small default delivery team, project-detected specialists, and on-demand skills.
+Phase 1 agent model and Photobooth rollout are both done and verified. Holding on Phase 2 `agentos run` per Ralph; waiting for a new concrete AgentOS priority.
 
 ## Scope
 
@@ -23,10 +23,14 @@ Implemented Phase 1 core behavior:
 - Doctor warns for missing `.agentos/skills.md`, missing enabled agent files, and capability/enabled mismatches.
 - Adapters/pointers mention `.agentos/skills.md` so engines know where to find on-demand skills.
 - Current dogfood AgentOS repo was updated to the minimal detected team and stale old agent files were removed.
+- Photobooth was rolled over to the new detected profile and on-demand skills index, and verified.
+- Claude Code plain-engine read-only smoke in Photobooth passed.
 
 ## Last completed step
 
-Full Phase 1 verification passed, Claude Code review returned PASS/no merge blockers after the unknown-alias and stale-agent warning fixes, and commit `0f68aa1` was pushed to `origin/main`.
+Full Phase 1 verification passed, Claude Code review returned PASS/no merge blockers after the unknown-alias and stale-agent warning fixes, commit `0f68aa1` was pushed to `origin/main`, Photobooth's AgentOS install was updated/verified against the new detected profile and skills index, and the Claude Code plain-engine read-only smoke test in Photobooth passed.
+
+The previously suggested Phase 2 feature `agentos run` is now ON HOLD / deferred — Ralph confirmed it is not needed at the moment.
 
 ## Files changed
 
@@ -62,6 +66,8 @@ Full Phase 1 verification passed, Claude Code review returned PASS/no merge bloc
 - `node dist/cli.js doctor` — PASS
 - `node dist/cli.js status` — PASS
 - Photobooth dry-run from parent root with new detected profile — PASS
+- Photobooth rollout/update to new detected profile and on-demand skills index — PASS, verified
+- Claude Code plain-engine read-only smoke in Photobooth — PASS
 
 ## Known failures
 
@@ -74,7 +80,7 @@ None currently known.
 
 ## Next exact action
 
-Reinstall/update AgentOS in Photobooth using the new detected profile and on-demand skills index.
+Hold on `agentos run`. Wait for a new concrete AgentOS priority from Ralph; optionally maintain rollout docs or gather real-world feedback in the meantime.
 
 ## Protected files / do not touch
 
@@ -86,4 +92,4 @@ Reinstall/update AgentOS in Photobooth using the new detected profile and on-dem
 
 ## Open decisions
 
-- Whether Phase 2 should migrate/update Photobooth immediately after Phase 1 lands.
+- Phase 2 `agentos run` is on hold / deferred per Ralph — do not resume without a new explicit go-ahead.

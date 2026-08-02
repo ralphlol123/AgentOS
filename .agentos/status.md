@@ -10,6 +10,8 @@ Last updated: 2026-08-03
 - Package-manager compatibility: npm/pnpm/Bun OK.
 - npm publish dry-run: OK.
 - Photobooth dry-run with new detected profile: OK.
+- Photobooth rollout/update to new detected profile and on-demand skills index: OK, verified.
+- Claude Code plain-engine read-only smoke in Photobooth: OK, passed.
 
 ## Phase 1 agent model
 
@@ -32,4 +34,8 @@ Implemented:
 
 ## Current phase
 
-Phase 1 is verified, committed, pushed, and remote HEAD is verified.
+Phase 1 is verified, committed, pushed, and remote HEAD is verified. Photobooth rollout to the new detected profile and on-demand skills index is done and verified, including a passing Claude Code plain-engine read-only smoke test.
+
+## Phase 2
+
+`agentos run` is ON HOLD / deferred — Ralph confirmed it is not needed at the moment. Next AgentOS action: hold on `agentos run`; wait for a new concrete AgentOS priority, or optionally maintain rollout docs / gather real-world feedback.

@@ -15,15 +15,19 @@
 - [x] Implement Phase 1 agent model: minimal/detected/custom profiles, generated agent files, `.agentos/skills.md`, and doctor consistency warnings.
 - [x] Run Claude Code review of Phase 1 diff: PASS, no merge blockers.
 - [x] Run full Bun/release verification and Photobooth dry-run smoke.
+- [x] Commit and push Phase 1 agent model.
+- [x] Reinstall/update AgentOS in Photobooth using the new detected profile and on-demand skills index. Verified.
+- [x] Run Claude Code plain-engine read-only smoke in Photobooth. PASS.
 
 ## Now
 
-- [x] Commit and push Phase 1 agent model.
+- [ ] Waiting for Ralph's next concrete AgentOS priority. Do not start `agentos run` unless Ralph explicitly reopens it.
 
 ## Next
 
-- [ ] Reinstall/update AgentOS in Photobooth using the new detected profile and on-demand skills index.
+- [ ] (On hold) `agentos run` Phase 2 feature — deferred; Ralph said we do not need it at the moment.
 
 ## Later
 
 - [ ] Consider real `npm publish` only after npm account, package ownership, and release version are confirmed.
+- [ ] Optionally maintain rollout docs / gather real-world feedback while `agentos run` is on hold.
