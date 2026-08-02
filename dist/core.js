@@ -2,6 +2,7 @@ import { access, copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/p
 import { execFile } from 'node:child_process';
 import { basename, dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 const execFileAsync = promisify(execFile);
 const AGENTOS_DIR = '.agentos';
 const REQUIRED_FILES = [
@@ -574,44 +575,28 @@ function replaceAgentOSSection(content, section) {
     return `${prefix}${section}`;
 }
 function parseReposFromProjectYaml(project) {
-    const repos = [];
-    const lines = project.split(/\r?\n/);
-    let inRepos = false;
-    let current = null;
-    for (const line of lines) {
-        if (/^repos:\s*$/.test(line)) {
-            inRepos = true;
-            continue;
+    const data = parseProjectYaml(project);
+    const repos = data.repos && typeof data.repos === 'object' ? data.repos : {};
+    return Object.entries(repos).map(([name, raw]) => {
+        const repo = raw && typeof raw === 'object' ? raw : {};
+        const commands = {};
+        const ports = {};
+        for (const [key, value] of Object.entries(repo)) {
+            if (key.endsWith('_command'))
+                commands[key] = String(value);
+            if (key === 'port' || key.endsWith('_port'))
+                ports[key] = String(value);
         }
-        if (inRepos && /^\S/.test(line) && !/^repos:/.test(line))
-            break;
-        const repoMatch = line.match(/^  ([A-Za-z0-9_-]+):\s*$/);
-        if (inRepos && repoMatch) {
-            current = { name: repoMatch[1], path: '.', type: 'unknown', framework: 'unknown', packageManager: 'unknown', commands: {}, ports: {} };
-            repos.push(current);
-            continue;
-        }
-        if (!inRepos || !current)
-            continue;
-        const kv = line.match(/^    ([A-Za-z0-9_]+):\s*(.+?)\s*$/);
-        if (!kv)
-            continue;
-        const key = kv[1];
-        const value = kv[2].replace(/^['"]|['"]$/g, '');
-        if (key === 'path')
-            current.path = value;
-        else if (key === 'type')
-            current.type = value;
-        else if (key === 'framework')
-            current.framework = value;
-        else if (key === 'package_manager')
-            current.packageManager = value;
-        else if (key.endsWith('_command'))
-            current.commands[key] = value;
-        else if (key === 'port' || key.endsWith('_port'))
-            current.ports[key] = value;
-    }
-    return repos.filter((r) => r.path && r.path !== '.');
+        return {
+            name,
+            path: stringValue(repo.path, '.'),
+            type: stringValue(repo.type, 'unknown'),
+            framework: stringValue(repo.framework, 'unknown'),
+            packageManager: stringValue(repo.package_manager, 'unknown'),
+            commands,
+            ports,
+        };
+    }).filter((r) => r.path && r.path !== '.');
 }
 async function inferMode(cwd) {
     if (await exists(join(cwd, 'package.json')) || await exists(join(cwd, 'README.md')))
@@ -705,54 +690,47 @@ async function detectPackageManager(abs) {
     return 'npm';
 }
 function projectYaml({ projectName, mode, workspaceKind, repos }) {
-    return `name: ${safeId(projectName)}
-agentos_version: 0.1
-mode: ${mode}
-workspace_kind: ${workspaceKind}
-source_of_truth: .agentos/
-
-principles:
-  - One AgentOS per product/workspace.
-  - Many repos inside it.
-  - Each task declares which repo(s) are in scope.
-
-repos:
-${repos.map(repoYaml).join('\n')}
-
-agents:
-  frontend: frontend-engineer
-  backend: backend-engineer
-  qa: qa-engineer
-  review: code-reviewer
-  release: release-manager
-
-engines:
-  allowed:
-    - claude-code
-    - codex
-    - hermes
-    - opencode
-    - chatgpt
-
-adapters:
-  child_repo_pointer_files: true
-  child_repo_gitignore_policy: ${workspaceKind === 'multi-repo' ? 'ignore' : 'none'}
-`;
+    return dumpProjectYaml({
+        name: safeId(projectName),
+        agentos_version: 0.1,
+        mode,
+        workspace_kind: workspaceKind,
+        source_of_truth: '.agentos/',
+        principles: [
+            'One AgentOS per product/workspace.',
+            'Many repos inside it.',
+            'Each task declares which repo(s) are in scope.',
+        ],
+        repos: Object.fromEntries(repos.map((repo) => [repo.name, repoYamlObject(repo)])),
+        agents: {
+            frontend: 'frontend-engineer',
+            backend: 'backend-engineer',
+            qa: 'qa-engineer',
+            review: 'code-reviewer',
+            release: 'release-manager',
+        },
+        engines: {
+            allowed: ['claude-code', 'codex', 'hermes', 'opencode', 'chatgpt'],
+        },
+        adapters: {
+            child_repo_pointer_files: true,
+            child_repo_gitignore_policy: workspaceKind === 'multi-repo' ? 'ignore' : 'none',
+        },
+    });
 }
-function repoYaml(r) {
-    return [
-        `  ${r.name}:`,
-        `    path: ${r.path}`,
-        `    type: ${r.type}`,
-        `    framework: ${r.framework}`,
-        `    package_manager: ${r.packageManager}`,
-        `    build_command: ${r.buildCommand || 'unknown'}`,
-        `    dev_command: ${r.devCommand || 'unknown'}`,
-        `    test_command: ${r.testCommand || 'unknown'}`,
-        r.testE2eCommand ? `    test_e2e_command: ${r.testE2eCommand}` : null,
-        r.generateCommand ? `    generate_command: ${r.generateCommand}` : null,
-        r.previewCommand ? `    preview_command: ${r.previewCommand}` : null,
-    ].filter(Boolean).join('\n');
+function repoYamlObject(r) {
+    return Object.fromEntries([
+        ['path', r.path],
+        ['type', r.type],
+        ['framework', r.framework],
+        ['package_manager', r.packageManager],
+        ['build_command', r.buildCommand || 'unknown'],
+        ['dev_command', r.devCommand || 'unknown'],
+        ['test_command', r.testCommand || 'unknown'],
+        r.testE2eCommand ? ['test_e2e_command', r.testE2eCommand] : null,
+        r.generateCommand ? ['generate_command', r.generateCommand] : null,
+        r.previewCommand ? ['preview_command', r.previewCommand] : null,
+    ].filter(Boolean));
 }
 function agentsBootloader({ workspaceKind, repos }) {
     return [
@@ -844,19 +822,12 @@ async function ensureProjectYamlEngine(path, engine) {
     if (!await exists(path))
         return;
     const content = await readFile(path, 'utf8');
-    if (content.includes(`- ${engine}`))
-        return;
-    if (!content.includes('engines:'))
-        return;
-    const lines = content.split(/\r?\n/);
-    const allowedIdx = lines.findIndex((line) => /^  allowed:\s*$/.test(line));
-    if (allowedIdx < 0)
-        return;
-    let insertAt = allowedIdx + 1;
-    while (insertAt < lines.length && /^    - /.test(lines[insertAt]))
-        insertAt += 1;
-    lines.splice(insertAt, 0, `    - ${engine}`);
-    await writeFile(path, `${lines.join('\n').replace(/\n*$/, '')}\n`, 'utf8');
+    const data = parseProjectYaml(content);
+    data.engines = data.engines && typeof data.engines === 'object' ? data.engines : {};
+    data.engines.allowed = Array.isArray(data.engines.allowed) ? data.engines.allowed : [];
+    if (!data.engines.allowed.includes(engine))
+        data.engines.allowed.push(engine);
+    await writeFile(path, dumpProjectYaml(data), 'utf8');
 }
 async function createOrPatchRootFile(path, section) {
     if (!await exists(path))
@@ -1102,14 +1073,35 @@ function obsidianNoteTemplate(note, projectName, linked) {
     return `# ${titleText}\n\n${body}\n`;
 }
 function ensureObsidianProjectConfig(project, { vault, destination, linked }) {
-    const block = `knowledge:\n  obsidian:\n    mode: link-only\n    vault: ${vault}\n    destination: ${destination}\n    linked:\n${linked.map((n) => `      - ${n}`).join('\n')}\n`;
-    const trimmed = String(project || '').trimEnd();
-    if (/^knowledge:\n(?:[ \t].*\n?)*/m.test(trimmed)) {
-        return `${trimmed.replace(/^knowledge:\n(?:[ \t].*\n?)*/m, block)}\n`;
-    }
-    return `${trimmed}\n\n${block}`;
+    const data = parseProjectYaml(project);
+    data.knowledge = data.knowledge && typeof data.knowledge === 'object' ? data.knowledge : {};
+    data.knowledge.obsidian = {
+        mode: 'link-only',
+        vault,
+        destination,
+        linked,
+    };
+    return dumpProjectYaml(data);
 }
-function firstYamlValue(text, key) { return text.match(new RegExp(`^${key}:\\s*(.+)$`, 'm'))?.[1]?.trim(); }
+function firstYamlValue(text, key) {
+    const value = parseProjectYaml(text)[key];
+    return value === undefined || value === null ? undefined : String(value);
+}
+function parseProjectYaml(text) {
+    try {
+        const parsed = parseYaml(String(text || ''));
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    }
+    catch {
+        return {};
+    }
+}
+function dumpProjectYaml(data) {
+    return stringifyYaml(data, { indent: 2, lineWidth: 0 }).replace(/\n*$/, '\n');
+}
+function stringValue(value, fallback = '') {
+    return value === undefined || value === null ? fallback : String(value);
+}
 function extractSection(text, heading) {
     const re = new RegExp(`## ${escapeRegex(heading)}\\n\\n([\\s\\S]*?)(?=\\n## |$)`);
     return text.match(re)?.[1]?.trim();

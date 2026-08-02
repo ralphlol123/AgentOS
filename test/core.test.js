@@ -120,6 +120,46 @@ test('status, handoff, and doctor summarize a healthy initialized workspace', as
   assert.match(doctor.text, /AgentOS doctor: OK/);
 });
 
+
+test('status and prompt read quoted project YAML values without leaking YAML syntax', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true });
+  const projectPath = join(root, '.agentos/project.yaml');
+  const projectYaml = await readFile(projectPath, 'utf8');
+  await writeFile(projectPath, projectYaml
+    .replace(/^name: .+$/m, 'name: "AgentOS: YAML Parser"')
+    .replace('workspace_kind: single-repo', "workspace_kind: 'single-repo'"));
+
+  const status = await statusAgentOS({ cwd: root });
+  const prompt = await promptAgentOS({ cwd: root, engine: 'hermes' });
+
+  assert.match(status.text, /Project: AgentOS: YAML Parser/);
+  assert.doesNotMatch(status.text, /Project: "AgentOS: YAML Parser"/);
+  assert.match(prompt.text, /Project: AgentOS: YAML Parser/);
+  assert.match(prompt.text, /kind: single-repo/);
+  assert.doesNotMatch(prompt.text, /kind: 'single-repo'/);
+});
+
+
+test('link-obsidian preserves existing project.yaml knowledge fields', async () => {
+  const root = await tempProject();
+  const vault = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true });
+  const projectPath = join(root, '.agentos/project.yaml');
+  const projectYaml = await readFile(projectPath, 'utf8');
+  await writeFile(projectPath, `${projectYaml.trimEnd()}\n\nknowledge:\n  docs:\n    mode: link-only\n    links:\n      - docs/README.md\n`);
+
+  await linkObsidianAgentOS({ cwd: root, vault, dest: 'Projects/AgentOS', create: true });
+
+  const updated = await readFile(projectPath, 'utf8');
+  assert.match(updated, /knowledge:/);
+  assert.match(updated, /docs:/);
+  assert.match(updated, /links:/);
+  assert.match(updated, /- docs\/README\.md/);
+  assert.match(updated, /obsidian:/);
+  assert.match(updated, /mode: link-only/);
+});
+
 async function mkdirp(path) {
   const { mkdir } = await import('node:fs/promises');
   await mkdir(path, { recursive: true });

@@ -2,61 +2,62 @@
 
 ## Current objective
 
-Add `agentos doctor --json` for machine-readable AgentOS health output usable by CI and future automation.
+Replace manual `.agentos/project.yaml` generation/parsing with a real YAML parser/writer.
 
 ## Scope
 
 - Workspace kind: single-repo
 - Repo in scope: `agentos-for-projects` at `.`
-- Files in scope: `src/core.ts`, `src/cli.ts`, `test/core.test.js`, `README.md`, `.github/workflows/ci.yml`, `.agentos/*`, regenerated `dist/*`
+- Files in scope: `src/core.ts`, `test/core.test.js`, `package.json`, `package-lock.json`, `bun.lock`, `README.md`, regenerated `dist/*`, `.agentos/*`
 - Protected paths: secrets, unrelated repos, Photobooth app repos unless explicitly requested
 
 ## Current state
 
-- `doctorAgentOS({ json: true })` returns structured data with JSON text.
-- CLI supports `agentos doctor --json`.
-- Human text output remains unchanged for normal `agentos doctor`.
-- CI now includes `node dist/cli.js doctor --json` after build/typecheck.
-- README documents `agentos doctor --json`.
-- Verification passed locally.
-- Implementation was committed and pushed to `origin/main`.
+- Added runtime dependency `yaml@2.9.0`.
+- `projectYaml()` now builds a JS object and serializes it through `yaml`.
+- `parseReposFromProjectYaml()` now parses real YAML objects instead of scanning indented lines.
+- `firstYamlValue()` now parses YAML values, so quoted scalar syntax does not leak into status/prompt text.
+- `ensureProjectYamlEngine()` now updates `engines.allowed` through parsed YAML.
+- `ensureObsidianProjectConfig()` now preserves existing `knowledge` subkeys and writes/updates only `knowledge.obsidian`.
+- README documents real YAML parser/writer use.
+- Global `agentos` command was reinstalled from the local checkout and verified.
 
 ## Last completed step
 
-Committed and pushed `agentos doctor --json`.
+Full Bun verification passed, including YAML parser behavior tests and package-manager compatibility.
 
 ## Files changed
 
 - `src/core.ts`
-- `src/cli.ts`
 - `test/core.test.js`
+- `package.json`
+- `package-lock.json`
+- `bun.lock`
 - `README.md`
-- `.github/workflows/ci.yml`
-- `dist/cli.js`
-- `dist/cli.js.map`
 - `dist/core.d.ts`
 - `dist/core.js`
 - `dist/core.js.map`
 - `.agentos/tasks.md`
 - `.agentos/status.md`
+- `.agentos/memory.md`
 - `.agentos/handoff.md`
 
 ## Tests run
 
-- RED: `bun run build && node --test --test-name-pattern "doctor.*json"` failed because CLI printed text instead of JSON.
-- GREEN: `bun run build && node --test --test-name-pattern "doctor.*json|structured JSON"` passed.
-- PyYAML workflow parse — OK
-- actionlint `.github/workflows/ci.yml` — OK
+- RED: `bun run build && node --test --test-name-pattern "YAML|knowledge fields"` failed because quoted root values leaked quotes and link-obsidian replaced existing `knowledge.docs`.
+- GREEN: `bun run build && node --test --test-name-pattern "YAML|knowledge fields"` passed.
 - `bun install --frozen-lockfile` — OK
 - `bun run build` — OK
-- `node dist/cli.js doctor --json | python3 -m json.tool` — OK
+- `node dist/cli.js doctor --json` parsed by `python3 -m json.tool` — OK
 - `bun run check` — OK
-- `bun run test` — 16 pass, 0 fail
+- `bun run test` — 18 pass, 0 fail
 - `bun run smoke` — OK
 - `bun run test:package-managers` — npm/pnpm/Bun install and bin execution pass
 - `bun pm pack --dry-run` — OK
 - `agentos doctor` — OK
 - `agentos status` — OK
+- `npm install -g /home/hermes/agentos-for-projects` — OK
+- global `agentos doctor --json` parsed by `python3 -m json.tool` — OK
 
 ## Known failures
 
@@ -64,7 +65,7 @@ None currently known.
 
 ## Next exact action
 
-Start YAML parser/writer adoption.
+Commit and push YAML parser/writer adoption.
 
 ## Protected files / do not touch
 
@@ -75,5 +76,5 @@ Start YAML parser/writer adoption.
 
 ## Open decisions
 
-- Which YAML library to adopt for parser/writer.
-- Whether to extend JSON output to `status --json` and `compact --json` later.
+- Whether to expose project config read/write helpers as public API later.
+- Whether to add JSON output for `status` and `compact` later.

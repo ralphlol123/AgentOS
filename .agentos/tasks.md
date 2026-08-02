@@ -13,10 +13,11 @@
 - [x] Add `agentos doctor --json` for machine-readable health output.
 - [x] Add CI step for `node dist/cli.js doctor --json`.
 - [x] Commit and push `agentos doctor --json`.
+- [x] Replace manual `.agentos/project.yaml` generation/parsing with the `yaml` package.
 
 ## Now
 
-- [ ] Replace manual YAML generation/parsing with a real YAML parser.
+- [ ] Commit and push YAML parser/writer adoption.
 
 ## Next
 

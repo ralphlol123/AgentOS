@@ -44,6 +44,7 @@ It supports:
 - interactive/link-only Obsidian knowledge setup: `agentos link-obsidian`
 - generated engine prompts: `agentos prompt [claude|codex|opencode|hermes]`
 - doctor diagnostics for duplicate task sections, stale handoff/task hints, repo git branch/ahead-behind state, untracked adapter files, missing commands, and configured port usage
+- real YAML parsing/writing for `.agentos/project.yaml` via the `yaml` package, not regex/string-splice parsing
 
 ## Commands
 
