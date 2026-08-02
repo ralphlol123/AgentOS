@@ -12,13 +12,12 @@
 - [x] Add `bun.lock` and make Bun the preferred dogfood package manager while preserving npm/pnpm/Bun compatibility tests.
 - [x] Add `agentos doctor --json` for machine-readable health output.
 - [x] Add CI step for `node dist/cli.js doctor --json`.
-- [x] Commit and push `agentos doctor --json`.
 - [x] Replace manual `.agentos/project.yaml` generation/parsing with the `yaml` package.
-- [x] Commit and push YAML parser/writer adoption.
+- [x] Improve global install/publish flow: package metadata, LICENSE, release scripts, metadata tests, CI publish dry-run.
 
 ## Now
 
-- [ ] Improve global install/publish flow once the package is ready to publish.
+- [ ] Commit and push global install/publish flow improvements.
 
 ## Next
 

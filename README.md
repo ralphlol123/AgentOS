@@ -70,6 +70,10 @@ bun run smoke
 bun run test:package-managers
 bun pm pack --dry-run
 
+# release readiness without publishing
+bun run release:check
+bun run publish:dry-run
+
 # npm still works
 npm run build
 npm test
@@ -86,9 +90,46 @@ node dist/cli.js init --existing --dry-run
 .github/workflows/ci.yml
 ```
 
+## Package / publish flow
+
+The npm package is prepared for public publishing under:
+
+```text
+agentos-for-projects
+```
+
+Current registry check: `npm view agentos-for-projects` returned 404, so the name appears unpublished from this environment.
+
+Release-readiness checks:
+
+```bash
+bun run release:check      # check + test + smoke + npm/pnpm/Bun package compatibility + npm publish dry-run
+bun run publish:dry-run    # npm publish dry-run only
+npm run pack:dry-run       # inspect package contents without publishing
+```
+
+The package publishes only runtime files declared by `files` plus npm's standard metadata files:
+
+```text
+dist/
+README.md
+LICENSE
+package.json
+```
+
+Do not run real `npm publish` until the intended package name, npm account, and version are confirmed.
+
 ## Install / global usage
 
 AgentOS ships as a Node CLI bin named `agentos`. It works with npm, pnpm, and Bun.
+
+After publishing, users should be able to install from the registry:
+
+```bash
+npm install -g agentos-for-projects
+pnpm add -g agentos-for-projects
+bun add -g agentos-for-projects
+```
 
 From a local checkout:
 
@@ -200,6 +241,5 @@ Claude Code, Codex, ChatGPT, OpenCode, and Hermes should all read the same proje
 
 - No engine execution yet (`agentos run` is intentionally not in v0.1).
 - Repo/framework detection is package-script based and should eventually support more ecosystems.
-- YAML is generated manually; no YAML parser dependency yet.
 - Existing file merge is conservative append + backup, not semantic patching.
-- No package publishing config yet.
+- Package is publish-ready by dry-run checks, but real `npm publish` still requires confirmed npm account/package ownership/version.

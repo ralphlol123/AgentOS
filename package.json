@@ -4,7 +4,7 @@
   "description": "Project-owned context layer for model-agnostic coding agents.",
   "type": "module",
   "bin": {
-    "agentos": "./dist/cli.js"
+    "agentos": "dist/cli.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/cli.js',0o755)\"",
@@ -12,7 +12,10 @@
     "smoke": "tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/cli.js',0o755)\" && node ./test/smoke.js",
     "test:package-managers": "tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/cli.js',0o755)\" && node ./test/package-managers.js",
     "prepack": "tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/cli.js',0o755)\"",
-    "check": "tsc -p tsconfig.json --noEmit"
+    "check": "tsc -p tsconfig.json --noEmit",
+    "pack:dry-run": "npm pack --dry-run",
+    "publish:dry-run": "npm publish --dry-run --access public",
+    "release:check": "bun run check && bun run test && bun run smoke && bun run test:package-managers && npm publish --dry-run --access public"
   },
   "keywords": [
     "agents",
@@ -22,6 +25,17 @@
     "ai"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/ralphlol123/AgentOS.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ralphlol123/AgentOS/issues"
+  },
+  "homepage": "https://github.com/ralphlol123/AgentOS#readme",
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=20"
   },
@@ -29,11 +43,11 @@
     "@types/node": "^26.1.2",
     "typescript": "^7.0.2"
   },
+  "dependencies": {
+    "yaml": "^2.9.0"
+  },
   "files": [
     "dist",
     "README.md"
-  ],
-  "dependencies": {
-    "yaml": "^2.9.0"
-  }
+  ]
 }

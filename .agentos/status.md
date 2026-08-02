@@ -6,16 +6,19 @@ Last updated: 2026-08-02
 
 - AgentOS doctor: OK
 - AgentOS status: OK
+- Workflow YAML parse: OK
+- actionlint: OK
 - `agentos doctor --json`: OK and parseable
-- Bun install/build/check/test/smoke/package-manager compatibility/pack dry-run: OK
+- `bun run release:check`: OK
+- `bun run publish:dry-run`: OK
+- `bun pm pack --dry-run`: OK, 9 files / ~128.6KB unpacked
 - Package-manager compatibility: npm/pnpm/Bun OK
 - Global `agentos` command reinstalled and verified
-- Git remote: `main` pushed and verified
 
 ## Current phase
 
-YAML parser/writer adoption implemented, verified, committed, and pushed.
+Global install/publish flow improved and verified; commit/push pending.
 
 ## Next recommended work
 
-Improve global install/publish flow.
+Commit/push publish-flow improvements, then dogfood plain-engine boot behavior.

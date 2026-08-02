@@ -9,4 +9,5 @@ Stable project facts only. Do not dump execution logs here.
 - Core rule: one AgentOS per product/workspace; many repos inside it; each task declares repo scope.
 - Obsidian integration is link-only: create/link specific notes through `.agentos/knowledge.md`; never bulk-load the vault.
 - Current command surface: `init`, `status`, `handoff`, `doctor`, `compact`, `link-obsidian`, and `prompt`.
+- Release readiness uses `bun run release:check` plus `bun run publish:dry-run`; real `npm publish` still requires confirmed npm account/package ownership/version.
 - AgentOS dogfoods itself in this repo before Photobooth rollout.

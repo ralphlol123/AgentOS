@@ -51,3 +51,6 @@ jobs:
 
       - name: Pack dry run
         run: bun pm pack --dry-run
+
+      - name: npm publish dry run
+        run: bun run publish:dry-run
