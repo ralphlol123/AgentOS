@@ -172,6 +172,43 @@ test('doctor detects duplicate tasks, missing commands, git status, untracked ad
 });
 
 
+test('doctor returns structured JSON data when requested', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true });
+  await writeFile(join(root, '.agentos/tasks.md'), '# Tasks\n\n## Now\n\n- [ ] Do thing.\n\n## Now\n\n- [ ] Duplicate.\n');
+
+  const doctor = await doctorAgentOS({ cwd: root, json: true });
+
+  assert.equal(doctor.ok, false);
+  assert.equal(doctor.root, root);
+  assert.equal(doctor.status, 'FAIL');
+  assert.ok(Array.isArray(doctor.problems));
+  assert.ok(doctor.problems.includes('.agentos/tasks.md has duplicate ## Now sections'));
+  assert.ok(Array.isArray(doctor.warnings));
+  assert.ok(Array.isArray(doctor.diagnostics));
+  assert.equal(typeof doctor.text, 'string');
+  assert.equal(JSON.parse(doctor.text).ok, false);
+});
+
+
+test('doctor --json CLI prints parseable JSON only', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true });
+
+  const result = spawnSync(process.execPath, [join(process.cwd(), 'dist/cli.js'), 'doctor', '--json'], { cwd: root, encoding: 'utf8' });
+
+  assert.equal(result.status, 0);
+  assert.equal(result.stderr, '');
+  const parsed = JSON.parse(result.stdout);
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.status, 'OK');
+  assert.equal(parsed.root, root);
+  assert.ok(Array.isArray(parsed.problems));
+  assert.ok(Array.isArray(parsed.warnings));
+  assert.ok(Array.isArray(parsed.diagnostics));
+});
+
+
 test('doctor --fix adds OpenCode engine adapter to older workspaces', async () => {
   const root = await tempProject();
   await initAgentOS({ cwd: root, mode: 'new', yes: true });

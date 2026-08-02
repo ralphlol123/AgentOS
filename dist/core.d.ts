@@ -56,7 +56,4 @@ export declare function handoffAgentOS(options?: any): Promise<{
     ok: boolean;
     text: string;
 }>;
-export declare function doctorAgentOS(options?: any): Promise<{
-    ok: boolean;
-    text: string;
-}>;
+export declare function doctorAgentOS(options?: any): Promise<any>;

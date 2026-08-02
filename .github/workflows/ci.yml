@@ -37,6 +37,9 @@ jobs:
       - name: Type check
         run: bun run check
 
+      - name: AgentOS doctor JSON
+        run: node dist/cli.js doctor --json
+
       - name: Unit tests
         run: bun run test
 

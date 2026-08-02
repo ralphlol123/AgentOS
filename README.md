@@ -51,7 +51,7 @@ It supports:
 agentos init [--new|--existing] [--dry-run]
 agentos status
 agentos handoff
-agentos doctor [--fix]
+agentos doctor [--fix] [--json]
 agentos compact [--dry-run]
 agentos link-obsidian [--vault <path> --dest <folder> --link <note> --create]
 agentos prompt [claude|codex|opencode|hermes]
@@ -162,7 +162,10 @@ agentos init --existing --dry-run
 agentos init --existing
 agentos status
 agentos doctor
+agentos doctor --json
 ```
+
+`agentos doctor --json` prints machine-readable health data for CI/automation with `ok`, `status`, `root`, `fix`, `problems`, `warnings`, `diagnostics`, and summary counts.
 
 In parent-managed multi-repo workspaces, AgentOS creates child repo pointer files and adds this managed block to each child repo `.gitignore` so app repos are not polluted by local workspace adapters:
 

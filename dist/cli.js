@@ -34,7 +34,7 @@ async function main() {
             return;
         }
         if (command === 'doctor') {
-            const result = await doctorAgentOS({ cwd: process.cwd(), fix: flags.fix });
+            const result = await doctorAgentOS({ cwd: process.cwd(), fix: flags.fix, json: flags.json });
             console.log(result.text);
             process.exitCode = result.ok ? 0 : 1;
             return;
@@ -116,7 +116,7 @@ async function askDefault(rl, question, defaultValue) {
     return answer.trim() || defaultValue;
 }
 function printHelp() {
-    console.log(`AgentOS for Projects v${VERSION}\n\nUsage:\n  agentos init [--new|--existing] [--dry-run]\n  agentos status\n  agentos handoff\n  agentos doctor [--fix]\n  agentos compact [--dry-run]\n  agentos link-obsidian [--vault <path> --dest <folder> --link <note> --create]\n  agentos prompt [claude|codex|opencode|hermes]\n\nCore rule:\n  One AgentOS per product/workspace.\n  Many repos inside it.\n  Each task declares which repo(s) are in scope.`);
+    console.log(`AgentOS for Projects v${VERSION}\n\nUsage:\n  agentos init [--new|--existing] [--dry-run]\n  agentos status\n  agentos handoff\n  agentos doctor [--fix] [--json]\n  agentos compact [--dry-run]\n  agentos link-obsidian [--vault <path> --dest <folder> --link <note> --create]\n  agentos prompt [claude|codex|opencode|hermes]\n\nCore rule:\n  One AgentOS per product/workspace.\n  Many repos inside it.\n  Each task declares which repo(s) are in scope.`);
 }
 main();
 //# sourceMappingURL=cli.js.map

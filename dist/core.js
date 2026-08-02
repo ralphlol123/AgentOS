@@ -232,8 +232,10 @@ export async function handoffAgentOS(options = {}) {
 }
 export async function doctorAgentOS(options = {}) {
     const root = await findAgentOSRoot(options.cwd ?? process.cwd());
-    if (!root)
-        return { ok: false, text: 'AgentOS doctor: FAIL\nNo .agentos directory found.' };
+    if (!root) {
+        const result = doctorResult({ root: null, fix: Boolean(options.fix), problems: ['No .agentos directory found.'], warnings: [], diagnostics: [] });
+        return options.json ? withJsonText(result) : { ...result, text: 'AgentOS doctor: FAIL\nNo .agentos directory found.' };
+    }
     if (options.fix)
         await fixAgentOSAdapters(root);
     const problems = [];
@@ -291,17 +293,40 @@ export async function doctorAgentOS(options = {}) {
     await checkRepoCommands(repos, warnings, diagnostics);
     await checkGitState(root, repos, warnings, diagnostics);
     await checkPorts(repos, warnings, diagnostics);
+    const result = doctorResult({ root, fix: Boolean(options.fix), problems, warnings, diagnostics });
+    return options.json ? withJsonText(result) : result;
+}
+function doctorResult({ root, fix, problems, warnings, diagnostics }) {
+    const ok = problems.length === 0;
+    const status = ok ? 'OK' : 'FAIL';
     return {
-        ok: problems.length === 0,
-        text: [
-            `AgentOS doctor: ${problems.length === 0 ? 'OK' : 'FAIL'}`,
-            options.fix ? 'Fix mode: checked/repaired adapter files before validation' : null,
-            '',
-            problems.length ? `Problems:\n${problems.map((p) => `✗ ${p}`).join('\n')}` : '✓ Required files and adapter pointers are present',
-            warnings.length ? `\nWarnings:\n${warnings.map((w) => `- ${w}`).join('\n')}` : '',
-            diagnostics.length ? `\nDiagnostics:\n${diagnostics.map((d) => `- ${d}`).join('\n')}` : '',
-        ].filter(Boolean).join('\n').trim(),
+        ok,
+        status,
+        root,
+        fix,
+        problems,
+        warnings,
+        diagnostics,
+        summary: {
+            problem_count: problems.length,
+            warning_count: warnings.length,
+            diagnostic_count: diagnostics.length,
+        },
+        text: renderDoctorText({ status, fix, problems, warnings, diagnostics }),
     };
+}
+function withJsonText(result) {
+    return { ...result, text: `${JSON.stringify(result, null, 2)}\n` };
+}
+function renderDoctorText({ status, fix, problems, warnings, diagnostics }) {
+    return [
+        `AgentOS doctor: ${status}`,
+        fix ? 'Fix mode: checked/repaired adapter files before validation' : null,
+        '',
+        problems.length ? `Problems:\n${problems.map((p) => `✗ ${p}`).join('\n')}` : '✓ Required files and adapter pointers are present',
+        warnings.length ? `\nWarnings:\n${warnings.map((w) => `- ${w}`).join('\n')}` : '',
+        diagnostics.length ? `\nDiagnostics:\n${diagnostics.map((d) => `- ${d}`).join('\n')}` : '',
+    ].filter(Boolean).join('\n').trim();
 }
 async function checkTasksAndHandoff(root, problems, warnings, diagnostics) {
     const tasks = await safeRead(join(root, '.agentos/tasks.md'));

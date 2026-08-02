@@ -10,16 +10,15 @@
 - [x] Commit and push the AgentOS dogfood context.
 - [x] Add Bun-based GitHub Actions CI workflow.
 - [x] Add `bun.lock` and make Bun the preferred dogfood package manager while preserving npm/pnpm/Bun compatibility tests.
-- [x] Validate workflow YAML with PyYAML and actionlint.
-- [x] Execute the workflow's equivalent local steps with Bun.
+- [x] Add `agentos doctor --json` for machine-readable health output.
+- [x] Add CI step for `node dist/cli.js doctor --json`.
 
 ## Now
 
-- [ ] Commit and push the Bun-based CI changes.
+- [ ] Commit and push `agentos doctor --json`.
 
 ## Next
 
-- [ ] Add `agentos doctor --json` for machine-readable status.
 - [ ] Replace manual YAML generation/parsing with a real YAML parser.
 - [ ] Improve global install/publish flow once the package is ready to publish.
 

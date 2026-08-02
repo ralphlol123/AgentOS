@@ -2,53 +2,55 @@
 
 ## Current objective
 
-Add GitHub Actions CI for AgentOS using Bun as the primary dogfood package manager while preserving npm/pnpm/Bun compatibility verification.
+Add `agentos doctor --json` for machine-readable AgentOS health output usable by CI and future automation.
 
 ## Scope
 
 - Workspace kind: single-repo
 - Repo in scope: `agentos-for-projects` at `.`
-- Files in scope: `.github/workflows/ci.yml`, `bun.lock`, `package.json`, `README.md`, `.agentos/*`, regenerated `dist/*`
+- Files in scope: `src/core.ts`, `src/cli.ts`, `test/core.test.js`, `README.md`, `.github/workflows/ci.yml`, `.agentos/*`, regenerated `dist/*`
 - Protected paths: secrets, unrelated repos, Photobooth app repos unless explicitly requested
 
 ## Current state
 
-- Added `.github/workflows/ci.yml`.
-- CI uses `oven-sh/setup-bun@v2`, installs with `bun install --frozen-lockfile`, and runs Bun commands.
-- CI also sets up pnpm because `test:package-managers` verifies npm, pnpm, and Bun tarball installs.
-- Added `bun.lock`.
-- Made package scripts package-manager-neutral by removing nested `npm run` calls from scripts.
-- Updated docs and AgentOS context to show Bun as the preferred dogfood path.
+- `doctorAgentOS({ json: true })` returns structured data with JSON text.
+- CLI supports `agentos doctor --json`.
+- Human text output remains unchanged for normal `agentos doctor`.
+- CI now includes `node dist/cli.js doctor --json` after build/typecheck.
+- README documents `agentos doctor --json`.
 - Verification passed locally.
 
 ## Last completed step
 
-Validated workflow YAML/schema and executed the equivalent workflow steps locally.
+Validated JSON output, workflow YAML/schema, and full Bun verification path.
 
 ## Files changed
 
-- `.github/workflows/ci.yml`
-- `bun.lock`
-- `package.json`
+- `src/core.ts`
+- `src/cli.ts`
+- `test/core.test.js`
 - `README.md`
+- `.github/workflows/ci.yml`
+- `dist/cli.js`
+- `dist/cli.js.map`
 - `dist/core.d.ts`
+- `dist/core.js`
 - `dist/core.js.map`
-- `.agentos/project.yaml`
-- `.agentos/memory.md`
-- `.agentos/repos/agentos-for-projects.md`
 - `.agentos/tasks.md`
 - `.agentos/status.md`
 - `.agentos/handoff.md`
-- `AGENTS.md`
 
 ## Tests run
 
+- RED: `bun run build && node --test --test-name-pattern "doctor.*json"` failed because CLI printed text instead of JSON.
+- GREEN: `bun run build && node --test --test-name-pattern "doctor.*json|structured JSON"` passed.
 - PyYAML workflow parse — OK
 - actionlint `.github/workflows/ci.yml` — OK
 - `bun install --frozen-lockfile` — OK
 - `bun run build` — OK
+- `node dist/cli.js doctor --json | python3 -m json.tool` — OK
 - `bun run check` — OK
-- `bun run test` — 14 pass, 0 fail
+- `bun run test` — 16 pass, 0 fail
 - `bun run smoke` — OK
 - `bun run test:package-managers` — npm/pnpm/Bun install and bin execution pass
 - `bun pm pack --dry-run` — OK
@@ -61,7 +63,7 @@ None currently known.
 
 ## Next exact action
 
-Commit and push the Bun-based CI changes, then start `agentos doctor --json`.
+Commit and push `agentos doctor --json`, then start YAML parser/writer adoption.
 
 ## Protected files / do not touch
 
@@ -72,5 +74,5 @@ Commit and push the Bun-based CI changes, then start `agentos doctor --json`.
 
 ## Open decisions
 
-- Whether to keep package-manager compatibility on every CI run or later split it into a slower scheduled job.
-- Whether to implement `doctor --json` before or after YAML parser adoption.
+- Which YAML library to adopt for parser/writer.
+- Whether to extend JSON output to `status --json` and `compact --json` later.

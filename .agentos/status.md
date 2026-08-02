@@ -8,13 +8,14 @@ Last updated: 2026-08-02
 - AgentOS status: OK
 - Workflow YAML parse: OK
 - actionlint: OK
+- `agentos doctor --json`: OK and parseable
 - Bun install/build/check/test/smoke/package-manager compatibility/pack dry-run: OK
 - Package-manager compatibility: npm/pnpm/Bun OK
 
 ## Current phase
 
-Bun-based GitHub Actions CI added and locally verified. Pending commit/push.
+`agentos doctor --json` implemented, verified, and pending commit/push.
 
 ## Next recommended work
 
-Add `agentos doctor --json` for machine-readable status.
+Replace manual YAML generation/parsing with a real YAML parser.
