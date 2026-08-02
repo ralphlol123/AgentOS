@@ -2,7 +2,7 @@
 
 ## Current objective
 
-Replace manual `.agentos/project.yaml` generation/parsing with a real YAML parser/writer.
+Improve global install/publish flow once the package is ready to publish.
 
 ## Scope
 
@@ -67,7 +67,7 @@ None currently known.
 
 ## Next exact action
 
-Commit and push YAML parser/writer adoption.
+Improve global install/publish flow.
 
 ## Protected files / do not touch
 
