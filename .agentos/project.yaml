@@ -1,0 +1,57 @@
+name: agentos-for-projects
+agentos_version: 0.1
+mode: existing
+workspace_kind: single-repo
+source_of_truth: .agentos/
+
+principles:
+  - One AgentOS per product/workspace.
+  - Many repos inside it.
+  - Each task declares which repo(s) are in scope.
+  - AgentOS is dogfooded in this repository before rollout to client workspaces.
+
+repos:
+  agentos-for-projects:
+    path: .
+    type: cli-package
+    framework: node-typescript-cli
+    package_manager: npm
+    supported_package_managers:
+      - npm
+      - pnpm
+      - bun
+    build_command: npm run build
+    dev_command: npm run check
+    test_command: npm test
+    smoke_command: npm run smoke
+    package_manager_test_command: npm run test:package-managers
+    pack_command: npm pack --dry-run
+
+agents:
+  implementation: backend-engineer
+  qa: qa-engineer
+  review: code-reviewer
+  release: release-manager
+
+engines:
+  allowed:
+    - claude-code
+    - codex
+    - hermes
+    - opencode
+    - chatgpt
+
+adapters:
+  child_repo_pointer_files: false
+  child_repo_gitignore_policy: none
+
+knowledge:
+  obsidian:
+    mode: link-only
+    vault: /mnt/c/_/Obsidian/Ralph
+    destination: Projects/AgentOS
+    linked:
+      - Projects/AgentOS/Agentos For Projects Overview.md
+      - Projects/AgentOS/Agentos For Projects Architecture.md
+      - Projects/AgentOS/Agentos For Projects Decisions.md
+      - Projects/AgentOS/Agentos For Projects Roadmap.md
