@@ -1,31 +1,35 @@
 # Status
 
-Last updated: 2026-08-02
+Last updated: 2026-08-03
 
 ## Health
 
-- AgentOS doctor: OK
-- AgentOS status: OK
-- Workflow YAML parse: OK
-- actionlint: OK
-- `agentos doctor --json`: OK and parseable
-- `bun run release:check`: OK
-- Package-manager compatibility: npm/pnpm/Bun OK
-- Global `agentos` command reinstalled and verified
-- Git remote: `main` pushed and verified
+- AgentOS doctor: OK after Phase 1 agent model changes.
+- AgentOS status: OK.
+- Full Bun/release verification: OK.
+- Package-manager compatibility: npm/pnpm/Bun OK.
+- npm publish dry-run: OK.
+- Photobooth dry-run with new detected profile: OK.
 
-## Plain-engine boot smoke
+## Phase 1 agent model
 
-- Claude Code read-only boot: PASS
-- OpenCode read-only boot: PASS
-- Codex read-only boot: PASS
-- Evidence: `.agentos/runs/plain-engine-boot-20260802.md`
-- Repo source changes from smoke runs: none; only AgentOS record files updated afterward.
+Implemented:
+
+- default minimal delivery team: `implementation`, `qa`, `code-reviewer`, `release-manager`
+- default `detected` profile: minimal team plus repo-evidence specialists
+- detected specialists currently limited to `frontend-engineer` and `backend-engineer`
+- custom comma-list aliases such as `frontend,qa,release`
+- unknown custom aliases fail loudly instead of silently dropping roles
+- `.agentos/project.yaml` shape: `agents.profile`, `agents.capabilities`, `agents.enabled`
+- generated `.agentos/skills.md` with `Policy: on-demand`
+- doctor warnings for missing skills index, missing agent files, capability/enabled mismatches, and stale extra agent files
+
+## Claude Code review
+
+- Claude Code reviewed the updated Phase 1 diff after fixes.
+- Verdict: PASS, no merge blockers.
+- Non-blocking note: `doctor --fix` warns about orphaned agent files instead of auto-deleting them, which is intentionally safer.
 
 ## Current phase
 
-Plain-engine boot behavior is good enough for read-only context discovery in this repo. Editing/write-path trust still needs a separate low-risk test.
-
-## Next recommended work
-
-Decide whether to reinstall AgentOS in Photobooth now or first run one tiny controlled write-path AgentOS smoke in this repo.
+Phase 1 is verified and ready to commit/push.

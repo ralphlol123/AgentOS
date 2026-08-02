@@ -24,6 +24,7 @@ export async function initAgentOS(options: any = {}) {
   const repos = await detectRepos(cwd);
   const workspaceKind = repos.length > 1 ? 'multi-repo' : 'single-repo';
   const projectName = basename(cwd);
+  const agentSelection = resolveAgentSelection(options.agents ?? 'detected', repos);
 
   if (options.dryRun) {
     return {
@@ -31,7 +32,8 @@ export async function initAgentOS(options: any = {}) {
       workspaceKind,
       repos,
       planned: plannedFiles(mode, workspaceKind, repos),
-      text: renderDryRun({ cwd, mode, workspaceKind, repos }),
+      agents: agentSelection,
+      text: renderDryRun({ cwd, mode, workspaceKind, repos, agentSelection }),
     };
   }
 
@@ -41,13 +43,14 @@ export async function initAgentOS(options: any = {}) {
   await mkdir(join(cwd, AGENTOS_DIR, 'runs'), { recursive: true });
   await mkdir(join(cwd, AGENTOS_DIR, 'repos'), { recursive: true });
 
-  await writeIfMissing(join(cwd, AGENTOS_DIR, 'project.yaml'), projectYaml({ projectName, mode, workspaceKind, repos }));
+  await writeIfMissing(join(cwd, AGENTOS_DIR, 'project.yaml'), projectYaml({ projectName, mode, workspaceKind, repos, agentSelection }));
   await writeIfMissing(join(cwd, AGENTOS_DIR, 'memory.md'), memoryMd({ mode, workspaceKind }));
   await writeIfMissing(join(cwd, AGENTOS_DIR, 'handoff.md'), handoffMd({ mode, workspaceKind, repos }));
   await writeIfMissing(join(cwd, AGENTOS_DIR, 'decisions.md'), decisionsMd());
   await writeIfMissing(join(cwd, AGENTOS_DIR, 'tasks.md'), tasksMd({ mode }));
   await writeIfMissing(join(cwd, AGENTOS_DIR, 'status.md'), statusMd({ mode, workspaceKind }));
   await writeIfMissing(join(cwd, AGENTOS_DIR, 'knowledge.md'), knowledgeMd());
+  await writeIfMissing(join(cwd, AGENTOS_DIR, 'skills.md'), skillsMd(agentSelection));
   await writeIfMissing(join(cwd, AGENTOS_DIR, 'runs', 'README.md'), runsReadmeMd());
 
   if (mode === 'new') {
@@ -55,7 +58,7 @@ export async function initAgentOS(options: any = {}) {
     await writeIfMissing(join(cwd, AGENTOS_DIR, 'architecture.md'), architectureMd());
   }
 
-  for (const agent of defaultAgents()) {
+  for (const agent of agentSelection.agents) {
     await writeIfMissing(join(cwd, AGENTOS_DIR, 'agents', `${agent.id}.md`), agentMd(agent));
   }
   for (const engine of defaultEngines()) {
@@ -77,7 +80,7 @@ export async function initAgentOS(options: any = {}) {
     }
   }
 
-  return { mode, workspaceKind, repos, text: `AgentOS initialized (${mode}, ${workspaceKind}) at ${cwd}` };
+  return { mode, workspaceKind, repos, agents: agentSelection, text: `AgentOS initialized (${mode}, ${workspaceKind}, agents: ${agentSelection.profile}) at ${cwd}` };
 }
 
 export async function statusAgentOS(options: any = {}) {
@@ -282,6 +285,7 @@ export async function doctorAgentOS(options: any = {}) {
   if (!knowledge.includes('Do not bulk-load')) warnings.push('.agentos/knowledge.md missing link-only safety rule');
   if (!project.includes('- opencode')) warnings.push('.agentos/project.yaml engines.allowed does not list opencode');
   if (!await exists(join(root, '.agentos/engines/opencode.md'))) warnings.push('.agentos/engines/opencode.md is missing; run `agentos doctor --fix` to create it');
+  await checkAgentAndSkillConfig(root, project, warnings);
 
   for (const repo of repos) {
     const agentsPath = join(root, repo.path, 'AGENTS.md');
@@ -336,6 +340,38 @@ function renderDoctorText({ status, fix, problems, warnings, diagnostics }) {
     warnings.length ? `\nWarnings:\n${warnings.map((w) => `- ${w}`).join('\n')}` : '',
     diagnostics.length ? `\nDiagnostics:\n${diagnostics.map((d) => `- ${d}`).join('\n')}` : '',
   ].filter(Boolean).join('\n').trim();
+}
+
+async function checkAgentAndSkillConfig(root, project, warnings) {
+  const data = parseProjectYaml(project);
+  const agents: any = data.agents && typeof data.agents === 'object' ? data.agents : {};
+  const enabled = new Set<string>(Array.isArray(agents.enabled) ? agents.enabled.map((id) => normalizeAgentAlias(String(id))) : []);
+  const capabilities: Record<string, any> = agents.capabilities && typeof agents.capabilities === 'object' ? agents.capabilities : {};
+
+  if (!await exists(join(root, '.agentos/skills.md'))) {
+    warnings.push('skills index missing: .agentos/skills.md');
+  } else {
+    const skills = await safeRead(join(root, '.agentos/skills.md'));
+    if (!/Policy:\s*on-demand/i.test(skills)) warnings.push('.agentos/skills.md should declare Policy: on-demand');
+  }
+
+  if (!agents.profile) warnings.push('.agentos/project.yaml agents.profile missing; expected minimal, detected, or custom');
+  if (!enabled.size) warnings.push('.agentos/project.yaml agents.enabled is empty or missing');
+  for (const id of enabled) {
+    if (!AGENT_DEFINITIONS[id]) warnings.push(`agents.enabled references unknown agent ${id}`);
+    if (!await exists(join(root, '.agentos/agents', `${id}.md`))) warnings.push(`agents.enabled references ${id}, but .agentos/agents/${id}.md is missing`);
+  }
+  for (const [capability, rawAgent] of Object.entries(capabilities)) {
+    const id = normalizeAgentAlias(String(rawAgent));
+    if (!enabled.has(id)) warnings.push(`agents.capabilities.${capability} points to ${id}, but it is not listed in agents.enabled`);
+    if (!await exists(join(root, '.agentos/agents', `${id}.md`))) warnings.push(`agents.capabilities.${capability} points to ${id}, but .agentos/agents/${id}.md is missing`);
+  }
+  let agentFiles: string[] = [];
+  try { agentFiles = await readdir(join(root, '.agentos/agents')); } catch {}
+  for (const file of agentFiles.filter((name) => name.endsWith('.md'))) {
+    const id = file.replace(/\.md$/, '');
+    if (!enabled.has(id)) warnings.push(`.agentos/agents/${file} is not listed in agents.enabled; remove it or add it`);
+  }
 }
 
 
@@ -478,6 +514,12 @@ async function fixAgentOSAdapters(root) {
   const repos = parseReposFromProjectYaml(project);
   await ensureProjectYamlEngine(projectPath, 'opencode');
   await writeIfMissing(join(root, '.agentos/knowledge.md'), knowledgeMd());
+  const agentSelection = agentSelectionFromProject(project, repos);
+  await ensureProjectYamlAgents(projectPath, agentSelection);
+  await writeIfMissing(join(root, '.agentos/skills.md'), skillsMd(agentSelection));
+  for (const agent of agentSelection.agents) {
+    await writeIfMissing(join(root, '.agentos/agents', `${agent.id}.md`), agentMd(agent));
+  }
   for (const engine of defaultEngines()) {
     await writeIfMissing(join(root, '.agentos/engines', `${engine.id}.md`), engineMd(engine));
   }
@@ -679,7 +721,7 @@ async function detectPackageManager(abs) {
   return 'npm';
 }
 
-function projectYaml({ projectName, mode, workspaceKind, repos }) {
+function projectYaml({ projectName, mode, workspaceKind, repos, agentSelection }) {
   return dumpProjectYaml({
     name: safeId(projectName),
     agentos_version: 0.1,
@@ -692,13 +734,7 @@ function projectYaml({ projectName, mode, workspaceKind, repos }) {
       'Each task declares which repo(s) are in scope.',
     ],
     repos: Object.fromEntries(repos.map((repo) => [repo.name, repoYamlObject(repo)])),
-    agents: {
-      frontend: 'frontend-engineer',
-      backend: 'backend-engineer',
-      qa: 'qa-engineer',
-      review: 'code-reviewer',
-      release: 'release-manager',
-    },
+    agents: agentConfigObject(agentSelection),
     engines: {
       allowed: ['claude-code', 'codex', 'hermes', 'opencode', 'chatgpt'],
     },
@@ -733,7 +769,7 @@ function agentsBootloader({ workspaceKind, repos }) {
     `Workspace: ${workspaceKind}`,
     `Repos: ${repos.map((r) => `${r.name}=${r.path} (${r.type}/${r.framework}/${r.packageManager})`).join('; ') || 'none'}`,
     '',
-    'Read first: `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`, `.agentos/knowledge.md`, relevant `.agentos/repos/*`, `.agentos/agents/*`, `.agentos/engines/*`.',
+    'Read first: `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`, `.agentos/knowledge.md`, `.agentos/skills.md`, relevant `.agentos/repos/*`, `.agentos/agents/*`, `.agentos/engines/*`.',
     '',
     'Rules: declare role + repo scope before editing; edit only in scope; never touch secrets/.env/migrations/prod config without approval; do not commit/push unless explicitly asked; verify; update handoff/tasks before stopping.',
     '',
@@ -744,7 +780,7 @@ function claudeAdapter() {
   return [
     '# CLAUDE.md',
     '',
-    'AgentOS for Projects. Read `AGENTS.md`, `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`, `.agentos/knowledge.md`, relevant `.agentos/repos/*`, `.agentos/agents/*`, and `.agentos/engines/claude-code.md` before acting.',
+    'AgentOS for Projects. Read `AGENTS.md`, `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`, `.agentos/knowledge.md`, `.agentos/skills.md`, relevant `.agentos/repos/*`, `.agentos/agents/*`, and `.agentos/engines/claude-code.md` before acting.',
     '',
     'Rules: declare role + repo scope before editing; edit only in scope; backend only if in scope; no secrets/.env/migrations/prod config without approval; no commit/push unless explicitly asked; verify; update handoff/tasks before stopping.',
     '',
@@ -758,7 +794,7 @@ function subrepoAgentsPointer(repo) {
     '# AGENTS.md',
     '',
     `AgentOS child repo: ${repo.name} (${repo.path}).`,
-    'Parent context: `../AGENTS.md`, `../.agentos/project.yaml`, `../.agentos/memory.md`, `../.agentos/handoff.md`, `../.agentos/tasks.md`, `../.agentos/knowledge.md`, relevant `../.agentos/agents/*`, `../.agentos/engines/*`, and `../.agentos/repos/' + repo.name + '.md`.',
+    'Parent context: `../AGENTS.md`, `../.agentos/project.yaml`, `../.agentos/memory.md`, `../.agentos/handoff.md`, `../.agentos/tasks.md`, `../.agentos/knowledge.md`, `../.agentos/skills.md`, relevant `../.agentos/agents/*`, `../.agentos/engines/*`, and `../.agentos/repos/' + repo.name + '.md`.',
     'Rules: do not treat this repo as the whole product; declare scope; edit only in scope; no commit/push unless asked; update parent handoff/tasks.',
     '',
   ].join('\n');
@@ -769,7 +805,7 @@ function subrepoClaudePointer(repo) {
     '# CLAUDE.md',
     '',
     `AgentOS child repo: ${repo.name} (${repo.path}).`,
-    'Before acting read `../CLAUDE.md`, `../AGENTS.md`, `../.agentos/project.yaml`, `../.agentos/handoff.md`, `../.agentos/tasks.md`, `../.agentos/knowledge.md`, relevant `../.agentos/agents/*`, and `../.agentos/repos/' + repo.name + '.md`.',
+    'Before acting read `../CLAUDE.md`, `../AGENTS.md`, `../.agentos/project.yaml`, `../.agentos/handoff.md`, `../.agentos/tasks.md`, `../.agentos/knowledge.md`, `../.agentos/skills.md`, relevant `../.agentos/agents/*`, and `../.agentos/repos/' + repo.name + '.md`.',
     'Declare scope; edit only in scope; no commit/push unless asked; update parent handoff/tasks.',
     '',
   ].join('\n');
@@ -779,7 +815,7 @@ function hermesAdapter() {
   return [
     '# Hermes Agent Adapter',
     '',
-    'AgentOS for Projects. Read `AGENTS.md`, `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`, `.agentos/knowledge.md`, relevant `.agentos/repos/*` and `.agentos/agents/*` before work.',
+    'AgentOS for Projects. Read `AGENTS.md`, `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`, `.agentos/knowledge.md`, `.agentos/skills.md`, relevant `.agentos/repos/*` and `.agentos/agents/*` before work.',
     'Hermes rules: load relevant skills; verify real file/git/terminal/browser state; do not trust subagent reports without checking; update handoff/tasks when state changes.',
     '',
   ].join('\n');
@@ -797,6 +833,17 @@ function knowledgeMd(options: any = {}) {
   const obsidian = options.vault ? `\n## Obsidian\n\nVault: \`${options.vault}\`\nDestination: \`${options.destination}\`\nMode: \`link-only\`\n\nLinked notes:\n${linked.map((note) => `- [[${note.replace(/\.md$/, '')}]]`).join('\n') || '- None linked yet.'}\n` : '';
   return `# Knowledge\n\nLong-term knowledge links for this project.\n\nRules:\n- Do not bulk-load external vaults or folders.\n- Read only linked notes relevant to the current task.\n- Keep runtime context small; use handoff/tasks for current state.\n${obsidian}`;
 }
+function skillsMd(agentSelection) {
+  const enabled = new Set(agentSelection.enabled);
+  const sections = [];
+  if (enabled.has('implementation')) sections.push(['implementation', ['systematic-debugging — use for unclear bugs.', 'test-driven-development — use when adding or changing behavior.']]);
+  if (enabled.has('frontend-engineer')) sections.push(['frontend-engineer', ['frontend-build-verification — use before declaring frontend work done.', 'nuxt-e2e-testing — use for Nuxt route/browser behavior.', 'ai-slop-design-review — use for UI polish/design review.']]);
+  if (enabled.has('backend-engineer')) sections.push(['backend-engineer', ['backend-service-verification — use for local backend service verification.', 'nestjs-auth-guards — use for NestJS auth/permission work.']]);
+  if (enabled.has('qa')) sections.push(['qa', ['nuxt-e2e-testing — use for browser-driven frontend QA.', 'backend-service-verification — use for backend smoke/e2e verification.']]);
+  if (enabled.has('code-reviewer')) sections.push(['code-reviewer', ['shared-repo-git-safety — use before reviewing staged or unstaged changes in shared repos.', 'requesting-code-review — use for pre-commit review.']]);
+  if (enabled.has('release-manager')) sections.push(['release-manager', ['shared-repo-git-safety — use before commit/push/merge.', 'github-pr-workflow — use for PR lifecycle work.']]);
+  return `# Skills\n\nPolicy: on-demand.\n\nLoad only skills relevant to the current task and assigned agent role. Do not bulk-load all skills.\n\n${sections.map(([role, skills]) => `## ${role}\n\n${skills.map((skill) => `- ${skill}`).join('\n')}`).join('\n\n')}\n`;
+}
 function decisionsMd() { return '# Decisions\n\nDurable decisions go here with date, reason, alternatives, and status.\n'; }
 function tasksMd({ mode }) { return `# Tasks\n\n## Now\n\n- [ ] ${mode === 'new' ? 'Define MVP scope before scaffolding code.' : 'Choose the first AgentOS-managed task.'}\n\n## Next\n\n- [ ] Run \`agentos status\` and \`agentos doctor\`.\n\n## Later\n\n- [ ] Add run logs under \`.agentos/runs/\` as work happens.\n`; }
 function statusMd({ mode, workspaceKind }) { return `# Status\n\nMode: ${mode}\nWorkspace kind: ${workspaceKind}\nCurrent phase: context-layer initialized\n`; }
@@ -804,16 +851,91 @@ function productMd({ projectName }) { return `# Product\n\nProject: ${projectNam
 function architectureMd() { return '# Architecture\n\nDefine stack, boundaries, data model, and deployment before scaffolding code.\n'; }
 function runsReadmeMd() { return '# Runs\n\nStore per-task briefs, results, verification logs, and diff summaries here.\n'; }
 
-function defaultAgents() {
-  return [
-    { id: 'frontend-engineer', mandate: 'Own frontend implementation within declared frontend repo scope.' },
-    { id: 'backend-engineer', mandate: 'Own backend implementation within declared backend repo scope.' },
-    { id: 'qa-engineer', mandate: 'Verify changed behavior with real commands and browser checks when UI is touched.' },
-    { id: 'code-reviewer', mandate: 'Review diffs for correctness, security, scope, and project consistency.' },
-    { id: 'release-manager', mandate: 'Coordinate commit, push, merge, and release mechanics after verification and approval.' },
-  ];
+const AGENT_DEFINITIONS = {
+  implementation: { id: 'implementation', mandate: 'Own implementation work inside the declared repo/file scope.' },
+  'frontend-engineer': { id: 'frontend-engineer', mandate: 'Own frontend implementation within declared frontend repo scope.' },
+  'backend-engineer': { id: 'backend-engineer', mandate: 'Own backend implementation within declared backend repo scope.' },
+  qa: { id: 'qa', mandate: 'Verify changed behavior with real commands and browser checks when UI is touched.' },
+  'code-reviewer': { id: 'code-reviewer', mandate: 'Review diffs for correctness, security, scope, and project consistency.' },
+  'release-manager': { id: 'release-manager', mandate: 'Coordinate commit, push, merge, and release mechanics after verification and approval.' },
+};
+
+const MINIMAL_AGENT_IDS = ['implementation', 'qa', 'code-reviewer', 'release-manager'];
+
+function resolveAgentSelection(requested, repos) {
+  const raw = String(requested || 'detected').trim().toLowerCase();
+  if (raw === 'minimal') return buildAgentSelection('minimal', MINIMAL_AGENT_IDS);
+  if (raw === 'detected') return buildAgentSelection('detected', [...MINIMAL_AGENT_IDS, ...detectedSpecialistIds(repos)]);
+  const requestedIds = raw.split(',').map((item) => item.trim()).filter(Boolean);
+  const normalized = requestedIds.map(normalizeAgentAlias);
+  const unknown = normalized.filter((id) => !AGENT_DEFINITIONS[id]);
+  if (unknown.length) throw new Error(`Unknown agent alias(es): ${unknown.join(', ')}`);
+  return buildAgentSelection('custom', normalized.length ? normalized : MINIMAL_AGENT_IDS);
 }
-function agentMd(agent) { return `# ${title(agent.id)}\n\nMandate: ${agent.mandate}\nRules: read project/handoff/tasks first; work only in declared scope; update handoff before stopping; escalate destructive/prod/credential/cross-scope actions.\n`; }
+
+function agentSelectionFromProject(project, repos) {
+  const data = parseProjectYaml(project);
+  const agents = data.agents && typeof data.agents === 'object' ? data.agents : {};
+  const enabled = Array.isArray(agents.enabled) ? agents.enabled.map((id) => normalizeAgentAlias(String(id))) : [];
+  if (enabled.length) return buildAgentSelection(stringValue(agents.profile, 'detected'), enabled);
+  return buildAgentSelection('detected', [...MINIMAL_AGENT_IDS, ...detectedSpecialistIds(repos)]);
+}
+
+function buildAgentSelection(profile, ids) {
+  const seen = new Set();
+  const normalized = ids.map(normalizeAgentAlias).filter((id) => id && AGENT_DEFINITIONS[id] && !seen.has(id) && seen.add(id));
+  return {
+    profile,
+    enabled: normalized,
+    capabilities: agentCapabilities(normalized),
+    agents: normalized.map((id) => AGENT_DEFINITIONS[id]),
+  };
+}
+
+function detectedSpecialistIds(repos) {
+  const ids = [];
+  if (repos.some((repo) => repo.type === 'frontend' || ['nuxt','nextjs','vite/vue','react'].includes(repo.framework))) ids.push('frontend-engineer');
+  if (repos.some((repo) => repo.type === 'backend' || ['nestjs','express'].includes(repo.framework))) ids.push('backend-engineer');
+  return ids;
+}
+
+function normalizeAgentAlias(value) {
+  const id = safeId(value);
+  const aliases = {
+    frontend: 'frontend-engineer',
+    backend: 'backend-engineer',
+    review: 'code-reviewer',
+    reviewer: 'code-reviewer',
+    release: 'release-manager',
+    qa: 'qa',
+    'qa-engineer': 'qa',
+    impl: 'implementation',
+    implementer: 'implementation',
+  };
+  return aliases[id] || id;
+}
+
+function agentCapabilities(enabled) {
+  const set = new Set(enabled);
+  const capabilities: Record<string, string> = {};
+  if (set.has('implementation')) capabilities.implementation = 'implementation';
+  if (set.has('frontend-engineer')) capabilities.frontend = 'frontend-engineer';
+  if (set.has('backend-engineer')) capabilities.backend = 'backend-engineer';
+  if (set.has('qa')) capabilities.qa = 'qa';
+  if (set.has('code-reviewer')) capabilities.review = 'code-reviewer';
+  if (set.has('release-manager')) capabilities.release = 'release-manager';
+  return capabilities;
+}
+
+function agentConfigObject(agentSelection) {
+  return {
+    profile: agentSelection.profile,
+    capabilities: agentSelection.capabilities,
+    enabled: agentSelection.enabled,
+  };
+}
+
+function agentMd(agent) { return `# ${title(agent.id)}\n\nMandate: ${agent.mandate}\n\n## Responsibilities in\n\n- Work only inside declared task scope.\n- Read AgentOS project, memory, handoff, tasks, skills, repo, and role context before acting.\n- Report files changed, verification run, failures, and next action before stopping.\n\n## Responsibilities out\n\n- Do not touch secrets, .env files, production config, migrations, or unrelated repos without explicit approval.\n- Do not commit or push unless explicitly assigned.\n\n## Skills\n\nUse .agentos/skills.md as an on-demand index. Load only skills relevant to this role and task.\n`; }
 function defaultEngines() { return ['claude-code', 'codex', 'opencode', 'hermes', 'chatgpt'].map((id) => ({ id })); }
 function engineMd(engine) { return `# ${title(engine.id)} Adapter\n\nRead AGENTS.md + .agentos context first. Before stopping: handoff current state, files changed, tests, failures, next action.\n`; }
 function repoMd(repo) { return `# ${title(repo.name)} Repo\n\nPath: \`${repo.path}\`; type: ${repo.type}; framework: ${repo.framework}; package manager: ${repo.packageManager}.\nCommands: dev=\`${repo.devCommand || 'unknown'}\`; build=\`${repo.buildCommand || 'unknown'}\`; test=\`${repo.testCommand || 'unknown'}\`${repo.testE2eCommand ? `; e2e=\`${repo.testE2eCommand}\`` : ''}${repo.generateCommand ? `; generate=\`${repo.generateCommand}\`` : ''}${repo.previewCommand ? `; preview=\`${repo.previewCommand}\`` : ''}.\nScope: edit only when task includes \`${repo.name}\`.\n`; }
@@ -826,6 +948,14 @@ async function ensureProjectYamlEngine(path, engine) {
   data.engines = data.engines && typeof data.engines === 'object' ? data.engines : {};
   data.engines.allowed = Array.isArray(data.engines.allowed) ? data.engines.allowed : [];
   if (!data.engines.allowed.includes(engine)) data.engines.allowed.push(engine);
+  await writeFile(path, dumpProjectYaml(data), 'utf8');
+}
+
+async function ensureProjectYamlAgents(path, agentSelection) {
+  if (!await exists(path)) return;
+  const content = await readFile(path, 'utf8');
+  const data = parseProjectYaml(content);
+  data.agents = agentConfigObject(agentSelection);
   await writeFile(path, dumpProjectYaml(data), 'utf8');
 }
 
@@ -866,7 +996,7 @@ function renderEnginePrompt({ engine, root, project, handoff, tasks }) {
   return [
     'Follow AgentOS for Projects.',
     `Project: ${projectName}; root: ${root}; kind: ${workspaceKind}; engine: ${engine}.`,
-    `Read: AGENTS.md; ${engineAdapterLine(engine)}; .agentos/project.yaml; memory.md; handoff.md; tasks.md; relevant repos/*, agents/*, engines/*.`,
+    `Read: AGENTS.md; ${engineAdapterLine(engine)}; .agentos/project.yaml; memory.md; handoff.md; tasks.md; skills.md; relevant repos/*, agents/*, engines/*.`,
     'Rules: declare role + scope before editing; edit only in scope; no secrets/.env/migrations/prod config without approval; no commit/push unless asked; verify; update handoff/tasks if state changes.',
     ...engineSpecificRules(engine),
     `Current objective: ${oneLine(currentObjective)}`,
@@ -1102,6 +1232,6 @@ function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 function safeId(s) { return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'project'; }
 function title(s) { return s.split('-').map((p) => p[0]?.toUpperCase() + p.slice(1)).join(' '); }
 function plannedFiles(mode, workspaceKind, repos) { return ['.agentos/project.yaml', '.agentos/memory.md', '.agentos/handoff.md', '.agentos/tasks.md', 'AGENTS.md', 'CLAUDE.md']; }
-function renderDryRun({ cwd, mode, workspaceKind, repos }) {
-  return `AgentOS dry run\nRoot: ${cwd}\nMode: ${mode}\nWorkspace: ${workspaceKind}\nRepos:\n${repos.map((r) => `- ${r.name}: ${r.path}`).join('\n')}\nWould create/patch AgentOS context files. App source files would not be touched.`;
+function renderDryRun({ cwd, mode, workspaceKind, repos, agentSelection }: any) {
+  return `AgentOS dry run\nRoot: ${cwd}\nMode: ${mode}\nWorkspace: ${workspaceKind}\nAgents: ${agentSelection?.profile || 'detected'} (${agentSelection?.enabled?.join(', ') || 'unknown'})\nRepos:\n${repos.map((r) => `- ${r.name}: ${r.path}`).join('\n')}\nWould create/patch AgentOS context files. App source files would not be touched.`;
 }

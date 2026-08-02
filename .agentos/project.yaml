@@ -3,13 +3,11 @@ agentos_version: 0.1
 mode: existing
 workspace_kind: single-repo
 source_of_truth: .agentos/
-
 principles:
   - One AgentOS per product/workspace.
   - Many repos inside it.
   - Each task declares which repo(s) are in scope.
   - AgentOS is dogfooded in this repository before rollout to client workspaces.
-
 repos:
   agentos-for-projects:
     path: .
@@ -27,13 +25,18 @@ repos:
     smoke_command: bun run smoke
     package_manager_test_command: bun run test:package-managers
     pack_command: bun pm pack --dry-run
-
 agents:
-  implementation: backend-engineer
-  qa: qa-engineer
-  review: code-reviewer
-  release: release-manager
-
+  profile: detected
+  capabilities:
+    implementation: implementation
+    qa: qa
+    review: code-reviewer
+    release: release-manager
+  enabled:
+    - implementation
+    - qa
+    - code-reviewer
+    - release-manager
 engines:
   allowed:
     - claude-code
@@ -41,11 +44,9 @@ engines:
     - hermes
     - opencode
     - chatgpt
-
 adapters:
   child_repo_pointer_files: false
   child_repo_gitignore_policy: none
-
 knowledge:
   obsidian:
     mode: link-only

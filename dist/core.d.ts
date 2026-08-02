@@ -3,11 +3,23 @@ export declare function initAgentOS(options?: any): Promise<{
     workspaceKind: string;
     repos: any[];
     planned: string[];
+    agents: {
+        profile: any;
+        enabled: any;
+        capabilities: Record<string, string>;
+        agents: any;
+    };
     text: string;
 } | {
     mode: any;
     workspaceKind: string;
     repos: any[];
+    agents: {
+        profile: any;
+        enabled: any;
+        capabilities: Record<string, string>;
+        agents: any;
+    };
     text: string;
     planned?: undefined;
 }>;

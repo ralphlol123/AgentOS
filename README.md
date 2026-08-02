@@ -43,13 +43,15 @@ It supports:
 - deterministic live-context compaction: `agentos compact [--dry-run]`
 - interactive/link-only Obsidian knowledge setup: `agentos link-obsidian`
 - generated engine prompts: `agentos prompt [claude|codex|opencode|hermes]`
-- doctor diagnostics for duplicate task sections, stale handoff/task hints, repo git branch/ahead-behind state, untracked adapter files, missing commands, and configured port usage
+- agent selection profiles: `--agents minimal`, default `--agents detected`, or custom comma lists
+- generated `.agentos/skills.md` with an on-demand skill-loading policy
+- doctor diagnostics for duplicate task sections, stale handoff/task hints, agent/skills consistency, repo git branch/ahead-behind state, untracked adapter files, missing commands, and configured port usage
 - real YAML parsing/writing for `.agentos/project.yaml` via the `yaml` package, not regex/string-splice parsing
 
 ## Commands
 
 ```bash
-agentos init [--new|--existing] [--dry-run]
+agentos init [--new|--existing] [--agents minimal|detected|frontend,qa,release] [--dry-run]
 agentos status
 agentos handoff
 agentos doctor [--fix] [--json]
@@ -208,6 +210,43 @@ agentos doctor --json
 ```
 
 `agentos doctor --json` prints machine-readable health data for CI/automation with `ok`, `status`, `root`, `fix`, `problems`, `warnings`, `diagnostics`, and summary counts.
+
+Agent profile selection:
+
+```bash
+agentos init --existing --agents minimal
+agentos init --existing --agents detected        # default
+agentos init --existing --agents frontend,qa,release
+```
+
+Profiles:
+
+- `minimal` creates the default delivery team only: `implementation`, `qa`, `code-reviewer`, and `release-manager`.
+- `detected` creates the minimal team plus specialists justified by repo evidence, currently `frontend-engineer` and/or `backend-engineer`.
+- comma lists create a custom enabled set using friendly aliases such as `frontend`, `backend`, `qa`, `review`, and `release`.
+
+AgentOS records the selected model in `.agentos/project.yaml`:
+
+```yaml
+agents:
+  profile: detected
+  capabilities:
+    implementation: implementation
+    frontend: frontend-engineer
+    backend: backend-engineer
+    qa: qa
+    review: code-reviewer
+    release: release-manager
+  enabled:
+    - implementation
+    - frontend-engineer
+    - backend-engineer
+    - qa
+    - code-reviewer
+    - release-manager
+```
+
+Skills are on-demand. Init writes `.agentos/skills.md` as an index of relevant global/project skills by agent role, and adapters instruct engines to load only skills relevant to the assigned task rather than bulk-loading everything.
 
 In parent-managed multi-repo workspaces, AgentOS creates child repo pointer files and adds this managed block to each child repo `.gitignore` so app repos are not polluted by local workspace adapters:
 

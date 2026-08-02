@@ -67,6 +67,80 @@ test('init --existing detects a multi-repo workspace from child package.json fil
 });
 
 
+test('init --existing uses detected agent profile with core delivery team, detected specialists, and skills index', async () => {
+  const root = await tempProject();
+  await mkdirp(join(root, 'frontend'));
+  await writeFile(join(root, 'frontend/package.json'), JSON.stringify({ scripts: { build: 'vite build' }, dependencies: { vite: '^5.0.0', react: '^18.0.0' } }, null, 2));
+  await mkdirp(join(root, 'backend'));
+  await writeFile(join(root, 'backend/package.json'), JSON.stringify({ scripts: { build: 'nest build' }, dependencies: { '@nestjs/core': '^10.0.0' } }, null, 2));
+
+  await initAgentOS({ cwd: root, mode: 'existing', yes: true });
+
+  const projectYaml = await readFile(join(root, '.agentos/project.yaml'), 'utf8');
+  assert.match(projectYaml, /profile: detected/);
+  assert.match(projectYaml, /capabilities:/);
+  assert.match(projectYaml, /implementation: implementation/);
+  assert.match(projectYaml, /frontend: frontend-engineer/);
+  assert.match(projectYaml, /backend: backend-engineer/);
+  assert.match(projectYaml, /qa: qa/);
+  assert.match(projectYaml, /enabled:/);
+  for (const id of ['implementation', 'frontend-engineer', 'backend-engineer', 'qa', 'code-reviewer', 'release-manager']) {
+    assert.equal(await exists(join(root, '.agentos/agents', `${id}.md`)), true, `${id} agent file should exist`);
+    assert.match(projectYaml, new RegExp(`- ${id}`));
+  }
+  assert.equal(await exists(join(root, '.agentos/agents/qa-engineer.md')), false);
+  const skills = await readFile(join(root, '.agentos/skills.md'), 'utf8');
+  assert.match(skills, /Policy: on-demand/);
+  assert.match(skills, /frontend-engineer/);
+  assert.match(skills, /backend-service-verification/);
+});
+
+
+test('init supports minimal and custom agent profiles', async () => {
+  const minimalRoot = await tempProject();
+  await initAgentOS({ cwd: minimalRoot, mode: 'new', yes: true, agents: 'minimal' });
+  const minimalYaml = await readFile(join(minimalRoot, '.agentos/project.yaml'), 'utf8');
+  assert.match(minimalYaml, /profile: minimal/);
+  assert.match(minimalYaml, /- implementation/);
+  assert.match(minimalYaml, /- qa/);
+  assert.doesNotMatch(minimalYaml, /frontend-engineer/);
+  assert.equal(await exists(join(minimalRoot, '.agentos/agents/frontend-engineer.md')), false);
+
+  const customRoot = await tempProject();
+  await initAgentOS({ cwd: customRoot, mode: 'new', yes: true, agents: 'frontend,qa,release' });
+  const customYaml = await readFile(join(customRoot, '.agentos/project.yaml'), 'utf8');
+  assert.match(customYaml, /profile: custom/);
+  for (const id of ['frontend-engineer', 'qa', 'release-manager']) assert.match(customYaml, new RegExp(`- ${id}`));
+  assert.doesNotMatch(customYaml, /backend-engineer/);
+});
+
+
+test('init rejects unknown custom agent aliases', async () => {
+  const root = await tempProject();
+  await assert.rejects(
+    () => initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'fronted,qa' }),
+    /Unknown agent alias\(es\): fronted/,
+  );
+});
+
+
+test('doctor warns when agent capabilities or skills index are inconsistent', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true });
+  const { rm } = await import('node:fs/promises');
+  await rm(join(root, '.agentos/skills.md'), { force: true });
+  await rm(join(root, '.agentos/agents/qa.md'), { force: true });
+  await writeFile(join(root, '.agentos/agents/qa-engineer.md'), '# Old QA Engineer\n');
+
+  const doctor = await doctorAgentOS({ cwd: root });
+
+  assert.equal(doctor.ok, true);
+  assert.match(doctor.text, /skills index missing: \.agentos\/skills\.md/);
+  assert.match(doctor.text, /agents\.capabilities\.qa points to qa, but \.agentos\/agents\/qa\.md is missing/);
+  assert.match(doctor.text, /\.agentos\/agents\/qa-engineer\.md is not listed in agents\.enabled/);
+});
+
+
 test('multi-repo init preserves child .gitignore and ignores AgentOS pointer files', async () => {
   const root = await tempProject();
   await mkdirp(join(root, 'frontend'));
