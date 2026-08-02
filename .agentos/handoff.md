@@ -19,10 +19,11 @@ Add `agentos doctor --json` for machine-readable AgentOS health output usable by
 - CI now includes `node dist/cli.js doctor --json` after build/typecheck.
 - README documents `agentos doctor --json`.
 - Verification passed locally.
+- Implementation was committed and pushed to `origin/main`.
 
 ## Last completed step
 
-Validated JSON output, workflow YAML/schema, and full Bun verification path.
+Committed and pushed `agentos doctor --json`.
 
 ## Files changed
 
@@ -63,7 +64,7 @@ None currently known.
 
 ## Next exact action
 
-Commit and push `agentos doctor --json`, then start YAML parser/writer adoption.
+Start YAML parser/writer adoption.
 
 ## Protected files / do not touch
 

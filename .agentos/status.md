@@ -11,10 +11,11 @@ Last updated: 2026-08-02
 - `agentos doctor --json`: OK and parseable
 - Bun install/build/check/test/smoke/package-manager compatibility/pack dry-run: OK
 - Package-manager compatibility: npm/pnpm/Bun OK
+- Git remote: `main` pushed and verified
 
 ## Current phase
 
-`agentos doctor --json` implemented, verified, and pending commit/push.
+`agentos doctor --json` implemented, verified, committed, and pushed.
 
 ## Next recommended work
 
