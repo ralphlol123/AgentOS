@@ -18,7 +18,7 @@
 
 ## Now
 
-- [ ] Commit and push Phase 1 agent model.
+- [x] Commit and push Phase 1 agent model.
 
 ## Next
 

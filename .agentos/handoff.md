@@ -26,7 +26,7 @@ Implemented Phase 1 core behavior:
 
 ## Last completed step
 
-Full Phase 1 verification passed, and Claude Code review returned PASS/no merge blockers after the unknown-alias and stale-agent warning fixes.
+Full Phase 1 verification passed, Claude Code review returned PASS/no merge blockers after the unknown-alias and stale-agent warning fixes, and commit `0f68aa1` was pushed to `origin/main`.
 
 ## Files changed
 
@@ -74,7 +74,7 @@ None currently known.
 
 ## Next exact action
 
-Commit and push Phase 1 agent model.
+Reinstall/update AgentOS in Photobooth using the new detected profile and on-demand skills index.
 
 ## Protected files / do not touch
 
