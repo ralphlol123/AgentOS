@@ -17,10 +17,11 @@ Dogfood AgentOS inside the AgentOS repository so future AgentOS development uses
 - AgentOS repo has been linked to Obsidian destination `Projects/AgentOS` in link-only mode.
 - Project context has been hardened for a Node/TypeScript CLI package and npm/pnpm/Bun compatibility.
 - Verification passed.
+- Dogfood context was committed and pushed to `origin/main`.
 
 ## Last completed step
 
-Ran AgentOS health checks and full package verification successfully.
+Committed and pushed the AgentOS dogfood context.
 
 ## Files changed
 
@@ -53,7 +54,7 @@ None currently known.
 
 ## Next exact action
 
-Commit and push the AgentOS dogfood context, then start the next task: GitHub Actions CI.
+Add GitHub Actions CI for build/test/smoke/package-manager checks.
 
 ## Protected files / do not touch
 
@@ -64,5 +65,5 @@ Commit and push the AgentOS dogfood context, then start the next task: GitHub Ac
 
 ## Open decisions
 
-- Whether to add GitHub Actions CI next.
+- Whether CI should run package-manager compatibility on every PR or only main/nightly if runtime cost becomes high.
 - Whether to implement `doctor --json` before or after YAML parser adoption.

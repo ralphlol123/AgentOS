@@ -10,10 +10,11 @@ Last updated: 2026-08-02
 - Smoke tests: OK
 - Package-manager compatibility: npm/pnpm/Bun OK
 - Pack dry-run: OK
+- Git remote: `main` pushed and verified
 
 ## Current phase
 
-Dogfood context installed and verified. Pending commit/push.
+Dogfood context installed, verified, committed, and pushed.
 
 ## Next recommended work
 
