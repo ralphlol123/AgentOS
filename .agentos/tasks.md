@@ -14,11 +14,11 @@
 - [x] Add CI step for `node dist/cli.js doctor --json`.
 - [x] Replace manual `.agentos/project.yaml` generation/parsing with the `yaml` package.
 - [x] Improve global install/publish flow: package metadata, LICENSE, release scripts, metadata tests, CI publish dry-run.
-- [x] Commit and push global install/publish flow improvements.
+- [x] Dogfood plain-engine boot behavior with Claude Code/OpenCode/Codex read-only tasks.
 
 ## Now
 
-- [ ] Dogfood plain-engine boot behavior with Claude Code/OpenCode/Codex read-only tasks.
+- [ ] Commit and push plain-engine boot findings.
 
 ## Next
 
@@ -27,3 +27,4 @@
 ## Later
 
 - [ ] Consider real `npm publish` only after npm account, package ownership, and release version are confirmed.
+- [ ] Test higher-risk write-path behavior separately before trusting plain-engine editing without generated prompt prefixes.
