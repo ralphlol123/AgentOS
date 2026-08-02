@@ -51,6 +51,11 @@ test('init --existing detects a multi-repo workspace from child package.json fil
   assert.deepEqual(result.repos.map((r) => r.name).sort(), ['backend', 'frontend']);
   assert.equal(await exists(join(root, '.agentos/repos/frontend.md')), true);
   assert.equal(await exists(join(root, '.agentos/repos/backend.md')), true);
+  const frontendGitignore = await readFile(join(root, 'frontend/.gitignore'), 'utf8');
+  const backendGitignore = await readFile(join(root, 'backend/.gitignore'), 'utf8');
+  assert.match(frontendGitignore, /AgentOS parent-workspace pointer files/);
+  assert.match(frontendGitignore, /\/AGENTS\.md/);
+  assert.match(backendGitignore, /\/CLAUDE\.md/);
 
   const projectYaml = await readFile(join(root, '.agentos/project.yaml'), 'utf8');
   assert.match(projectYaml, /workspace_kind: multi-repo/);
@@ -58,6 +63,26 @@ test('init --existing detects a multi-repo workspace from child package.json fil
   assert.match(projectYaml, /path: \.\/backend/);
   assert.match(projectYaml, /dev_command: pnpm run start:dev/);
   assert.match(projectYaml, /test_e2e_command: pnpm run test:e2e/);
+  assert.match(projectYaml, /child_repo_gitignore_policy: ignore/);
+});
+
+
+test('multi-repo init preserves child .gitignore and ignores AgentOS pointer files', async () => {
+  const root = await tempProject();
+  await mkdirp(join(root, 'frontend'));
+  await writeFile(join(root, 'frontend/package.json'), JSON.stringify({ scripts: { build: 'vite build' }, dependencies: { vite: '^5.0.0' } }, null, 2));
+  await writeFile(join(root, 'frontend/.gitignore'), 'node_modules/\n.env\n');
+  await mkdirp(join(root, 'backend'));
+  await writeFile(join(root, 'backend/package.json'), JSON.stringify({ scripts: { build: 'nest build' }, dependencies: { '@nestjs/core': '^10.0.0' } }, null, 2));
+
+  await initAgentOS({ cwd: root, mode: 'existing', yes: true });
+  const gitignore = await readFile(join(root, 'frontend/.gitignore'), 'utf8');
+  assert.match(gitignore, /node_modules\//);
+  assert.match(gitignore, /\.env/);
+  assert.match(gitignore, /# AgentOS parent-workspace pointer files/);
+  assert.match(gitignore, /\/AGENTS\.md/);
+  assert.match(gitignore, /\/CLAUDE\.md/);
+  assert.match(gitignore, /\/\.hermes\.md/);
 });
 
 test('existing AGENTS.md and CLAUDE.md are patched with backups, not overwritten', async () => {
@@ -141,7 +166,8 @@ test('doctor detects duplicate tasks, missing commands, git status, untracked ad
   assert.match(doctor.text, /missing test_command/);
   assert.match(doctor.text, /git:/);
   assert.match(doctor.text, /has no upstream/);
-  assert.match(doctor.text, /untracked AgentOS adapter files/);
+  assert.doesNotMatch(doctor.text, /untracked AgentOS adapter files/);
+  assert.match(doctor.text, /has no untracked adapter files/);
   assert.match(doctor.text, /dev_port 9:/);
 });
 

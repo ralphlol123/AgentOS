@@ -38,6 +38,7 @@ It supports:
 - root `AGENTS.md` bootloader
 - root `CLAUDE.md` Claude Code adapter
 - subrepo pointer files for multi-repo projects
+- automatic child-repo `.gitignore` entries for parent-managed pointer files
 - status, handoff, and doctor checks
 - deterministic live-context compaction: `agentos compact [--dry-run]`
 - interactive/link-only Obsidian knowledge setup: `agentos link-obsidian`
@@ -101,6 +102,16 @@ agentos init --existing --dry-run
 agentos init --existing
 agentos status
 agentos doctor
+```
+
+In parent-managed multi-repo workspaces, AgentOS creates child repo pointer files and adds this managed block to each child repo `.gitignore` so app repos are not polluted by local workspace adapters:
+
+```gitignore
+# AgentOS parent-workspace pointer files
+/AGENTS.md
+/CLAUDE.md
+/.hermes.md
+# End AgentOS parent-workspace pointer files
 ```
 
 New project:

@@ -63,6 +63,7 @@ export async function initAgentOS(options = {}) {
         for (const repo of repos) {
             await createOrPatchRootFile(join(cwd, repo.path, 'AGENTS.md'), subrepoAgentsPointer(repo));
             await createOrPatchRootFile(join(cwd, repo.path, 'CLAUDE.md'), subrepoClaudePointer(repo));
+            await ensureChildRepoGitignore(join(cwd, repo.path));
         }
     }
     return { mode, workspaceKind, repos, text: `AgentOS initialized (${mode}, ${workspaceKind}) at ${cwd}` };
@@ -390,7 +391,7 @@ async function checkGitState(root, repos, warnings, diagnostics) {
     }
 }
 async function checkUntrackedAdapters(abs, repo, dirty, warnings, diagnostics) {
-    const adapters = dirty.filter((line) => /^\?\?\s+(.hermes\/|\.hermes\.md|AGENTS\.md|CLAUDE\.md)/.test(line));
+    const adapters = dirty.filter((line) => /^\?\?\s+(.hermes\/|\.hermes\.md$|AGENTS\.md$|CLAUDE\.md$)/.test(line));
     if (adapters.length) {
         warnings.push(`${repo.name} has untracked AgentOS adapter files: ${adapters.map((line) => line.replace(/^\?\?\s+/, '')).join(', ')}`);
     }
@@ -450,7 +451,39 @@ async function fixAgentOSAdapters(root) {
     for (const repo of repos) {
         await ensureAgentOSSection(join(root, repo.path, 'AGENTS.md'), subrepoAgentsPointer(repo));
         await ensureAgentOSSection(join(root, repo.path, 'CLAUDE.md'), subrepoClaudePointer(repo));
+        await ensureChildRepoGitignore(join(root, repo.path));
     }
+}
+const CHILD_REPO_GITIGNORE_BLOCK = `# AgentOS parent-workspace pointer files
+/AGENTS.md
+/CLAUDE.md
+/.hermes.md
+# End AgentOS parent-workspace pointer files
+`;
+async function ensureChildRepoGitignore(repoRoot) {
+    const gitignorePath = join(repoRoot, '.gitignore');
+    const content = await safeRead(gitignorePath);
+    const next = ensureManagedBlock(content, 'AgentOS parent-workspace pointer files', CHILD_REPO_GITIGNORE_BLOCK);
+    if (next !== content)
+        await writeFile(gitignorePath, next, 'utf8');
+}
+function ensureManagedBlock(content, title, block) {
+    const start = `# ${title}`;
+    const end = `# End ${title}`;
+    const normalizedBlock = `${block.trimEnd()}\n`;
+    if (content.includes(start) && content.includes(end)) {
+        const re = new RegExp(`${escapeRegExp(start)}[\\s\\S]*?${escapeRegExp(end)}\\n?`, 'm');
+        return content.replace(re, normalizedBlock);
+    }
+    if (content.includes(start)) {
+        const legacy = new RegExp(`${escapeRegExp(start)}\\n/AGENTS\\.md\\n/CLAUDE\\.md\\n/\\.hermes\\.md\\n?`, 'm');
+        return content.replace(legacy, normalizedBlock);
+    }
+    const trimmed = content.trimEnd();
+    return `${trimmed}${trimmed ? '\n\n' : ''}${normalizedBlock}`;
+}
+function escapeRegExp(value) {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 async function ensureAgentOSSection(path, section) {
     if (!await exists(path))
@@ -675,6 +708,10 @@ engines:
     - hermes
     - opencode
     - chatgpt
+
+adapters:
+  child_repo_pointer_files: true
+  child_repo_gitignore_policy: ${workspaceKind === 'multi-repo' ? 'ignore' : 'none'}
 `;
 }
 function repoYaml(r) {
