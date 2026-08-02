@@ -14,16 +14,16 @@
 - [x] Add CI step for `node dist/cli.js doctor --json`.
 - [x] Commit and push `agentos doctor --json`.
 - [x] Replace manual `.agentos/project.yaml` generation/parsing with the `yaml` package.
+- [x] Commit and push YAML parser/writer adoption.
 
 ## Now
 
-- [ ] Commit and push YAML parser/writer adoption.
+- [ ] Improve global install/publish flow once the package is ready to publish.
 
 ## Next
 
-- [ ] Improve global install/publish flow once the package is ready to publish.
+- [ ] Dogfood plain-engine boot behavior with Claude Code/OpenCode/Codex read-only tasks.
 
 ## Later
 
-- [ ] Dogfood plain-engine boot behavior with Claude Code/OpenCode/Codex read-only tasks.
 - [ ] Reinstall AgentOS in Photobooth only after dogfood context and CI are stable.

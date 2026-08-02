@@ -22,9 +22,11 @@ Replace manual `.agentos/project.yaml` generation/parsing with a real YAML parse
 - README documents real YAML parser/writer use.
 - Global `agentos` command was reinstalled from the local checkout and verified.
 
+- Implementation was committed and pushed to `origin/main`.
+
 ## Last completed step
 
-Full Bun verification passed, including YAML parser behavior tests and package-manager compatibility.
+Committed and pushed YAML parser/writer adoption.
 
 ## Files changed
 

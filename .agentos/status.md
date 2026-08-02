@@ -10,11 +10,12 @@ Last updated: 2026-08-02
 - Bun install/build/check/test/smoke/package-manager compatibility/pack dry-run: OK
 - Package-manager compatibility: npm/pnpm/Bun OK
 - Global `agentos` command reinstalled and verified
+- Git remote: `main` pushed and verified
 
 ## Current phase
 
-YAML parser/writer adoption implemented and verified; commit/push pending.
+YAML parser/writer adoption implemented, verified, committed, and pushed.
 
 ## Next recommended work
 
-Commit YAML parser/writer adoption, then improve global install/publish flow.
+Improve global install/publish flow.
