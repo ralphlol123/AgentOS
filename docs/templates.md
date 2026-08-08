@@ -27,6 +27,7 @@ Show a template by ID:
 ```bash
 agentos templates show agent:project-manager
 agentos templates show skill:frontend/ai-slop-design-review
+agentos templates show skill:github/conventional-commit
 ```
 
 Copy a template into the current project's `.agentos/` runtime context:
@@ -36,6 +37,7 @@ agentos templates copy agent:security-reviewer --dry-run
 agentos templates copy agent:security-reviewer
 agentos templates copy agent:security-reviewer --replace
 agentos templates copy skill:frontend/ai-slop-design-review
+agentos templates copy skill:github/conventional-commit
 ```
 
 Validate a local template file before copying/importing it:
@@ -115,6 +117,7 @@ templates/skills/frontend/frontend-build-verification.md
 templates/skills/backend/backend-service-verification.md
 templates/skills/backend/nestjs-feature-implementation.md
 templates/skills/fullstack/full-system-rehearsal.md
+templates/skills/github/conventional-commit.md
 templates/skills/github/github-pr-workflow.md
 templates/skills/github/github-actions-verification.md
 ```
@@ -143,6 +146,7 @@ Add a specific skill:
 
 ```bash
 agentos skills add systematic-debugging
+agentos skills add conventional-commit
 ```
 
 Use compact summary mode, the default:

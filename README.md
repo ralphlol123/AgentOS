@@ -158,6 +158,7 @@ Add specific skills or category packs:
 
 ```bash
 agentos skills add systematic-debugging
+agentos skills add conventional-commit
 agentos skills add frontend-pack
 agentos skills add backend-pack,github-pack --mode full
 ```
@@ -189,6 +190,7 @@ agentos templates show agent:project-manager
 agentos templates copy agent:project-manager --dry-run
 agentos templates copy agent:project-manager
 agentos templates copy skill:frontend/ai-slop-design-review
+agentos templates copy skill:github/conventional-commit
 agentos templates validate templates/agents/project-manager.md --type agent
 ```
 
