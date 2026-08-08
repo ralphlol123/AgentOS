@@ -834,6 +834,21 @@ const SKILL_CATALOG = [
         fullNotes: ['A review that only checks style misses correctness/security issues — prioritize correctness and security first.'],
     },
     {
+        id: 'conventional-commit', category: 'github', title: 'Conventional Commit',
+        summary: 'use when generating or reviewing commit messages from Git changes.',
+        trigger: 'generating, reviewing, or preparing a commit message from current Git changes.',
+        procedure: [
+            'Capture a fresh baseline with `git status --short --branch`; inspect staged changes first, then unstaged changes only if nothing is staged.',
+            'Never stage, commit, push, reset, checkout, or run destructive Git commands unless the user explicitly requested that action.',
+            'Run configured project quality checks when safe and available; if formatting/checks change files, re-inspect the diff before writing the message.',
+            'Stop and warn if the diff includes secrets, `.env` files, private keys, production config, migrations, or unrelated concerns that should be split.',
+            'Choose the Conventional Commit type and scope from the actual diff; prefer business/product scopes over technical scopes.',
+            'Write an imperative subject under 72 characters and body bullets in past tense, describing outcomes rather than filenames.',
+        ],
+        verification: ['Git diff/status were inspected immediately before the message; the message describes only actual diff content and calls out secrets/unrelated work instead of hiding it.'],
+        fullNotes: ['Prefer staged changes when any are staged. If only unstaged changes exist, say that nothing is staged.', 'Generated artifacts should not dominate the message; summarize the source change that caused them.', 'If the user asks for the exact commit command, prefer explicit paths over `git add .` when possible.'],
+    },
+    {
         id: 'github-actions-verification', category: 'github', title: 'GitHub Actions Verification',
         summary: 'use when adding/changing GitHub Actions workflows.',
         trigger: 'adding or changing GitHub Actions workflows.',

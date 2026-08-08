@@ -2,69 +2,86 @@
 
 ## Current objective
 
-Finalize import safety hardening on branch `feat/import-safety-hardening`, then prepare for the release branch after this PR merges.
+Generalize Ralph's KargaX commit-message workflow into a reusable AgentOS `conventional-commit` skill template, then prepare for the release branch after this PR merges.
 
 ## Scope
 
 - Repo: `agentos-for-projects` only.
-- In scope: import/copy safety behavior, CLI flags, tests, docs, generated dist, AgentOS state, safe packed-install smoke.
-- Out of scope: real npm publish, `agentos run`, KargaX AgentOS re-enable, and non-throwaway workspace write-path tests.
+- Branch: `feat/conventional-commit-skill-template`.
+- In scope:
+  - `templates/skills/github/conventional-commit.md`
+  - built-in skill catalog entry
+  - template/catalog tests
+  - README/templates docs
+- Out of scope:
+  - publishing to npm
+  - editing KargaX repos
+  - changing release version
 
 ## Current state
 
-Branch: `feat/import-safety-hardening`, created from verified `main` after PR #4.
+- Started from latest `origin/main`, which already included import safety hardening.
+- Inspected KargaX source skill at `/home/app/www/kargax/new/.opencode/skills/kargax-commit/SKILL.md`.
+- Generalized its reusable behavior:
+  - inspect latest git state before message generation
+  - prefer staged diff when present
+  - do not stage/commit/push without explicit user request
+  - stop on secrets/sensitive files/unrelated concerns
+  - optionally run configured quality checks and re-inspect after formatter changes
+  - choose Conventional Commit type/scope from the actual diff
+  - imperative subject + past-tense outcome body bullets
+- Added `templates/skills/github/conventional-commit.md`.
+- Added `conventional-commit` to the `github` built-in skill catalog so `github-pack` and detected Git workspaces include it.
+- Updated tests and docs.
+- Packed installed CLI smoke passed for template list/show/copy/validate, overwrite protection, `--replace`, and `github-pack` materialization.
+- Full verification gate passed.
 
-Implemented:
+## Last completed step
 
-- Added RED tests for:
-  - registry copy overwrite protection;
-  - import overwrite protection;
-  - explicit `--replace` success path;
-  - blocked import quarantine file creation;
-  - URL fetch failure recovery text without stack traces;
-  - dangerous command and secret-like warning coverage.
-- Verified RED run failed on the expected missing behaviors.
-- Implemented hardening in `src/core.ts`:
-  - copied/imported templates refuse to overwrite existing project-local files by default;
-  - `replace: true` / CLI `--replace` explicitly replaces after caller approval;
-  - blocked imports are quarantined under `.agentos/imports/quarantine/` with source, SHA256, findings, recovery steps, and original content;
-  - blocked imports no longer materialize runtime agent/skill files;
-  - import URL/path read failures return user-facing `Source fetch failed` text and write nothing.
-- Implemented CLI flag forwarding in `src/cli.ts`:
-  - `agentos templates copy <id> --replace`;
-  - `agentos templates import ... --yes --replace`.
-- Updated docs:
-  - `README.md`;
-  - `docs/quickstart.md`;
-  - `docs/templates.md`;
-  - `docs/safe-imports.md`.
-- Updated Obsidian roadmap:
-  - `/mnt/c/_/Obsidian/Ralph/Projects/AgentOS/Agentos For Projects Roadmap.md`.
+- Full verification gate exited 0.
 
-## Verification run
+## Files changed
 
-- GREEN run: `bun run test` passed with 54 tests / 0 failures.
-- Packed installed CLI smoke passed:
-  - packed package with `npm pack`;
-  - installed into temp npm prefix;
-  - initialized a safe throwaway repo;
-  - verified copy overwrite block, copy `--replace`, import overwrite block, import `--replace`, quarantine on blocked prompt-injection-like content, URL fetch failure recovery text, and `agentos doctor`;
-  - terminal output ended with `IMPORT_SAFETY_HARDENING_SMOKE_PASS`.
-- Full verification passed:
-  - `bun run check`;
-  - `bun run test` — 54 tests / 0 failures;
-  - `bun run smoke`;
-  - `bun run test:package-managers` — PASS npm, pnpm, Bun;
-  - `npm publish --dry-run --access public`;
-  - `node dist/cli.js doctor` — OK;
-  - `node dist/cli.js status` — OK;
-  - `git diff --check` — PASS.
+- `.agentos/handoff.md`
+- `.agentos/tasks.md`
+- `README.md`
+- `docs/templates.md`
+- `src/core.ts`
+- `test/core.test.js`
+- `templates/skills/github/conventional-commit.md`
+- generated `dist/core.js`
+- generated `dist/core.js.map`
+
+## Tests run
+
+- `bun run test` — passed, 54 tests / 0 failures.
+- Packed installed CLI smoke — passed with `COMMIT_SKILL_TEMPLATE_SMOKE_PASS`.
+- Full gate — passed:
+  - `bun run check`
+  - `bun run test`
+  - `bun run smoke`
+  - `bun run test:package-managers`
+  - `npm publish --dry-run --access public`
+  - `node dist/cli.js doctor`
+  - `node dist/cli.js status`
+  - `git diff --check`
+
+## Known failures
+
+- None.
 
 ## Next exact action
 
-Review final diff, commit exact intended paths, push `feat/import-safety-hardening`, verify remote SHA, and report PR URL.
+1. Commit and push `feat/conventional-commit-skill-template`.
+2. Open PR and merge.
+3. After merge, start `chore/release-0.1.0`.
 
-## Known caveats
+## Protected files / do not touch
 
-- Real publish remains blocked until explicit npm/package/version approval.
-- KargaX remains intentionally off-limits for AgentOS write-path testing unless Ralph explicitly reopens it.
+- Do not edit `/home/app/www/kargax/new`.
+- Do not publish npm package yet.
+- Do not start release branch until this skill-template branch is pushed/merged.
+
+## Open decisions
+
+- Whether to merge this small skill-template PR before starting `chore/release-0.1.0`.

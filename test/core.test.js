@@ -704,7 +704,7 @@ test('skills add supports category-pack aliases', async () => {
   await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
   const result = await skillsAgentOS({ cwd: root, add: 'github-pack' });
   assert.equal(result.ok, true);
-  assert.deepEqual(result.skills.slice().sort(), ['github-actions-verification', 'github-code-review', 'github-pr-workflow']);
+  assert.deepEqual(result.skills.slice().sort(), ['conventional-commit', 'github-actions-verification', 'github-code-review', 'github-pr-workflow']);
 });
 
 test('skills add rejects unknown skill ids loudly', async () => {
@@ -782,6 +782,7 @@ test('template library files are present for agents, skills, schemas, and exampl
   assert.equal(await exists(join(process.cwd(), 'templates/agents/project-manager.md')), true);
   assert.equal(await exists(join(process.cwd(), 'templates/agents/security-reviewer.md')), true);
   assert.equal(await exists(join(process.cwd(), 'templates/skills/frontend/ai-slop-design-review.md')), true);
+  assert.equal(await exists(join(process.cwd(), 'templates/skills/github/conventional-commit.md')), true);
   assert.equal(await exists(join(process.cwd(), 'templates/schemas/agent-template.schema.json')), true);
   assert.equal(await exists(join(process.cwd(), 'templates/examples/imported-skill.example.md')), true);
 });
@@ -793,6 +794,7 @@ test('skills list and agents list expose built-in reusable templates', async () 
   assert.equal(skills.ok, true);
   assert.match(skills.text, /frontend-pack/);
   assert.match(skills.text, /ai-slop-design-review/);
+  assert.match(skills.text, /conventional-commit/);
   const agents = await agentsAgentOS({ cwd: root, list: true });
   assert.equal(agents.ok, true);
   assert.match(agents.text, /project-manager/);
@@ -854,6 +856,7 @@ test('templates list and show expose repository template registry entries', asyn
   assert.match(list.text, /AgentOS template registry/);
   assert.match(list.text, /agent:project-manager/);
   assert.match(list.text, /skill:frontend\/ai-slop-design-review/);
+  assert.match(list.text, /skill:github\/conventional-commit/);
 
   const shown = await templatesAgentOS({ cwd: root, command: 'show', id: 'agent:project-manager' });
   assert.equal(shown.ok, true);
