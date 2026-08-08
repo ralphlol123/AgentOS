@@ -1,0 +1,33 @@
+{
+  "type": "object",
+  "required": [
+    "id",
+    "role",
+    "responsibilities_in",
+    "responsibilities_out",
+    "skills_policy"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "role": {
+      "type": "string"
+    },
+    "responsibilities_in": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "responsibilities_out": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "skills_policy": {
+      "type": "string"
+    }
+  }
+}
