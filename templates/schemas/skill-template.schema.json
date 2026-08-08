@@ -1,0 +1,36 @@
+{
+  "type": "object",
+  "required": [
+    "name",
+    "category",
+    "trigger",
+    "procedure",
+    "verification"
+  ],
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "category": {
+      "type": "string"
+    },
+    "trigger": {
+      "type": "string"
+    },
+    "procedure": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "verification": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "source": {
+      "type": "string"
+    }
+  }
+}

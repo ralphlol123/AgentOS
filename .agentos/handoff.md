@@ -2,74 +2,85 @@
 
 ## Current objective
 
-Finalize the AgentOS Local Skills + Custom Agents sprint implementation on branch `feat/local-skills-custom-agents`.
+Finalize the AgentOS Templates + Safe Import System sprint on branch `feat/template-library`.
 
 ## Scope
 
 - Repo: `agentos-for-projects` only.
-- In scope: local skill templates, `agentos skills add`, local skill doctor validation, custom/local agent preservation, optional `project-manager` planning role, `agentos migrate claude --preserve`, default Obsidian destination, EACCES diagnostics, tests, generated `dist/`.
-- Out of scope: `agentos run`, execution orchestration, real npm publish, and re-installing AgentOS into KargaX.
+- In scope: repository template library under `templates/`, `agentos agents list/add`, `agentos skills list`, guarded `agentos templates import`, tests, package inclusion, generated `dist/`, and dogfood state.
+- Out of scope: `agentos run`, real npm publish, KargaX AgentOS re-enable, and merging PRs without Ralph's approval.
 
 ## Current state
 
-Branch: `feat/local-skills-custom-agents`.
+Branch: `feat/template-library`, created on top of `feat/local-skills-custom-agents` commit `399beb3`.
 
 Implemented:
 
-- `agentos skills add [--detected] [skill-id|category-pack,...] [--mode summary|full] [--dry-run]`.
-- Built-in common development skill catalog with compact summary mode by default and full mode opt-in.
-- Local skill materialization under `.agentos/skills/<category>/<skill>/SKILL.md`.
-- `.agentos/skills.md` update with `Details: .agentos/skills/.../SKILL.md` links and on-demand policy.
-- Doctor validation for missing local skill links, unlisted local skill files, and token-heavy local skills.
-- Custom/local agent preservation: declared custom agents with matching `.agentos/agents/<id>.md` are valid and preserved by `doctor --fix`.
-- Optional built-in planning-only `project-manager` role via `planning`, `pm`, or `project-manager` aliases; not enabled by default detected profile.
-- `agentos migrate claude --preserve [--dry-run]` for preserve-but-disable `.claude/agents`, `.claude/settings.local.json`, and `.claude/settings.json`, plus canonical AgentOS `CLAUDE.md` block and `.claude/README.agentos.md`.
-- Default Obsidian destination changed to `Projects/<ProjectName>/AgentOS` when `--dest` is omitted in core API.
-- Link-Obsidian EACCES diagnostics now explain parent-folder ownership/write-permission fixes.
-
-Claude Code started the implementation but was killed after running too long; the remaining missing pieces were completed manually and verified.
+- Repo template library:
+  - `templates/agents/*.md` for built-in/common roles including `project-manager`, `security-reviewer`, and `data-engineer`.
+  - `templates/skills/**.md` for portable common skill cards.
+  - `templates/schemas/*.schema.json` for future validation shape.
+  - `templates/examples/imported-*.example.md` for imported content examples.
+- Package metadata includes `templates` in published tarballs.
+- CLI/API additions:
+  - `agentos skills list`.
+  - `agentos agents list`.
+  - `agentos agents add <agent-id|template-file> [--name id] [--dry-run]`.
+  - `agentos templates import <url-or-file> --type agent|skill --name <id> [--mode summary|full] [--dry-run] [--yes]`.
+- Guarded import behavior:
+  - dry-run by default unless `--yes` is provided;
+  - source path/URL, SHA256, byte size, findings, and target path shown;
+  - prompt-injection-like instructions block import;
+  - secret-like words, dangerous command patterns, missing license hints, and large content produce warnings;
+  - attribution/source metadata is preserved in generated content;
+  - skill imports update `.agentos/skills.md` after write.
 
 ## Last completed step
 
-Full verification passed after adding the missing CLI helper, Claude migration command, default Obsidian destination, and migration/default tests.
+Full verification passed locally after adding tests and CLI smoke checks.
 
 ## Files changed
 
 - `src/core.ts`
 - `src/cli.ts`
 - `test/core.test.js`
+- `package.json`
 - `dist/core.d.ts`
 - `dist/core.js`
 - `dist/core.js.map`
 - `dist/cli.js`
 - `dist/cli.js.map`
+- `templates/agents/*.md`
+- `templates/skills/**/*.md`
+- `templates/schemas/*.json`
+- `templates/examples/*.md`
 - `.agentos/tasks.md`
 - `.agentos/handoff.md`
 
 ## Tests run
 
-- `bun run build` — PASS.
-- `bun run test` — PASS, 42 tests / 0 failures.
+- `bun run test` — PASS, 47 tests / 0 failures.
+- CLI smoke for `skills list`, `agents list`, `agents add --dry-run`, `templates import --dry-run`, `templates import --yes`, and `doctor` in a temp project — PASS.
 - `bun run check` — PASS.
 - `bun run smoke` — PASS.
-- `bun run test:package-managers` — PASS for npm, pnpm, and Bun tarball installs.
+- `bun run test:package-managers` — PASS for npm, pnpm, and Bun.
+- `npm publish --dry-run --access public` — PASS dry-run; tarball includes `templates/`.
 - `node dist/cli.js doctor` — PASS.
 - `node dist/cli.js status` — PASS.
 - `git diff --check` — PASS.
-- CLI help smoke: `node dist/cli.js help` shows `skills add` and `migrate claude --preserve`.
 
 ## Known warnings / failures
 
-- KargaX AgentOS remains intentionally rolled back; do not use KargaX as a write-path dogfood target unless Ralph explicitly asks.
-- The smoke script still passes an explicit Obsidian destination, so the new default is covered by unit test rather than smoke output.
-- Real npm publish remains blocked until npm package name/account/ownership/version are confirmed.
+- `gh` is not installed and the available GitHub token returned `401 Bad credentials`, so PR creation must use manual compare URL unless auth is fixed.
+- `feat/template-library` depends on `feat/local-skills-custom-agents`; merge/review that branch first.
+- KargaX remains intentionally rolled back to `.claude`; do not use it for AgentOS write-path dogfood unless Ralph explicitly asks.
 
 ## Next exact action
 
-Inspect final diff, commit the sprint branch, push it, then report branch/commit and verification summary.
+Review final diff, commit exact intended paths, push `feat/template-library`, verify remote SHA, then report branch/PR URL and verification summary.
 
 ## Open decisions
 
-- Whether to merge `feat/local-skills-custom-agents` into `main` immediately or review first.
-- Whether `project-manager` should ever become part of `--agents detected`; current implementation keeps it explicit only.
-- `agentos run` remains on hold unless Ralph explicitly reopens it.
+- Whether to merge `feat/local-skills-custom-agents` first, then rebase/merge `feat/template-library`.
+- Whether future template imports from web should support automatic license detection beyond current hints.
+- Real npm publish remains blocked until npm account/package/version are confirmed.

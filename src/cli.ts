@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
-import { compactAgentOS, doctorAgentOS, handoffAgentOS, initAgentOS, linkObsidianAgentOS, migrateClaudeAgentOS, promptAgentOS, skillsAgentOS, statusAgentOS } from './core.js';
+import { agentsAgentOS, compactAgentOS, doctorAgentOS, handoffAgentOS, initAgentOS, linkObsidianAgentOS, migrateClaudeAgentOS, promptAgentOS, skillsAgentOS, statusAgentOS, templatesAgentOS } from './core.js';
 
 const VERSION = '0.1.0';
 
@@ -56,8 +56,14 @@ async function main() {
     }
     if (command === 'skills') {
       const [sub, ...rest] = args;
+      if (sub === 'list') {
+        const result = await skillsAgentOS({ cwd: process.cwd(), list: true });
+        console.log(result.text);
+        process.exitCode = result.ok ? 0 : 1;
+        return;
+      }
       if (sub !== 'add') {
-        console.log('Usage: agentos skills add [--detected] [skill-id|category-pack,...] [--mode summary|full] [--dry-run]');
+        console.log('Usage: agentos skills list | agentos skills add [--detected] [skill-id|category-pack,...] [--mode summary|full] [--dry-run]');
         process.exitCode = sub ? 1 : 0;
         return;
       }
@@ -69,6 +75,38 @@ async function main() {
         mode: subFlags.mode,
         dryRun: subFlags['dry-run'],
       });
+      console.log(result.text);
+      process.exitCode = result.ok ? 0 : 1;
+      return;
+    }
+    if (command === 'agents') {
+      const [sub, ...rest] = args;
+      if (sub === 'list') {
+        const result = await agentsAgentOS({ cwd: process.cwd(), list: true });
+        console.log(result.text);
+        process.exitCode = result.ok ? 0 : 1;
+        return;
+      }
+      if (sub !== 'add') {
+        console.log('Usage: agentos agents list | agentos agents add <agent-id|template-file> [--name id] [--dry-run]');
+        process.exitCode = sub ? 1 : 0;
+        return;
+      }
+      const { flags: subFlags, positionals } = parseFlagsAndPositionals(rest);
+      const result = await agentsAgentOS({ cwd: process.cwd(), add: positionals[0], name: subFlags.name, dryRun: subFlags['dry-run'] });
+      console.log(result.text);
+      process.exitCode = result.ok ? 0 : 1;
+      return;
+    }
+    if (command === 'templates') {
+      const [sub, ...rest] = args;
+      if (sub !== 'import') {
+        console.log('Usage: agentos templates import <url-or-file> --type agent|skill --name <id> [--mode summary|full] [--dry-run] [--yes]');
+        process.exitCode = sub ? 1 : 0;
+        return;
+      }
+      const { flags: subFlags, positionals } = parseFlagsAndPositionals(rest);
+      const result = await templatesAgentOS({ cwd: process.cwd(), command: 'import', source: positionals[0], type: subFlags.type, name: subFlags.name, mode: subFlags.mode, dryRun: subFlags['dry-run'], yes: subFlags.yes });
       console.log(result.text);
       process.exitCode = result.ok ? 0 : 1;
       return;
@@ -156,7 +194,7 @@ async function askDefault(rl: any, question: string, defaultValue: string) {
 }
 
 function printHelp() {
-  console.log(`AgentOS for Projects v${VERSION}\n\nUsage:\n  agentos init [--new|--existing] [--agents minimal|detected|frontend,qa,release] [--dry-run]\n  agentos status\n  agentos handoff\n  agentos doctor [--fix] [--json]\n  agentos compact [--dry-run]\n  agentos link-obsidian [--vault <path> --dest <folder> --link <note> --create]\n  agentos skills add [--detected] [skill-id|category-pack,...] [--mode summary|full] [--dry-run]\n  agentos migrate claude --preserve [--dry-run]\n  agentos prompt [claude|codex|opencode|hermes]\n\nCore rule:\n  One AgentOS per product/workspace.\n  Many repos inside it.\n  Each task declares which repo(s) are in scope.`);
+  console.log(`AgentOS for Projects v${VERSION}\n\nUsage:\n  agentos init [--new|--existing] [--agents minimal|detected|frontend,qa,release] [--dry-run]\n  agentos status\n  agentos handoff\n  agentos doctor [--fix] [--json]\n  agentos compact [--dry-run]\n  agentos link-obsidian [--vault <path> --dest <folder> --link <note> --create]\n  agentos skills list\n  agentos skills add [--detected] [skill-id|category-pack,...] [--mode summary|full] [--dry-run]\n  agentos agents list\n  agentos agents add <agent-id|template-file> [--name id] [--dry-run]\n  agentos templates import <url-or-file> --type agent|skill --name <id> [--mode summary|full] [--dry-run] [--yes]\n  agentos migrate claude --preserve [--dry-run]\n  agentos prompt [claude|codex|opencode|hermes]\n\nCore rule:\n  One AgentOS per product/workspace.\n  Many repos inside it.\n  Each task declares which repo(s) are in scope.`);
 }
 
 main();

@@ -89,6 +89,42 @@ export declare function skillsAgentOS(options?: any): Promise<{
     dryRun: boolean;
     skills: string[];
     text: string;
+} | {
+    ok: boolean;
+    root: any;
+    skills: string[];
+    text: string;
+}>;
+export declare function agentsAgentOS(options?: any): Promise<{
+    dryRun?: undefined;
+    root?: undefined;
+    ok: boolean;
+    text: string;
+    id?: undefined;
+} | {
+    ok: boolean;
+    root: string;
+    id: any;
+    dryRun: boolean;
+    text: string;
+} | {
+    ok: boolean;
+    root: any;
+    agents: string[];
+    text: string;
+}>;
+export declare function templatesAgentOS(options?: any): Promise<{
+    dryRun?: undefined;
+    root?: undefined;
+    ok: boolean;
+    text: string;
+    review?: undefined;
+} | {
+    ok: boolean;
+    root: string;
+    dryRun: boolean;
+    text: string;
+    review: any[];
 }>;
 export declare function handoffAgentOS(options?: any): Promise<{
     ok: boolean;
