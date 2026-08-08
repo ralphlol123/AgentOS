@@ -11,6 +11,7 @@ export declare function initAgentOS(options?: any): Promise<{
     };
     text: string;
 } | {
+    planned?: undefined;
     mode: any;
     workspaceKind: string;
     repos: any[];
@@ -21,7 +22,6 @@ export declare function initAgentOS(options?: any): Promise<{
         agents: any;
     };
     text: string;
-    planned?: undefined;
 }>;
 export declare function statusAgentOS(options?: any): Promise<{
     ok: boolean;
@@ -62,6 +62,32 @@ export declare function linkObsidianAgentOS(options?: any): Promise<{
     vault: string;
     destination: string;
     linked: string[];
+    text: string;
+}>;
+export declare function migrateClaudeAgentOS(options?: any): Promise<{
+    dryRun?: undefined;
+    ok: boolean;
+    text: string;
+    root?: undefined;
+} | {
+    ok: boolean;
+    root: string;
+    dryRun: boolean;
+    text: string;
+}>;
+export declare function skillsAgentOS(options?: any): Promise<{
+    dryRun?: undefined;
+    root?: undefined;
+    ok: boolean;
+    text: string;
+    mode?: undefined;
+    skills?: undefined;
+} | {
+    ok: boolean;
+    root: string;
+    mode: "full" | "summary";
+    dryRun: boolean;
+    skills: string[];
     text: string;
 }>;
 export declare function handoffAgentOS(options?: any): Promise<{

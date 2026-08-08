@@ -2,65 +2,74 @@
 
 ## Current objective
 
-Maintain AgentOS dogfood state accurately while larger AgentOS implementation work is deferred.
+Finalize the AgentOS Local Skills + Custom Agents sprint implementation on branch `feat/local-skills-custom-agents`.
 
 ## Scope
 
 - Repo: `agentos-for-projects` only.
-- In scope: `.agentos/tasks.md`, `.agentos/handoff.md`, roadmap alignment, current-state clarity.
-- Out of scope: `agentos run`, local skills implementation, Claude legacy migration, custom/local agents implementation, npm publish, and re-installing AgentOS into KargaX.
+- In scope: local skill templates, `agentos skills add`, local skill doctor validation, custom/local agent preservation, optional `project-manager` planning role, `agentos migrate claude --preserve`, default Obsidian destination, EACCES diagnostics, tests, generated `dist/`.
+- Out of scope: `agentos run`, execution orchestration, real npm publish, and re-installing AgentOS into KargaX.
 
 ## Current state
 
-AgentOS core is stable. Latest verified package commit is `c9c9fc8 chore: optimize AgentOS context loading`; local `main` is aligned with `origin/main` before this state-only update.
+Branch: `feat/local-skills-custom-agents`.
 
-Completed product state:
+Implemented:
 
-- TypeScript CLI MVP, init/status/doctor/handoff/prompt/compact/link-obsidian are implemented.
-- npm/pnpm/Bun compatibility, Bun CI, `doctor --json`, YAML parser, package metadata, and dry-run publish flow are implemented.
-- Phase 1 agent model is implemented: minimal delivery team plus detected frontend/backend specialists and on-demand skills index.
-- Token-efficiency hardening is complete and pushed.
+- `agentos skills add [--detected] [skill-id|category-pack,...] [--mode summary|full] [--dry-run]`.
+- Built-in common development skill catalog with compact summary mode by default and full mode opt-in.
+- Local skill materialization under `.agentos/skills/<category>/<skill>/SKILL.md`.
+- `.agentos/skills.md` update with `Details: .agentos/skills/.../SKILL.md` links and on-demand policy.
+- Doctor validation for missing local skill links, unlisted local skill files, and token-heavy local skills.
+- Custom/local agent preservation: declared custom agents with matching `.agentos/agents/<id>.md` are valid and preserved by `doctor --fix`.
+- Optional built-in planning-only `project-manager` role via `planning`, `pm`, or `project-manager` aliases; not enabled by default detected profile.
+- `agentos migrate claude --preserve [--dry-run]` for preserve-but-disable `.claude/agents`, `.claude/settings.local.json`, and `.claude/settings.json`, plus canonical AgentOS `CLAUDE.md` block and `.claude/README.agentos.md`.
+- Default Obsidian destination changed to `Projects/<ProjectName>/AgentOS` when `--dest` is omitted in core API.
+- Link-Obsidian EACCES diagnostics now explain parent-folder ownership/write-permission fixes.
 
-Recent KargaX findings:
-
-- KargaX AgentOS trial showed local skill bodies are useful for non-Hermes engines because a skills index alone does not teach Claude/OpenCode the skill procedure.
-- Full local `SKILL.md` copies can increase token usage; future default should be compact summaries with full mode opt-in.
-- Custom/local agent support is incomplete: `doctor --fix` drops unknown agents such as `project-manager` because the current built-in role model does not preserve undeclared/custom IDs.
-- KargaX Obsidian linking failed for the `app` user when the target folder was owned by `hermes:hermes`; cross-user permissions need clearer guidance/diagnostics.
-- KargaX has been rolled back to `.claude`; AgentOS is no longer active in that workspace for now.
-
-Deferred roadmap state:
-
-- The Obsidian roadmap is the source of truth for deferred larger work.
-- Deferred until usage budget recovers: AgentOS Local Skills + Legacy Claude Migration, custom/local AgentOS agents, planning/project-manager support.
+Claude Code started the implementation but was killed after running too long; the remaining missing pieces were completed manually and verified.
 
 ## Last completed step
 
-Committed the dogfood state-only update as `890e928 chore: update AgentOS dogfood state`, then prepared the next sprint plan without implementing feature code.
+Full verification passed after adding the missing CLI helper, Claude migration command, default Obsidian destination, and migration/default tests.
 
 ## Files changed
 
+- `src/core.ts`
+- `src/cli.ts`
+- `test/core.test.js`
+- `dist/core.d.ts`
+- `dist/core.js`
+- `dist/core.js.map`
+- `dist/cli.js`
+- `dist/cli.js.map`
 - `.agentos/tasks.md`
 - `.agentos/handoff.md`
-- `.hermes/plans/2026-08-08_agentos-local-skills-custom-agents.md`
 
 ## Tests run
 
+- `bun run build` — PASS.
+- `bun run test` — PASS, 42 tests / 0 failures.
+- `bun run check` — PASS.
+- `bun run smoke` — PASS.
+- `bun run test:package-managers` — PASS for npm, pnpm, and Bun tarball installs.
 - `node dist/cli.js doctor` — PASS.
 - `node dist/cli.js status` — PASS.
 - `git diff --check` — PASS.
+- CLI help smoke: `node dist/cli.js help` shows `skills add` and `migrate claude --preserve`.
 
 ## Known warnings / failures
 
-None known in the AgentOS repo after this state-only update. KargaX AgentOS should not be resumed unless Ralph explicitly asks.
+- KargaX AgentOS remains intentionally rolled back; do not use KargaX as a write-path dogfood target unless Ralph explicitly asks.
+- The smoke script still passes an explicit Obsidian destination, so the new default is covered by unit test rather than smoke output.
+- Real npm publish remains blocked until npm package name/account/ownership/version are confirmed.
 
 ## Next exact action
 
-Wait for Ralph's next concrete AgentOS priority. Do not start implementation work, do not resume KargaX AgentOS, and do not start `agentos run` unless explicitly reopened.
+Inspect final diff, commit the sprint branch, push it, then report branch/commit and verification summary.
 
 ## Open decisions
 
+- Whether to merge `feat/local-skills-custom-agents` into `main` immediately or review first.
+- Whether `project-manager` should ever become part of `--agents detected`; current implementation keeps it explicit only.
 - `agentos run` remains on hold unless Ralph explicitly reopens it.
-- KargaX AgentOS remains stopped/rolled back unless Ralph explicitly asks to re-enable it.
-- Local skills/custom agents sprint remains deferred until usage budget recovers and Ralph explicitly resumes it.
-- Real npm publish remains blocked until npm package name/account/ownership/version are confirmed.

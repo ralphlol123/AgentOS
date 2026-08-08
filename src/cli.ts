@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
-import { compactAgentOS, doctorAgentOS, handoffAgentOS, initAgentOS, linkObsidianAgentOS, promptAgentOS, statusAgentOS } from './core.js';
+import { compactAgentOS, doctorAgentOS, handoffAgentOS, initAgentOS, linkObsidianAgentOS, migrateClaudeAgentOS, promptAgentOS, skillsAgentOS, statusAgentOS } from './core.js';
 
 const VERSION = '0.1.0';
 
@@ -54,6 +54,37 @@ async function main() {
       process.exitCode = result.ok ? 0 : 1;
       return;
     }
+    if (command === 'skills') {
+      const [sub, ...rest] = args;
+      if (sub !== 'add') {
+        console.log('Usage: agentos skills add [--detected] [skill-id|category-pack,...] [--mode summary|full] [--dry-run]');
+        process.exitCode = sub ? 1 : 0;
+        return;
+      }
+      const { flags: subFlags, positionals } = parseFlagsAndPositionals(rest);
+      const result = await skillsAgentOS({
+        cwd: process.cwd(),
+        detected: Boolean(subFlags.detected),
+        add: positionals.length ? positionals.join(',') : undefined,
+        mode: subFlags.mode,
+        dryRun: subFlags['dry-run'],
+      });
+      console.log(result.text);
+      process.exitCode = result.ok ? 0 : 1;
+      return;
+    }
+    if (command === 'migrate') {
+      const [target] = args;
+      if (target !== 'claude') {
+        console.log('Usage: agentos migrate claude --preserve [--dry-run]');
+        process.exitCode = target ? 1 : 0;
+        return;
+      }
+      const result = await migrateClaudeAgentOS({ cwd: process.cwd(), preserve: flags.preserve, dryRun: flags['dry-run'] });
+      console.log(result.text);
+      process.exitCode = result.ok ? 0 : 1;
+      return;
+    }
     if (command === 'prompt') {
       const engine = args.find((arg) => !arg.startsWith('-')) || 'generic';
       const result = await promptAgentOS({ cwd: process.cwd(), engine });
@@ -69,7 +100,12 @@ async function main() {
 }
 
 function parseFlags(args: string[]): Record<string, any> {
+  return parseFlagsAndPositionals(args).flags;
+}
+
+function parseFlagsAndPositionals(args: string[]): { flags: Record<string, any>; positionals: string[] } {
   const flags: Record<string, any> = {};
+  const positionals: string[] = [];
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
     if (arg.startsWith('--')) {
@@ -83,9 +119,13 @@ function parseFlags(args: string[]): Record<string, any> {
       } else {
         flags[raw] = true;
       }
-    } else if (arg.startsWith('-')) flags[arg.slice(1)] = true;
+    } else if (arg.startsWith('-')) {
+      flags[arg.slice(1)] = true;
+    } else {
+      positionals.push(arg);
+    }
   }
-  return flags;
+  return { flags, positionals };
 }
 
 async function resolveObsidianOptions(flags: Record<string, any>) {
@@ -116,7 +156,7 @@ async function askDefault(rl: any, question: string, defaultValue: string) {
 }
 
 function printHelp() {
-  console.log(`AgentOS for Projects v${VERSION}\n\nUsage:\n  agentos init [--new|--existing] [--agents minimal|detected|frontend,qa,release] [--dry-run]\n  agentos status\n  agentos handoff\n  agentos doctor [--fix] [--json]\n  agentos compact [--dry-run]\n  agentos link-obsidian [--vault <path> --dest <folder> --link <note> --create]\n  agentos prompt [claude|codex|opencode|hermes]\n\nCore rule:\n  One AgentOS per product/workspace.\n  Many repos inside it.\n  Each task declares which repo(s) are in scope.`);
+  console.log(`AgentOS for Projects v${VERSION}\n\nUsage:\n  agentos init [--new|--existing] [--agents minimal|detected|frontend,qa,release] [--dry-run]\n  agentos status\n  agentos handoff\n  agentos doctor [--fix] [--json]\n  agentos compact [--dry-run]\n  agentos link-obsidian [--vault <path> --dest <folder> --link <note> --create]\n  agentos skills add [--detected] [skill-id|category-pack,...] [--mode summary|full] [--dry-run]\n  agentos migrate claude --preserve [--dry-run]\n  agentos prompt [claude|codex|opencode|hermes]\n\nCore rule:\n  One AgentOS per product/workspace.\n  Many repos inside it.\n  Each task declares which repo(s) are in scope.`);
 }
 
 main();
