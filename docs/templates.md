@@ -14,6 +14,45 @@ templates/
 
 These files are portable source material. Project-local runtime copies live under `.agentos/` and may be customized per workspace.
 
+## Template registry commands
+
+List all repository templates:
+
+```bash
+agentos templates list
+```
+
+Show a template by ID:
+
+```bash
+agentos templates show agent:project-manager
+agentos templates show skill:frontend/ai-slop-design-review
+```
+
+Copy a template into the current project's `.agentos/` runtime context:
+
+```bash
+agentos templates copy agent:security-reviewer --dry-run
+agentos templates copy agent:security-reviewer
+agentos templates copy skill:frontend/ai-slop-design-review
+```
+
+Validate a local template file before copying/importing it:
+
+```bash
+agentos templates validate templates/agents/project-manager.md --type agent
+agentos templates validate templates/skills/frontend/ai-slop-design-review.md --type skill
+```
+
+Template IDs use:
+
+```text
+agent:<agent-name>
+skill:<category>/<skill-name>
+```
+
+`templates copy` writes agents to `.agentos/agents/<id>.md` and skills to `.agentos/skills/<category>/<skill>/SKILL.md`. Agent copies are registered in `.agentos/project.yaml`; skill copies update `.agentos/skills.md`.
+
 ## Agent templates
 
 Current built-in agent template files:

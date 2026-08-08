@@ -111,6 +111,10 @@ agentos skills list
 agentos skills add [--detected] [skill-id|category-pack,...] [--mode summary|full] [--dry-run]
 agentos agents list
 agentos agents add <agent-id|template-file> [--name id] [--dry-run]
+agentos templates list
+agentos templates show <id>
+agentos templates copy <id> [--dry-run]
+agentos templates validate <file> --type agent|skill
 agentos templates import <url-or-file> --type agent|skill --name <id> [--mode summary|full] [--dry-run] [--yes]
 agentos migrate claude --preserve [--dry-run]
 agentos prompt [claude|codex|opencode|hermes]
@@ -177,7 +181,18 @@ templates/schemas/
 templates/examples/
 ```
 
-Use them through CLI commands:
+Use the registry commands to discover and materialize them:
+
+```bash
+agentos templates list
+agentos templates show agent:project-manager
+agentos templates copy agent:project-manager --dry-run
+agentos templates copy agent:project-manager
+agentos templates copy skill:frontend/ai-slop-design-review
+agentos templates validate templates/agents/project-manager.md --type agent
+```
+
+Agent convenience commands remain available:
 
 ```bash
 agentos agents list

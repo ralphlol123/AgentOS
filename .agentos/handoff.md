@@ -2,71 +2,70 @@
 
 ## Current objective
 
-Finalize the AgentOS docs and release-readiness sprint on branch `feat/docs-and-release-readiness`.
+Finalize product-quality polish for the AgentOS template registry on branch `feat/template-registry-polish`.
 
 ## Scope
 
 - Repo: `agentos-for-projects` only.
-- In scope: README, docs, release checklist, packed-install dogfood evidence, AgentOS dogfood state.
-- Out of scope: real npm publish, new runtime features, `agentos run`, KargaX AgentOS re-enable, and merging PRs without Ralph's approval.
+- In scope: template registry CLI/API, tests, docs, generated dist, AgentOS state, safe throwaway-repo smoke.
+- Out of scope: real npm publish, `agentos run`, KargaX AgentOS re-enable, and any non-throwaway workspace write-path test.
 
 ## Current state
 
-Branch: `feat/docs-and-release-readiness`, created from merged `main` after PR #1 and PR #2.
+Branch: `feat/template-registry-polish`, created from verified `main` after PR #3.
 
 Implemented:
 
-- Rewrote `README.md` to cover current CLI behavior:
-  - `init`, `status`, `handoff`, `doctor`, `compact`, `link-obsidian`, `prompt`;
-  - `skills list/add`;
-  - `agents list/add`;
-  - `templates import`;
-  - `migrate claude --preserve`;
-  - install, development, package, and publish flow.
-- Added docs:
+- TDD RED tests added and verified failing for:
+  - `templates list`;
+  - `templates show <id>`;
+  - `templates copy <id> [--dry-run]`;
+  - `templates validate <file> --type agent|skill`.
+- Core implementation added in `src/core.ts`:
+  - file-backed registry discovery from packaged `templates/` via `import.meta.url` package root resolution;
+  - IDs: `agent:<name>` and `skill:<category>/<name>`;
+  - show template content;
+  - copy agents into `.agentos/agents/<id>.md` and register them in `project.yaml`;
+  - copy skills into `.agentos/skills/<category>/<skill>/SKILL.md` and update `.agentos/skills.md`;
+  - validate required sections for agent/skill files.
+- CLI implementation added in `src/cli.ts`:
+  - `agentos templates list`;
+  - `agentos templates show <id>`;
+  - `agentos templates copy <id> [--dry-run]`;
+  - `agentos templates validate <file> --type agent|skill`.
+- README and docs updated:
+  - `README.md`;
   - `docs/quickstart.md`;
-  - `docs/templates.md`;
-  - `docs/safe-imports.md`;
-  - `docs/release-readiness.md`.
-- Release readiness doc includes a robust tarball lookup with `find` because direct `npm pack` stdout capture can include lifecycle output.
-
-## Dogfood install evidence
-
-Real packed global install dogfood passed in a clean temp project:
-
-- `npm pack --pack-destination <tmp>` produced `agentos-for-projects-0.1.0.tgz`.
-- Installed with `npm install -g --prefix <tmp-global> <tarball>`.
-- Verified installed package contains template files:
-  - `templates/agents/project-manager.md`;
-  - `templates/skills/frontend/ai-slop-design-review.md`.
-- Ran installed `agentos` from PATH:
-  - `agentos --version` -> `0.1.0`;
-  - `agentos init --new`;
-  - `agentos agents list`;
-  - `agentos skills list`;
-  - `agentos templates import sample-skill.md --type skill --name sample-skill --dry-run`;
-  - `agentos templates import sample-skill.md --type skill --name sample-skill --yes`;
-  - `agentos doctor` -> OK.
+  - `docs/templates.md`.
 
 ## Verification run
 
-Passed on `feat/docs-and-release-readiness`:
-
-- `bun run check`;
-- `bun run test` — 47 tests / 0 failures;
-- `bun run smoke`;
-- `bun run test:package-managers` — PASS npm, pnpm, Bun;
-- `npm publish --dry-run --access public` — dry-run completed and tarball includes `templates/`;
-- `node dist/cli.js doctor` — OK;
-- `node dist/cli.js status` — OK;
-- `git diff --check` — PASS.
-
-## Known warnings / failures
-
-- First dogfood attempt used direct `npm pack` stdout capture and failed because lifecycle output polluted the tarball path. Fixed by documenting and using `find` to locate the `.tgz`.
-- `npm publish --dry-run --access public` warns when not logged in to npm; this is non-blocking for dry-run tarball verification.
-- Real publish still requires explicit owner approval, npm account/package ownership confirmation, and version confirmation.
+- Initial RED run: `bun run test` failed exactly on the three new registry tests.
+- GREEN run: `bun run test` passed with 50 tests / 0 failures.
+- Safe throwaway-repo smoke passed with packed/installed CLI:
+  - packed package with `npm pack`;
+  - installed globally into temp npm prefix;
+  - created `/tmp/.../safe-throwaway-repo` with seed README/package.json and git commit;
+  - ran installed `agentos init --existing`;
+  - ran `templates list`, `templates show agent:project-manager`, `templates copy agent:project-manager`, `templates copy skill:frontend/ai-slop-design-review`, validation for copied agent/skill, import dry-run/write for a sample skill, `doctor`, and `status`;
+  - verified copied/imported files exist and project/skills indexes were updated;
+  - terminal output ended with `SAFE_THROWAWAY_REPO_SMOKE_PASS`.
+- Full verification passed:
+  - `bun run check`;
+  - `bun run test` — 50 tests / 0 failures;
+  - `bun run smoke`;
+  - `bun run test:package-managers` — PASS npm, pnpm, Bun;
+  - `npm publish --dry-run --access public`;
+  - `node dist/cli.js doctor` — OK;
+  - `node dist/cli.js status` — OK;
+  - `git diff --check` — PASS.
 
 ## Next exact action
 
-Review final diff, commit exact intended docs/state files, push `feat/docs-and-release-readiness`, verify remote SHA, and report PR URL.
+Review final diff, commit exact intended paths, push `feat/template-registry-polish`, verify remote SHA, and report PR URL.
+
+## Known caveats
+
+- Throwaway repo git status contains expected untracked AgentOS files and command-output logs; it was a temporary smoke workspace only.
+- Real publish remains blocked until explicit npm/package/version approval.
+- KargaX remains intentionally off-limits for AgentOS write-path testing unless Ralph explicitly reopens it.
