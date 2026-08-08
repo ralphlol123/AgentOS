@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, writeFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
-import { initAgentOS, statusAgentOS, handoffAgentOS, doctorAgentOS, promptAgentOS, compactAgentOS, linkObsidianAgentOS } from '../dist/core.js';
+import { initAgentOS, statusAgentOS, handoffAgentOS, doctorAgentOS, promptAgentOS, compactAgentOS, linkObsidianAgentOS, migrateClaudeAgentOS, skillsAgentOS } from '../dist/core.js';
 
 async function exists(path) {
   try {
@@ -139,6 +139,79 @@ test('doctor warns when agent capabilities or skills index are inconsistent', as
   assert.match(doctor.text, /skills index missing: \.agentos\/skills\.md/);
   assert.match(doctor.text, /agents\.capabilities\.qa points to qa, but \.agentos\/agents\/qa\.md is missing/);
   assert.match(doctor.text, /\.agentos\/agents\/qa-engineer\.md is not listed in agents\.enabled/);
+});
+
+
+test('doctor treats a declared custom local agent with an existing agent file as valid', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
+  const projectPath = join(root, '.agentos/project.yaml');
+  let projectYaml = await readFile(projectPath, 'utf8');
+  projectYaml = projectYaml.replace(/enabled:\n((?:\s+- .+\n)+)/, (m, list) => `enabled:\n${list}    - security-reviewer\n`);
+  await writeFile(projectPath, projectYaml);
+  await writeFile(join(root, '.agentos/agents/security-reviewer.md'), '# Security Reviewer\n\nMandate: custom security review.\n');
+
+  const doctor = await doctorAgentOS({ cwd: root });
+
+  assert.equal(doctor.ok, true);
+  assert.doesNotMatch(doctor.text, /unknown agent/);
+  assert.doesNotMatch(doctor.text, /security-reviewer\.md is missing/);
+});
+
+test('doctor warns when a declared custom local agent has no matching agent file', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
+  const projectPath = join(root, '.agentos/project.yaml');
+  let projectYaml = await readFile(projectPath, 'utf8');
+  projectYaml = projectYaml.replace(/enabled:\n((?:\s+- .+\n)+)/, (m, list) => `enabled:\n${list}    - security-reviewer\n`);
+  await writeFile(projectPath, projectYaml);
+
+  const doctor = await doctorAgentOS({ cwd: root });
+
+  assert.match(doctor.text, /agents\.enabled references security-reviewer, but \.agentos\/agents\/security-reviewer\.md is missing/);
+});
+
+test('doctor --fix preserves declared custom local agents and their capability mapping', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
+  const projectPath = join(root, '.agentos/project.yaml');
+  let projectYaml = await readFile(projectPath, 'utf8');
+  projectYaml = projectYaml.replace(/enabled:\n((?:\s+- .+\n)+)/, (m, list) => `enabled:\n${list}    - security-reviewer\n`);
+  projectYaml = projectYaml.replace(/capabilities:\n((?:\s+\S+: \S+\n)+)/, (m, list) => `capabilities:\n${list}    security: security-reviewer\n`);
+  await writeFile(projectPath, projectYaml);
+  await writeFile(join(root, '.agentos/agents/security-reviewer.md'), '# Security Reviewer\n\nMandate: custom security review.\n');
+
+  const fixed = await doctorAgentOS({ cwd: root, fix: true });
+  assert.equal(fixed.ok, true);
+
+  const updated = await readFile(projectPath, 'utf8');
+  assert.match(updated, /- security-reviewer/);
+  assert.match(updated, /security: security-reviewer/);
+  const agentFile = await readFile(join(root, '.agentos/agents/security-reviewer.md'), 'utf8');
+  assert.match(agentFile, /custom security review/);
+});
+
+test('project-manager is an optional built-in planning-only role, not enabled by default', async () => {
+  const detectedRoot = await tempProject();
+  await initAgentOS({ cwd: detectedRoot, mode: 'new', yes: true });
+  assert.equal(await exists(join(detectedRoot, '.agentos/agents/project-manager.md')), false);
+  const detectedYaml = await readFile(join(detectedRoot, '.agentos/project.yaml'), 'utf8');
+  assert.doesNotMatch(detectedYaml, /project-manager/);
+
+  const planningRoot = await tempProject();
+  await initAgentOS({ cwd: planningRoot, mode: 'new', yes: true, agents: 'planning,implementation,qa' });
+  const projectYaml = await readFile(join(planningRoot, '.agentos/project.yaml'), 'utf8');
+  assert.match(projectYaml, /- project-manager/);
+  assert.match(projectYaml, /planning: project-manager/);
+  const agentMdContent = await readFile(join(planningRoot, '.agentos/agents/project-manager.md'), 'utf8');
+  assert.match(agentMdContent, /does not implement, commit, or push/);
+  assert.match(agentMdContent, /repo scope/i);
+  assert.match(agentMdContent, /protected paths/i);
+
+  const pmAliasRoot = await tempProject();
+  await initAgentOS({ cwd: pmAliasRoot, mode: 'new', yes: true, agents: 'pm,qa' });
+  const pmYaml = await readFile(join(pmAliasRoot, '.agentos/project.yaml'), 'utf8');
+  assert.match(pmYaml, /- project-manager/);
 });
 
 
@@ -542,4 +615,165 @@ test('link-obsidian treats --link folder as default note destination', async () 
   assert.equal(result.ok, true);
   assert.match(result.linked[0], /^Projects\/LinkedFolder\//);
   assert.equal(await exists(join(vault, result.linked[0])), true);
+});
+
+test('link-obsidian defaults to Projects/<ProjectName>/AgentOS when dest is omitted', async () => {
+  const root = await tempProject();
+  const vault = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true });
+  const result = await linkObsidianAgentOS({ cwd: root, vault, create: true, dryRun: true });
+  assert.equal(result.ok, true);
+  assert.match(result.destination, /^Projects\/Agentos Test .+\/AgentOS$/);
+  assert.match(result.text, /Destination: Projects\/Agentos Test .+\/AgentOS/);
+});
+
+test('migrate claude --preserve disables active .claude files and patches CLAUDE.md', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'existing', yes: true });
+  await mkdirp(join(root, '.claude/agents'));
+  await writeFile(join(root, '.claude/agents/frontend-engineer.md'), '# Legacy Frontend\n');
+  await writeFile(join(root, '.claude/settings.local.json'), '{"secret":"do-not-read"}\n');
+  await writeFile(join(root, 'CLAUDE.md'), '# Existing Claude\n');
+
+  const result = await migrateClaudeAgentOS({ cwd: root, preserve: true });
+  assert.equal(result.ok, true);
+  assert.equal(await exists(join(root, '.claude/agents')), false);
+  assert.equal(await exists(join(root, '.claude/settings.local.json')), false);
+  assert.equal(await exists(join(root, '.claude/README.agentos.md')), true);
+  const files = await readdir(join(root, '.claude'));
+  assert.ok(files.some((name) => /^agents\.agentos-legacy-/.test(name)));
+  assert.ok(files.some((name) => /^settings\.local\.json\.agentos-legacy-/.test(name)));
+  const claude = await readFile(join(root, 'CLAUDE.md'), 'utf8');
+  assert.match(claude, /AgentOS canonical Claude Code context/);
+  assert.match(claude, /Do not use `\.claude\/agents\*`/);
+});
+
+test('migrate claude --preserve dry-run is non-mutating and requires --preserve', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'existing', yes: true });
+  await mkdirp(join(root, '.claude/agents'));
+  const missingPreserve = await migrateClaudeAgentOS({ cwd: root });
+  assert.equal(missingPreserve.ok, false);
+  assert.match(missingPreserve.text, /Use --preserve/);
+  const dry = await migrateClaudeAgentOS({ cwd: root, preserve: true, dryRun: true });
+  assert.equal(dry.ok, true);
+  assert.match(dry.text, /dry run/);
+  assert.equal(await exists(join(root, '.claude/agents')), true);
+  assert.equal(await exists(join(root, '.claude/README.agentos.md')), false);
+});
+
+
+test('skill templates default to compact summary mode and support opt-in full mode', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
+
+  await skillsAgentOS({ cwd: root, add: 'systematic-debugging' });
+  const summary = await readFile(join(root, '.agentos/skills/core/systematic-debugging/SKILL.md'), 'utf8');
+  assert.match(summary, /^---\nname: systematic-debugging\ncategory: core\nmode: summary\n---/);
+  assert.match(summary, /Trigger:/);
+  assert.match(summary, /## Procedure/);
+  assert.match(summary, /## Verification/);
+  assert.doesNotMatch(summary, /## Notes/);
+
+  const fullRoot = await tempProject();
+  await initAgentOS({ cwd: fullRoot, mode: 'new', yes: true, agents: 'minimal' });
+  await skillsAgentOS({ cwd: fullRoot, add: 'systematic-debugging', mode: 'full' });
+  const full = await readFile(join(fullRoot, '.agentos/skills/core/systematic-debugging/SKILL.md'), 'utf8');
+  assert.match(full, /mode: full/);
+  assert.match(full, /## Notes/);
+  assert.ok(full.length > summary.length);
+});
+
+test('skills add with a specific skill id writes only that skill and updates the skills index', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
+
+  const result = await skillsAgentOS({ cwd: root, add: 'ai-slop-design-review' });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.skills, ['ai-slop-design-review']);
+  assert.equal(await exists(join(root, '.agentos/skills/frontend/ai-slop-design-review/SKILL.md')), true);
+  assert.equal(await exists(join(root, '.agentos/skills/core')), false);
+
+  const skillsMd = await readFile(join(root, '.agentos/skills.md'), 'utf8');
+  assert.match(skillsMd, /Policy: on-demand/);
+  assert.match(skillsMd, /Details: \.agentos\/skills\/frontend\/ai-slop-design-review\/SKILL\.md/);
+});
+
+test('skills add supports category-pack aliases', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
+  const result = await skillsAgentOS({ cwd: root, add: 'github-pack' });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.skills.slice().sort(), ['github-actions-verification', 'github-code-review', 'github-pr-workflow']);
+});
+
+test('skills add rejects unknown skill ids loudly', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
+  await assert.rejects(
+    () => skillsAgentOS({ cwd: root, add: 'not-a-real-skill' }),
+    /Unknown skill\(s\): not-a-real-skill/,
+  );
+});
+
+test('skills add --dry-run reports planned writes without touching the filesystem', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
+  const result = await skillsAgentOS({ cwd: root, add: 'systematic-debugging', dryRun: true });
+  assert.match(result.text, /Would write/);
+  assert.equal(await exists(join(root, '.agentos/skills/core/systematic-debugging/SKILL.md')), false);
+});
+
+test('skills add --detected materializes core, frontend, backend, fullstack, and github skills for a full-stack multi-repo', async () => {
+  const root = await tempProject();
+  await mkdirp(join(root, 'frontend'));
+  await writeFile(join(root, 'frontend/package.json'), JSON.stringify({ scripts: { build: 'nuxt build' }, dependencies: { nuxt: '^4.0.0' } }, null, 2));
+  await mkdirp(join(root, 'backend'));
+  await writeFile(join(root, 'backend/package.json'), JSON.stringify({ scripts: { build: 'nest build' }, dependencies: { '@nestjs/core': '^10.0.0' } }, null, 2));
+  await initAgentOS({ cwd: root, mode: 'existing', yes: true });
+  spawnSync('git', ['init'], { cwd: root, encoding: 'utf8' });
+
+  const result = await skillsAgentOS({ cwd: root, detected: true });
+  assert.equal(result.ok, true);
+  const expectedByCategory = {
+    core: 'systematic-debugging',
+    frontend: 'nuxt-e2e-testing',
+    backend: 'nestjs-feature-implementation',
+    fullstack: 'full-system-rehearsal',
+    github: 'github-pr-workflow',
+  };
+  for (const [category, id] of Object.entries(expectedByCategory)) {
+    assert.equal(await exists(join(root, `.agentos/skills/${category}/${id}/SKILL.md`)), true, `${id} should be materialized`);
+  }
+  const skillsMd = await readFile(join(root, '.agentos/skills.md'), 'utf8');
+  assert.match(skillsMd, /Details: \.agentos\/skills\/core\/systematic-debugging\/SKILL\.md/);
+});
+
+test('skill catalog contains no project-specific skill ids', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
+  await skillsAgentOS({ cwd: root, add: 'core-pack,frontend-pack,backend-pack,fullstack-pack,github-pack' });
+
+  const { readdir } = await import('node:fs/promises');
+  async function walk(dir) {
+    const out = [];
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) out.push(...await walk(join(dir, entry.name)));
+      else out.push(join(dir, entry.name));
+    }
+    return out;
+  }
+  const files = await walk(join(root, '.agentos/skills'));
+  const joined = files.join('\n').toLowerCase();
+  assert.doesNotMatch(joined, /photobooth|kargax/);
+  assert.ok(files.length >= 19, `expected at least 19 skill files, got ${files.length}`);
+});
+
+test('CLI skills add --detected materializes skills for a project', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
+  const result = spawnSync(process.execPath, [join(process.cwd(), 'dist/cli.js'), 'skills', 'add', '--detected'], { cwd: root, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /AgentOS skills add/);
+  assert.equal(await exists(join(root, '.agentos/skills/core/systematic-debugging/SKILL.md')), true);
 });

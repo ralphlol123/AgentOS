@@ -1,4 +1,4 @@
-import { access, copyFile, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { access, copyFile, mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -172,7 +172,7 @@ export async function linkObsidianAgentOS(options: any = {}) {
   const rawVault = String(options.vault || '').trim();
   if (!rawVault) return { ok: false, text: 'AgentOS link-obsidian: FAIL\nMissing --vault <path>.' };
   const vault = resolve(rawVault);
-  const destination = normalizeVaultRelativePath(options.dest || `Projects/${title(projectName).replace(/\s+/g, ' ')}`);
+  const destination = normalizeVaultRelativePath(options.dest || `Projects/${title(projectName).replace(/\s+/g, ' ')}/AgentOS`);
   const rawLink = options.link ? normalizeVaultRelativePath(options.link) : '';
   const create = Boolean(options.create);
   const dryRun = Boolean(options.dryRun);
@@ -206,22 +206,489 @@ ${linked.map((n) => `- ${n}`).join('\n')}`,
   ];
 
   if (!dryRun) {
-    await mkdir(join(root, '.agentos'), { recursive: true });
-    await writeFile(join(root, '.agentos/knowledge.md'), knowledge, 'utf8');
-    await writeFile(join(root, '.agentos/project.yaml'), projectPatched, 'utf8');
-    for (const note of linked) {
-      const notePath = join(vault, note);
-      if (!await exists(notePath)) {
-        await mkdir(dirname(notePath), { recursive: true });
-        await writeFile(notePath, obsidianNoteTemplate(note, projectName, linked), 'utf8');
+    try {
+      await mkdir(join(root, '.agentos'), { recursive: true });
+      await writeFile(join(root, '.agentos/knowledge.md'), knowledge, 'utf8');
+      await writeFile(join(root, '.agentos/project.yaml'), projectPatched, 'utf8');
+      for (const note of linked) {
+        const notePath = join(vault, note);
+        if (!await exists(notePath)) {
+          await mkdir(dirname(notePath), { recursive: true });
+          await writeFile(notePath, obsidianNoteTemplate(note, projectName, linked), 'utf8');
+        }
       }
+      await fixAgentOSAdapters(root);
+      const doctor = await doctorAgentOS({ cwd: root });
+      lines.push('', doctor.text);
+    } catch (error) {
+      if (error && error.code === 'EACCES') {
+        return { ok: false, vault, destination, linked, text: obsidianPermissionErrorText(error, vault, destination) };
+      }
+      throw error;
     }
-    await fixAgentOSAdapters(root);
-    const doctor = await doctorAgentOS({ cwd: root });
-    lines.push('', doctor.text);
   }
 
   return { ok: true, vault, destination, linked, text: lines.join('\n') };
+}
+
+function obsidianPermissionErrorText(error, vault, destination) {
+  const path = error.path || join(vault, destination);
+  return [
+    'AgentOS link-obsidian: FAIL',
+    `Permission denied creating or writing: ${path}`,
+    '',
+    'Check ownership/write permissions of the target Obsidian parent folder.',
+    'For WSL/app-user workspaces, run AgentOS as the same user that owns the Obsidian project folder or make the destination writable by that user.',
+    `Target destination: ${join(vault, destination)}`,
+  ].join('\n');
+}
+
+export async function migrateClaudeAgentOS(options: any = {}) {
+  const root = await findAgentOSRoot(options.cwd ?? process.cwd());
+  if (!root) return { ok: false, text: 'AgentOS migrate claude: FAIL\nNo .agentos directory found.' };
+  if (!options.preserve) return { ok: false, text: 'AgentOS migrate claude: FAIL\nUse --preserve to keep existing .claude files as legacy backups.' };
+  const dryRun = Boolean(options.dryRun);
+  const stamp = timestampForFilename(new Date());
+  const moves = [
+    ['.claude/agents', `.claude/agents.agentos-legacy-${stamp}`],
+    ['.claude/settings.local.json', `.claude/settings.local.json.agentos-legacy-${stamp}`],
+    ['.claude/settings.json', `.claude/settings.json.agentos-legacy-${stamp}`],
+  ];
+  const lines = [`AgentOS migrate claude${dryRun ? ' dry run' : ''}`, `Root: ${root}`, 'Mode: preserve legacy .claude files', ''];
+  await mkdir(join(root, '.claude'), { recursive: true });
+  for (const [srcRel, dstRel] of moves) {
+    const src = join(root, srcRel);
+    if (!await exists(src)) continue;
+    const dst = await uniqueLegacyPath(root, dstRel);
+    lines.push(`${dryRun ? 'Would move' : 'Moved'}: ${srcRel} -> ${relative(root, dst)}`);
+    if (!dryRun) await rename(src, dst);
+  }
+  const readmeRel = '.claude/README.agentos.md';
+  lines.push(`${dryRun ? 'Would write' : 'Wrote'}: ${readmeRel}`);
+  lines.push(`${dryRun ? 'Would patch' : 'Patched'}: CLAUDE.md`);
+  if (!dryRun) {
+    await writeFile(join(root, readmeRel), claudeLegacyReadme(), 'utf8');
+    await ensureClaudeCanonicalBlock(join(root, 'CLAUDE.md'));
+  }
+  return { ok: true, root, dryRun, text: lines.join('\n') };
+}
+
+async function uniqueLegacyPath(root, rel) {
+  let candidate = join(root, rel);
+  let index = 2;
+  while (await exists(candidate)) {
+    candidate = join(root, `${rel}.${index}`);
+    index += 1;
+  }
+  return candidate;
+}
+
+function claudeLegacyReadme() {
+  return `# Claude Legacy Context\n\nThis workspace is configured to use AgentOS as the canonical project context.\n\nLegacy Claude Code files were preserved with \`.agentos-legacy-<timestamp>\` suffixes so they can be inspected or restored manually. Do not treat legacy files as current project instructions unless Ralph explicitly asks to roll back from AgentOS.\n`;
+}
+
+async function ensureClaudeCanonicalBlock(path) {
+  const block = claudeCanonicalBlock();
+  const content = await safeRead(path);
+  if (content.includes('AgentOS canonical Claude Code context')) return;
+  await writeFile(path, content.trim() ? `${block}\n\n${content.trim()}\n` : block, 'utf8');
+}
+
+function claudeCanonicalBlock() {
+  return `# AgentOS canonical Claude Code context\n\nUse AgentOS as the source of truth for this workspace. Read \`AGENTS.md\`, \`.agentos/project.yaml\`, \`.agentos/memory.md\`, \`.agentos/handoff.md\`, \`.agentos/tasks.md\`, \`.agentos/skills.md\`, and only the relevant repo/agent/engine/skill files for the assigned task.\n\nDo not use \`.claude/agents*\` or \`.claude/settings*.json*\` as canonical project instructions. Those files are preserved legacy fallback/reference only.\n`;
+}
+
+export async function skillsAgentOS(options: any = {}) {
+  const root = await findAgentOSRoot(options.cwd ?? process.cwd());
+  if (!root) return { ok: false, text: 'AgentOS skills add: FAIL\nNo .agentos directory found.' };
+  const mode: 'summary' | 'full' = options.mode === 'full' ? 'full' : 'summary';
+  const dryRun = Boolean(options.dryRun);
+
+  const repos = parseReposFromProjectYaml(await safeRead(join(root, '.agentos/project.yaml')), { includeRoot: true });
+  const hasGit = await exists(join(root, '.git'));
+  const ids = resolveRequestedSkillIds(options, repos, hasGit);
+  const unknown = ids.filter((id) => !SKILL_BY_ID[id]);
+  if (unknown.length) throw new Error(`Unknown skill(s): ${unknown.join(', ')}. Run \`agentos skills list\` to see available skills and category packs.`);
+
+  const skills = ids.map((id) => SKILL_BY_ID[id]);
+  const lines = [`AgentOS skills add${dryRun ? ' dry run' : ''}`, `Root: ${root}`, `Mode: ${mode}`, ''];
+  for (const skill of skills) {
+    const relPath = skillRelPath(skill);
+    lines.push(`${dryRun ? 'Would write' : 'Wrote'}: ${relPath}`);
+    if (!dryRun) {
+      await mkdir(dirname(join(root, relPath)), { recursive: true });
+      await writeFile(join(root, relPath), renderSkillTemplate(skill, mode), 'utf8');
+    }
+  }
+
+  if (!dryRun) {
+    const skillsMdPath = join(root, '.agentos/skills.md');
+    const existing = await safeRead(skillsMdPath);
+    await writeFile(skillsMdPath, await ensureLocalSkillsSection(root, existing), 'utf8');
+    lines.push('Updated: .agentos/skills.md');
+  } else {
+    lines.push('Would update: .agentos/skills.md');
+  }
+
+  return { ok: true, root, mode, dryRun, skills: skills.map((s) => s.id), text: lines.join('\n') };
+}
+
+type SkillCategory = 'core' | 'frontend' | 'backend' | 'fullstack' | 'github';
+
+interface SkillDefinition {
+  id: string;
+  category: SkillCategory;
+  title: string;
+  summary: string;
+  trigger: string;
+  procedure: string[];
+  verification: string[];
+  fullNotes: string[];
+}
+
+const SKILL_CATALOG: SkillDefinition[] = [
+  {
+    id: 'systematic-debugging', category: 'core', title: 'Systematic Debugging',
+    summary: 'use for unclear bugs or inconsistent reproduction.',
+    trigger: "a bug's root cause is unclear or reproduction is inconsistent.",
+    procedure: [
+      'Reproduce the failure with the smallest possible input before changing any code.',
+      'Form a specific hypothesis about the cause; do not guess-and-check broadly.',
+      'Add logging/assertions or use a debugger to confirm or reject the hypothesis with real evidence.',
+      'Fix the confirmed root cause, not just the symptom.',
+      'Remove temporary debugging instrumentation before finishing.',
+    ],
+    verification: ['Re-run the original failing case and confirm it now passes.', 'Run the existing test suite to check for regressions.'],
+    fullNotes: ['Prefer binary search (bisecting commits/inputs) over linear scanning when the failure is intermittent.', 'Write down the hypothesis and the evidence that confirmed/rejected it so the fix can be reviewed.'],
+  },
+  {
+    id: 'test-driven-development', category: 'core', title: 'Test-Driven Development',
+    summary: 'use when adding or changing behavior.',
+    trigger: 'adding or changing behavior that can be exercised by an automated test.',
+    procedure: [
+      'Write a failing test that encodes the new/changed behavior before writing implementation code.',
+      'Run the test and confirm it fails for the expected reason (RED).',
+      'Write the minimum implementation needed to make the test pass (GREEN).',
+      'Refactor with the test suite green, without changing behavior.',
+    ],
+    verification: ['Run the test suite and confirm the new test passes along with all existing tests.'],
+    fullNotes: ['A RED test that fails for the wrong reason (e.g. a typo) is not a valid RED step — fix the test itself first.', 'Keep each RED/GREEN cycle small; commit-sized increments make review easier.'],
+  },
+  {
+    id: 'shared-repo-git-safety', category: 'core', title: 'Shared-Repo Git Safety',
+    summary: 'use before commit/push/merge in shared repos.',
+    trigger: 'running any git command that rewrites history or touches files you did not author this session, especially in shared/team repos.',
+    procedure: [
+      'Run `git status` before any destructive operation (checkout/reset/clean/restore) to see what would be affected.',
+      'Never force-push to a shared branch without explicit approval.',
+      'Stash or commit unrelated in-progress work before switching branches or rebasing.',
+      'Review a broad `git add` with `git status`/`git diff --staged` before committing to avoid pulling in unrelated or secret files.',
+    ],
+    verification: ['`git status --short --branch` shows only the intended changes before commit/push.'],
+    fullNotes: ['Prefer `git revert` over `git reset --hard`/force-push once a commit is shared with others.', 'Treat `--no-verify` and `--no-gpg-sign` as last resorts; investigate hook failures instead of bypassing them.'],
+  },
+  {
+    id: 'agent-output-verification', category: 'core', title: 'Agent Output Verification',
+    summary: 'use before trusting another agent\'s "done" report.',
+    trigger: 'another agent, subagent, or automated report claims work is done.',
+    procedure: [
+      'Do not trust a "done"/"tests pass" claim at face value; re-run the actual command yourself.',
+      'Check the real file/git/terminal state (diff, file contents, test output) rather than the summary text.',
+      'Confirm the change addresses the original request, not just that something changed.',
+    ],
+    verification: ['Independently reproduce the reported test/build result and confirm the diff matches the claimed change.'],
+    fullNotes: ['Subagent summaries describe intent, not guaranteed outcome — verify before reporting up the chain.'],
+  },
+  {
+    id: 'requesting-code-review', category: 'core', title: 'Requesting Code Review',
+    summary: 'use for pre-commit/pre-merge review.',
+    trigger: 'asking a human or another agent to review a change.',
+    procedure: [
+      'Run the full local verification suite (build/lint/test) and fix failures before requesting review.',
+      'Write a summary of what changed and why, not just what the diff shows.',
+      'Call out any known trade-offs, skipped edge cases, or follow-up work explicitly.',
+      'Keep the diff scoped to the stated task; split out unrelated cleanup into a separate change.',
+    ],
+    verification: ['Review checklist: verification commands run and passing; summary written; scope matches the request.'],
+    fullNotes: ['A reviewer without your context should be able to understand the "why" from the summary alone.'],
+  },
+  {
+    id: 'secret-scanner-safe-edits', category: 'core', title: 'Secret-Scanner-Safe Edits',
+    summary: 'use before touching config/env/credential files.',
+    trigger: 'a change touches config, env, or credential-adjacent files, or before staging a broad `git add`.',
+    procedure: [
+      'Never read, edit, or commit `.env` files or credential files without explicit approval.',
+      'Before staging with a broad `git add`, inspect `git status` for unexpected files (keys, tokens, dumps).',
+      'If a secret-looking value must be referenced, use a placeholder/env-var name in code, never the literal value.',
+      'If a secret is discovered already committed, flag it to the user instead of silently rewriting history.',
+    ],
+    verification: ['`git diff --staged` contains no literal credentials, tokens, or private keys.'],
+    fullNotes: ['Rotating a leaked secret is a security decision for the user/owner to make, not something to do unilaterally.'],
+  },
+  {
+    id: 'grounded-codebase-docs', category: 'core', title: 'Grounded Codebase Docs',
+    summary: 'use when writing/updating docs about code behavior.',
+    trigger: 'writing or updating documentation (README, CLAUDE.md, comments) about how the code behaves.',
+    procedure: [
+      'Read the actual current implementation before describing behavior; do not describe intended/legacy behavior from memory.',
+      'Prefer linking to file:line over duplicating logic in prose that can drift out of sync.',
+      'Verify commands/examples in the doc by actually running them.',
+    ],
+    verification: ['Every command and code reference in the doc has been executed/checked against the current codebase.'],
+    fullNotes: ['Docs that describe aspirational behavior instead of real behavior are worse than no docs — they actively mislead.'],
+  },
+  {
+    id: 'frontend-build-verification', category: 'frontend', title: 'Frontend Build Verification',
+    summary: 'use before declaring frontend work done.',
+    trigger: 'declaring frontend work done.',
+    procedure: [
+      'Run the project build command and confirm it exits cleanly.',
+      'Run type-checking/linting if configured.',
+      'Load the affected route/component in a real browser and check the console for errors.',
+    ],
+    verification: ['Build command exits 0; no new console errors on the affected pages.'],
+    fullNotes: ['A green build does not guarantee a working UI — always do a real browser pass for user-facing changes.'],
+  },
+  {
+    id: 'nuxt-e2e-testing', category: 'frontend', title: 'Nuxt E2E Testing',
+    summary: 'use for Nuxt route/browser behavior.',
+    trigger: 'Nuxt route/browser behavior changes.',
+    procedure: [
+      'Start the Nuxt dev/preview server.',
+      'Exercise the changed route/component through real navigation and interaction, not just unit tests.',
+      'Check network requests and console for errors during the flow.',
+      'Run the project e2e test command if one is configured.',
+    ],
+    verification: ['Manual or automated e2e pass on the changed route with no console/network errors.'],
+    fullNotes: ['Prefer testing the golden path plus at least one edge case (empty state, error state) over the golden path alone.'],
+  },
+  {
+    id: 'ai-slop-design-review', category: 'frontend', title: 'AI-Slop Design Review',
+    summary: 'use for UI polish/design review.',
+    trigger: 'UI polish/design review, especially on AI-generated or AI-assisted UI changes.',
+    procedure: [
+      'Compare against the existing design system/spacing/typography scale instead of introducing new ad hoc values.',
+      'Check responsive behavior at common breakpoints, not just the default viewport.',
+      'Remove generic placeholder copy, redundant wrapper elements, and unused CSS introduced during generation.',
+      'Verify interactive states: hover, focus, disabled, loading, and error.',
+    ],
+    verification: ['UI matches existing design language; all interactive states are visibly implemented, not just the default state.'],
+    fullNotes: ['Watch for tells of ungrounded generation: inconsistent spacing units, unnecessary nested divs, and copy that does not match the product voice.'],
+  },
+  {
+    id: 'interface-feel-polish', category: 'frontend', title: 'Interface Feel Polish',
+    summary: 'use for interaction/motion/feedback polish.',
+    trigger: 'refining interaction/motion/feedback quality on an already-functional UI.',
+    procedure: [
+      'Check perceived responsiveness: interactive elements should give immediate visual feedback on click/tap.',
+      'Verify loading and empty states are handled, not just the happy path with data.',
+      'Confirm animations/transitions are subtle and consistent with the rest of the app, not one-off.',
+    ],
+    verification: ['Interact with the feature end-to-end in a browser and confirm feedback/timing feels consistent with the rest of the app.'],
+    fullNotes: ['Prefer removing an animation that feels off over leaving an inconsistent one in.'],
+  },
+  {
+    id: 'backend-service-verification', category: 'backend', title: 'Backend Service Verification',
+    summary: 'use for local backend service verification.',
+    trigger: 'declaring backend work done.',
+    procedure: [
+      'Start the service locally and confirm it boots without errors.',
+      'Exercise the changed endpoint(s) with a real request (curl/HTTP client), not just unit tests.',
+      'Check logs for unexpected errors/warnings during the request.',
+    ],
+    verification: ['Real request to the changed endpoint returns the expected response with no unexpected errors in logs.'],
+    fullNotes: ['Unit tests can pass while the service fails to boot due to config/DI issues — always do a real boot check.'],
+  },
+  {
+    id: 'nestjs-feature-implementation', category: 'backend', title: 'NestJS Feature Implementation',
+    summary: 'use when implementing a new NestJS feature.',
+    trigger: 'implementing a new NestJS feature (module/controller/service).',
+    procedure: [
+      'Follow the existing module boundary conventions (module/controller/service/DTO) instead of inventing a new structure.',
+      'Validate input DTOs explicitly; do not trust unvalidated request bodies.',
+      'Keep controllers thin; put business logic in services.',
+      'Wire the new provider into its module and confirm Nest resolves the dependency graph at boot.',
+    ],
+    verification: ['Application boots with the new module wired in; the new endpoint/service behaves as specified for valid and invalid input.'],
+    fullNotes: ['A missing provider/module import surfaces as a boot-time DI error, not a test failure — always boot-check after wiring changes.'],
+  },
+  {
+    id: 'nestjs-auth-guards', category: 'backend', title: 'NestJS Auth Guards',
+    summary: 'use for NestJS auth/permission/guard work.',
+    trigger: 'NestJS auth/permission/guard work.',
+    procedure: [
+      'Identify exactly which routes/resources the change affects and what identity/role model applies.',
+      'Implement authorization checks in guards/decorators, not scattered inline checks in controllers.',
+      'Fail closed: default to denying access when a check cannot be evaluated.',
+      'Add a test for both an authorized and an unauthorized request.',
+    ],
+    verification: ['An authorized request succeeds and an unauthorized request is rejected with the correct status code.'],
+    fullNotes: ['Treat auth/permission code as security-sensitive: prefer explicit allow-lists over implicit deny-by-omission.'],
+  },
+  {
+    id: 'backend-pr-review', category: 'backend', title: 'Backend PR Review',
+    summary: 'use for reviewing backend pull requests.',
+    trigger: 'reviewing backend pull requests.',
+    procedure: [
+      'Check for missing input validation and unhandled error paths.',
+      'Check for N+1 queries or unbounded loops over external calls/DB rows.',
+      'Confirm migrations (if any) are backward compatible with the currently deployed code.',
+      'Confirm secrets/config are read from environment/config service, not hardcoded.',
+    ],
+    verification: ['Review comments cover validation, error handling, performance, and migration safety, or explicitly note none apply.'],
+    fullNotes: ['A backward-incompatible migration deployed before the code that needs it is a common source of production incidents.'],
+  },
+  {
+    id: 'full-system-rehearsal', category: 'fullstack', title: 'Full System Rehearsal',
+    summary: 'use before declaring cross-repo work done.',
+    trigger: 'declaring a cross-repo/full-stack change done.',
+    procedure: [
+      'Start both frontend and backend locally against each other, not against a mocked API.',
+      'Exercise the full user-facing flow end-to-end through the real UI.',
+      'Check both frontend console/network and backend logs during the flow for errors.',
+    ],
+    verification: ['End-to-end flow completes successfully with both services running live, no unexpected errors in either log.'],
+    fullNotes: ['Passing frontend and backend test suites independently does not guarantee they integrate correctly — always rehearse the full flow together.'],
+  },
+  {
+    id: 'github-pr-workflow', category: 'github', title: 'GitHub PR Workflow',
+    summary: 'use for PR lifecycle work.',
+    trigger: 'creating, updating, or merging pull requests.',
+    procedure: [
+      'Confirm the branch is up to date with its base before opening/updating a PR.',
+      'Write a PR description explaining why the change was made, with a test plan.',
+      'Do not merge your own PR unless explicitly instructed; wait for required review/checks.',
+    ],
+    verification: ['PR description includes a test plan; required CI checks are green before merge.'],
+    fullNotes: ['Keep PRs scoped to one logical change — large mixed-purpose PRs are harder to review and revert.'],
+  },
+  {
+    id: 'github-code-review', category: 'github', title: 'GitHub Code Review',
+    summary: 'use when reviewing a GitHub pull request.',
+    trigger: 'reviewing a GitHub pull request.',
+    procedure: [
+      'Read the PR description and linked issue for intent before reading the diff.',
+      'Review every changed file, not just the ones with the largest diff.',
+      'Distinguish must-fix comments from optional suggestions explicitly.',
+    ],
+    verification: ['Every must-fix comment is either resolved or explicitly acknowledged before approval.'],
+    fullNotes: ['A review that only checks style misses correctness/security issues — prioritize correctness and security first.'],
+  },
+  {
+    id: 'github-actions-verification', category: 'github', title: 'GitHub Actions Verification',
+    summary: 'use when adding/changing GitHub Actions workflows.',
+    trigger: 'adding or changing GitHub Actions workflows.',
+    procedure: [
+      'Confirm the workflow triggers (on:) match the intended events; overly broad triggers waste CI minutes and can create races.',
+      'Pin third-party actions to a commit SHA or trusted version tag, not a mutable branch ref.',
+      'Verify secrets used in the workflow are scoped to what the job actually needs.',
+    ],
+    verification: ['Workflow run succeeds on the intended trigger and does not expose secrets in logs.'],
+    fullNotes: ['Never disable a security-relevant CI check (e.g. a required status check) to unblock a merge without explicit approval.'],
+  },
+];
+
+const SKILL_BY_ID: Record<string, SkillDefinition> = Object.fromEntries(SKILL_CATALOG.map((s) => [s.id, s]));
+const SKILL_CATEGORIES: SkillCategory[] = ['core', 'frontend', 'backend', 'fullstack', 'github'];
+
+function skillRelPath(skill: SkillDefinition) {
+  return `.agentos/skills/${skill.category}/${skill.id}/SKILL.md`;
+}
+
+function renderSkillTemplate(skill: SkillDefinition, mode: 'summary' | 'full') {
+  const procedure = mode === 'full' ? skill.procedure : skill.procedure.slice(0, 3);
+  const lines = [
+    '---',
+    `name: ${skill.id}`,
+    `category: ${skill.category}`,
+    `mode: ${mode}`,
+    '---',
+    '',
+    `# ${skill.title}`,
+    '',
+    `Trigger: Use when ${skill.trigger}`,
+    '',
+    '## Procedure',
+    '',
+    ...procedure.map((step, i) => `${i + 1}. ${step}`),
+    '',
+    '## Verification',
+    '',
+    ...skill.verification.map((v) => `- ${v}`),
+  ];
+  if (mode === 'full' && skill.fullNotes.length) {
+    lines.push('', '## Notes', '', ...skill.fullNotes.map((n) => `- ${n}`));
+  }
+  lines.push('');
+  return lines.join('\n');
+}
+
+function resolveRequestedSkillIds(options, repos, hasGit) {
+  if (options.detected) return detectedSkillIds(repos, hasGit);
+  const raw = options.add;
+  if (!raw) throw new Error('agentos skills add requires --detected or at least one skill id/category-pack.');
+  const items = (Array.isArray(raw) ? raw : String(raw).split(',')).map((s) => String(s).trim()).filter(Boolean);
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const item of items) {
+    if (item.endsWith('-pack')) {
+      const category = item.slice(0, -'-pack'.length);
+      const matches = SKILL_CATALOG.filter((s) => s.category === category);
+      if (matches.length) {
+        for (const skill of matches) if (!seen.has(skill.id)) { seen.add(skill.id); ids.push(skill.id); }
+        continue;
+      }
+    }
+    if (!seen.has(item)) { seen.add(item); ids.push(item); }
+  }
+  return ids;
+}
+
+function detectedSkillIds(repos, hasGit) {
+  const categories = new Set<SkillCategory>(['core']);
+  const hasFrontend = repos.some((r) => r.type === 'frontend' || ['nuxt', 'nextjs', 'vite/vue', 'react'].includes(r.framework));
+  const hasBackend = repos.some((r) => r.type === 'backend' || ['nestjs', 'express'].includes(r.framework));
+  if (hasFrontend) categories.add('frontend');
+  if (hasBackend) categories.add('backend');
+  if (hasFrontend && hasBackend) categories.add('fullstack');
+  if (hasGit) categories.add('github');
+  return SKILL_CATALOG.filter((s) => categories.has(s.category)).map((s) => s.id);
+}
+
+async function listLocalSkillFiles(root) {
+  const skillsDir = join(root, '.agentos/skills');
+  const found: { category: string; id: string; relPath: string; abs: string }[] = [];
+  let categories: string[] = [];
+  try { categories = (await readdir(skillsDir, { withFileTypes: true })).filter((e) => e.isDirectory()).map((e) => e.name); } catch { return found; }
+  for (const category of categories) {
+    let ids: string[] = [];
+    try { ids = (await readdir(join(skillsDir, category), { withFileTypes: true })).filter((e) => e.isDirectory()).map((e) => e.name); } catch { continue; }
+    for (const id of ids) {
+      const abs = join(skillsDir, category, id, 'SKILL.md');
+      if (await exists(abs)) found.push({ category, id, relPath: `.agentos/skills/${category}/${id}/SKILL.md`, abs });
+    }
+  }
+  return found;
+}
+
+async function ensureLocalSkillsSection(root, existingSkillsMd) {
+  const entries = await listLocalSkillFiles(root);
+  const byCategory = new Map<string, typeof entries>();
+  for (const entry of entries) {
+    if (!byCategory.has(entry.category)) byCategory.set(entry.category, []);
+    byCategory.get(entry.category)!.push(entry);
+  }
+  const sections = [...byCategory.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([category, items]) => {
+    const bullets = items.sort((a, b) => a.id.localeCompare(b.id)).map((item) => {
+      const skill = SKILL_BY_ID[item.id];
+      const description = skill ? skill.summary : 'local project-defined skill.';
+      return `- ${item.id} — ${description}\n  Details: ${item.relPath}`;
+    });
+    return `### ${category}\n\n${bullets.join('\n')}`;
+  });
+  const block = `# AgentOS Local Skills\n\n${sections.length ? sections.join('\n\n') : 'No local skills materialized yet. Run `agentos skills add --detected` or `agentos skills add <skill-id>`.'}\n`;
+  const base = existingSkillsMd || skillsMd({ enabled: [] });
+  return ensureManagedBlock(base, 'AgentOS Local Skills', block);
 }
 
 export async function handoffAgentOS(options: any = {}) {
@@ -358,7 +825,6 @@ async function checkAgentAndSkillConfig(root, project, warnings) {
   if (!agents.profile) warnings.push('.agentos/project.yaml agents.profile missing; expected minimal, detected, or custom');
   if (!enabled.size) warnings.push('.agentos/project.yaml agents.enabled is empty or missing');
   for (const id of enabled) {
-    if (!AGENT_DEFINITIONS[id]) warnings.push(`agents.enabled references unknown agent ${id}`);
     if (!await exists(join(root, '.agentos/agents', `${id}.md`))) warnings.push(`agents.enabled references ${id}, but .agentos/agents/${id}.md is missing`);
   }
   for (const [capability, rawAgent] of Object.entries(capabilities)) {
@@ -515,7 +981,7 @@ async function fixAgentOSAdapters(root) {
   const allRepos = parseReposFromProjectYaml(project, { includeRoot: true });
   await ensureProjectYamlEngine(projectPath, 'opencode');
   await writeIfMissing(join(root, '.agentos/knowledge.md'), knowledgeMd());
-  const agentSelection = agentSelectionFromProject(project, childRepos);
+  const agentSelection = await agentSelectionFromProject(project, childRepos, root);
   await ensureProjectYamlAgents(projectPath, agentSelection);
   await writeIfMissing(join(root, '.agentos/skills.md'), skillsMd(agentSelection));
   for (const agent of agentSelection.agents) {
@@ -872,6 +1338,7 @@ const AGENT_DEFINITIONS = {
   qa: { id: 'qa', mandate: 'Verify changed behavior with real commands and browser checks when UI is touched.' },
   'code-reviewer': { id: 'code-reviewer', mandate: 'Review diffs for correctness, security, scope, and project consistency.' },
   'release-manager': { id: 'release-manager', mandate: 'Coordinate commit, push, merge, and release mechanics after verification and approval.' },
+  'project-manager': { id: 'project-manager', mandate: 'Break down coding/product requests into scoped, dependency-aware implementation plans before specialist agents edit files.', planningOnly: true },
 };
 
 const MINIMAL_AGENT_IDS = ['implementation', 'qa', 'code-reviewer', 'release-manager'];
@@ -887,23 +1354,42 @@ function resolveAgentSelection(requested, repos) {
   return buildAgentSelection('custom', normalized.length ? normalized : MINIMAL_AGENT_IDS);
 }
 
-function agentSelectionFromProject(project, repos) {
+async function agentSelectionFromProject(project, repos, root?: string) {
   const data = parseProjectYaml(project);
   const agents = data.agents && typeof data.agents === 'object' ? data.agents : {};
   const enabled = Array.isArray(agents.enabled) ? agents.enabled.map((id) => normalizeAgentAlias(String(id))) : [];
-  if (enabled.length) return buildAgentSelection(stringValue(agents.profile, 'detected'), enabled);
+  const capabilities: Record<string, any> = agents.capabilities && typeof agents.capabilities === 'object' ? agents.capabilities : {};
+  if (enabled.length) {
+    const allowCustom = [];
+    if (root) {
+      for (const id of enabled) {
+        if (!AGENT_DEFINITIONS[id] && await exists(join(root, '.agentos/agents', `${id}.md`))) allowCustom.push(id);
+      }
+    }
+    return buildAgentSelection(stringValue(agents.profile, 'detected'), enabled, { allowCustom, capabilities });
+  }
   return buildAgentSelection('detected', [...MINIMAL_AGENT_IDS, ...detectedSpecialistIds(repos)]);
 }
 
-function buildAgentSelection(profile, ids) {
+function buildAgentSelection(profile, ids, options: { allowCustom?: string[]; capabilities?: Record<string, any> } = {}) {
   const seen = new Set();
-  const normalized = ids.map(normalizeAgentAlias).filter((id) => id && AGENT_DEFINITIONS[id] && !seen.has(id) && seen.add(id));
+  const allowCustom = new Set(options.allowCustom || []);
+  const normalized = ids.map(normalizeAgentAlias).filter((id) => id && (AGENT_DEFINITIONS[id] || allowCustom.has(id)) && !seen.has(id) && seen.add(id));
+  const capabilities = agentCapabilities(normalized);
+  for (const [capability, rawAgent] of Object.entries(options.capabilities || {})) {
+    const id = normalizeAgentAlias(String(rawAgent));
+    if (normalized.includes(id) && !capabilities[capability]) capabilities[capability] = id;
+  }
   return {
     profile,
     enabled: normalized,
-    capabilities: agentCapabilities(normalized),
-    agents: normalized.map((id) => AGENT_DEFINITIONS[id]),
+    capabilities,
+    agents: normalized.map((id) => AGENT_DEFINITIONS[id] || customAgentDefinition(id)),
   };
+}
+
+function customAgentDefinition(id) {
+  return { id, mandate: `Custom project-defined agent role. See .agentos/agents/${id}.md for its role definition.`, custom: true };
 }
 
 function detectedSpecialistIds(repos) {
@@ -925,6 +1411,8 @@ function normalizeAgentAlias(value) {
     'qa-engineer': 'qa',
     impl: 'implementation',
     implementer: 'implementation',
+    planning: 'project-manager',
+    pm: 'project-manager',
   };
   return aliases[id] || id;
 }
@@ -938,6 +1426,7 @@ function agentCapabilities(enabled) {
   if (set.has('qa')) capabilities.qa = 'qa';
   if (set.has('code-reviewer')) capabilities.review = 'code-reviewer';
   if (set.has('release-manager')) capabilities.release = 'release-manager';
+  if (set.has('project-manager')) capabilities.planning = 'project-manager';
   return capabilities;
 }
 
@@ -949,7 +1438,14 @@ function agentConfigObject(agentSelection) {
   };
 }
 
-function agentMd(agent) { return `# ${title(agent.id)}\n\nMandate: ${agent.mandate}\n\n## Responsibilities in\n\n- Work only inside declared task scope.\n- Read AgentOS project, memory, handoff, and tasks first; then load only relevant skills, repo, role, and engine context.\n- Report files changed, verification run, failures, and next action before stopping.\n\n## Responsibilities out\n\n- Do not touch secrets, .env files, production config, migrations, or unrelated repos without explicit approval.\n- Do not commit or push unless explicitly assigned.\n\n## Skills\n\nUse .agentos/skills.md as an on-demand index. Load only skills relevant to this role and task.\n`; }
+function agentMd(agent) {
+  if (agent.id === 'project-manager') return projectManagerAgentMd();
+  return `# ${title(agent.id)}\n\nMandate: ${agent.mandate}\n\n## Responsibilities in\n\n- Work only inside declared task scope.\n- Read AgentOS project, memory, handoff, and tasks first; then load only relevant skills, repo, role, and engine context.\n- Report files changed, verification run, failures, and next action before stopping.\n\n## Responsibilities out\n\n- Do not touch secrets, .env files, production config, migrations, or unrelated repos without explicit approval.\n- Do not commit or push unless explicitly assigned.\n\n## Skills\n\nUse .agentos/skills.md as an on-demand index. Load only skills relevant to this role and task.\n`;
+}
+
+function projectManagerAgentMd() {
+  return `# Project Manager\n\nMandate: Break down coding/product requests into scoped, dependency-aware implementation plans before specialist agents edit files.\n\nThis is a planning-only role. The project-manager agent does not implement, commit, or push.\n\n## Responsibilities in\n\n- Read AgentOS project, memory, handoff, and tasks first; then load only relevant skills, repo, and role context.\n- For each incoming request, produce a plan that declares:\n  - Repo scope: which repo(s) the work touches.\n  - Protected paths: files/areas that must not be touched (secrets, .env, migrations, prod config) without explicit approval.\n  - Dependencies: ordering between plan steps and any cross-repo dependencies.\n  - Role assignment: which agent role (implementation, frontend-engineer, backend-engineer, qa, code-reviewer, release-manager) owns each step.\n  - Acceptance: what "done" means for each step.\n  - Verification: the exact commands/checks that must pass before a step is considered complete.\n- Hand the plan to the assigned specialist agent(s) before any file is edited.\n\n## Responsibilities out\n\n- Do not implement, edit application/source files, commit, or push.\n- Do not touch secrets, .env files, production config, or migrations.\n\n## Skills\n\nUse .agentos/skills.md as an on-demand index. Load only skills relevant to planning and scoping.\n`;
+}
 function defaultEngines() { return ['claude-code', 'codex', 'opencode', 'hermes', 'chatgpt'].map((id) => ({ id })); }
 function engineMd(engine) { return `# ${title(engine.id)} Adapter\n\nRead AGENTS.md + .agentos context first. Before stopping: handoff current state, files changed, tests, failures, next action.\n`; }
 function repoMd(repo) { return `# ${title(repo.name)} Repo\n\nPath: \`${repo.path}\`; type: ${repo.type}; framework: ${repo.framework}; package manager: ${repo.packageManager}.\nCommands: dev=\`${repo.devCommand || 'unknown'}\`; build=\`${repo.buildCommand || 'unknown'}\`; test=\`${repo.testCommand || 'unknown'}\`${repo.testE2eCommand ? `; e2e=\`${repo.testE2eCommand}\`` : ''}${repo.generateCommand ? `; generate=\`${repo.generateCommand}\`` : ''}${repo.previewCommand ? `; preview=\`${repo.previewCommand}\`` : ''}.\nScope: edit only when task includes \`${repo.name}\`.\n`; }
