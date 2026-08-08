@@ -407,20 +407,34 @@ export async function templatesAgentOS(options: any = {}) {
   const name = safeId(options.name || basename(source, extname(source)) || 'imported-template');
   const mode: 'summary' | 'full' = options.mode === 'full' ? 'full' : 'summary';
   const dryRun = options.dryRun !== false && !options.yes;
+  const replace = Boolean(options.replace);
   if (!source) throw new Error('agentos templates import requires a URL or file path.');
   if (!['agent', 'skill'].includes(type)) throw new Error('agentos templates import requires --type agent or --type skill.');
-  const fetched = await readImportSource(source);
+  let fetched;
+  try {
+    fetched = await readImportSource(source);
+  } catch (error) {
+    return { ok: false, root, dryRun, text: [`AgentOS templates import: FAIL`, `Root: ${root}`, `Source: ${source}`, '', `Source fetch failed: ${error.message}`, '', 'Check the URL/path and retry. No files were written.'].join('\n') };
+  }
   const review = reviewImportedTemplate(fetched.content);
   const relPath = type === 'agent' ? `.agentos/agents/${name}.md` : `.agentos/skills/imported/${name}/SKILL.md`;
+  const targetPath = join(root, relPath);
   const converted = type === 'agent' ? importedAgentTemplate(name, fetched, review) : importedSkillTemplate(name, mode, fetched, review);
-  const lines = [`AgentOS templates import${dryRun ? ' dry run' : ''}`, `Root: ${root}`, `Source: ${source}`, `Detected type: ${type}`, `Name: ${name}`, `SHA256: ${fetched.sha256}`, `Bytes: ${fetched.content.length}`, '', 'Review:', ...review.map((item) => `- ${item}`), '', `${dryRun ? 'Would write' : 'Wrote'}: ${relPath}`];
+  const writeVerb = replace ? 'Replaced' : 'Wrote';
+  const lines = [`AgentOS templates import${dryRun ? ' dry run' : ''}`, `Root: ${root}`, `Source: ${source}`, `Detected type: ${type}`, `Name: ${name}`, `SHA256: ${fetched.sha256}`, `Bytes: ${fetched.content.length}`, '', 'Review:', ...review.map((item) => `- ${item}`), ''];
   if (review.some((item) => item.startsWith('BLOCK:'))) {
-    lines.push('', 'Blocked: resolve the BLOCK item(s) before importing.');
+    const quarantineRel = await quarantineImportedTemplate(root, name, type, fetched, review);
+    lines.push(`Quarantined: ${quarantineRel}`, '', 'Blocked import recovery:', '- Inspect the quarantine review file.', '- Remove or rewrite blocked instructions at the source.', '- Re-run a dry-run import and confirm no BLOCK findings remain.', '- Only then re-run with --yes to materialize a runtime template.');
+    return { ok: false, root, dryRun, text: lines.join('\n'), review, quarantine: quarantineRel };
+  }
+  if (await exists(targetPath) && !replace) {
+    lines.push(`Target already exists: ${relPath}`, '', 'Refusing to overwrite local project context by default.', 'Use --replace only after reviewing the existing file and confirming replacement is intended.');
     return { ok: false, root, dryRun, text: lines.join('\n'), review };
   }
+  lines.push(`${dryRun ? (replace ? 'Would replace' : 'Would write') : writeVerb}: ${relPath}`);
   if (!dryRun) {
-    await mkdir(dirname(join(root, relPath)), { recursive: true });
-    await writeFile(join(root, relPath), converted, 'utf8');
+    await mkdir(dirname(targetPath), { recursive: true });
+    await writeFile(targetPath, converted, 'utf8');
     if (type === 'skill') await writeFile(join(root, '.agentos/skills.md'), await ensureLocalSkillsSection(root, await safeRead(join(root, '.agentos/skills.md'))), 'utf8');
   } else {
     lines.push('Dry run only. Re-run with --yes to write after reviewing attribution/license and safety findings.');
@@ -447,14 +461,20 @@ async function templatesCopyAgentOS(root, options: any = {}) {
   const entry = await findTemplateRegistryEntry(options.id);
   if (!entry) return { ok: false, root, text: `AgentOS templates copy: FAIL\nUnknown template id: ${options.id}. Run \`agentos templates list\`.` };
   const dryRun = Boolean(options.dryRun);
+  const replace = Boolean(options.replace);
   const content = await readFile(entry.absPath, 'utf8');
   const validation = validateTemplateContent(entry.type, content);
   if (!validation.ok) return { ok: false, root, dryRun, text: [`AgentOS templates copy: FAIL`, `Template: ${entry.id}`, ...validation.messages.map((m) => `- ${m}`)].join('\n') };
   const relPath = entry.type === 'agent' ? `.agentos/agents/${entry.name}.md` : `.agentos/skills/${entry.category}/${entry.name}/SKILL.md`;
-  const lines = [`AgentOS templates copy${dryRun ? ' dry run' : ''}`, `Root: ${root}`, `Template: ${entry.id}`, '', `${dryRun ? 'Would copy' : 'Copied'}: ${entry.relPath} -> ${relPath}`];
+  const targetPath = join(root, relPath);
+  if (await exists(targetPath) && !replace) {
+    return { ok: false, root, dryRun, entry, text: [`AgentOS templates copy: FAIL`, `Root: ${root}`, `Template: ${entry.id}`, '', `Target already exists: ${relPath}`, 'Refusing to overwrite local project context by default.', 'Use --replace only after reviewing the existing file and confirming replacement is intended.'].join('\n') };
+  }
+  const action = dryRun ? (replace ? 'Would replace' : 'Would copy') : (replace ? 'Replaced' : 'Copied');
+  const lines = [`AgentOS templates copy${dryRun ? ' dry run' : ''}`, `Root: ${root}`, `Template: ${entry.id}`, '', `${action}: ${entry.relPath} -> ${relPath}`];
   if (!dryRun) {
-    await mkdir(dirname(join(root, relPath)), { recursive: true });
-    await writeFile(join(root, relPath), content, 'utf8');
+    await mkdir(dirname(targetPath), { recursive: true });
+    await writeFile(targetPath, content, 'utf8');
     if (entry.type === 'agent') await registerProjectAgent(root, entry.name);
     else await writeFile(join(root, '.agentos/skills.md'), await ensureLocalSkillsSection(root, await safeRead(join(root, '.agentos/skills.md'))), 'utf8');
   }
@@ -516,6 +536,42 @@ async function templateRegistryEntries() {
 async function findTemplateRegistryEntry(id) {
   const wanted = String(id || '').trim();
   return (await templateRegistryEntries()).find((entry) => entry.id === wanted || entry.id.endsWith(`:${wanted}`));
+}
+
+async function quarantineImportedTemplate(root, name, type, fetched, review) {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const safeName = safeId(name || 'imported-template');
+  const relPath = `.agentos/imports/quarantine/${stamp}-${safeName}.md`;
+  const content = [
+    '# Quarantined AgentOS Template Import',
+    '',
+    `Type: ${type}`,
+    `Name: ${safeName}`,
+    `Source: ${fetched.source}`,
+    `SHA256: ${fetched.sha256}`,
+    `Bytes: ${fetched.content.length}`,
+    '',
+    '## Review findings',
+    '',
+    ...review.map((item) => `- ${item}`),
+    '',
+    '## Blocked import recovery',
+    '',
+    '1. Inspect the original content below.',
+    '2. Remove or rewrite blocked prompt-injection-like instructions at the source.',
+    '3. Re-run `agentos templates import ... --dry-run` and confirm no BLOCK findings remain.',
+    '4. Re-run with `--yes` only after the review is clean.',
+    '',
+    '## Original content',
+    '',
+    '```md',
+    fetched.content,
+    '```',
+    '',
+  ].join('\n');
+  await mkdir(dirname(join(root, relPath)), { recursive: true });
+  await writeFile(join(root, relPath), content, 'utf8');
+  return relPath;
 }
 
 function validateTemplateContent(type, content) {

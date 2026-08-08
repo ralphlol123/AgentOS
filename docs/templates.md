@@ -34,6 +34,7 @@ Copy a template into the current project's `.agentos/` runtime context:
 ```bash
 agentos templates copy agent:security-reviewer --dry-run
 agentos templates copy agent:security-reviewer
+agentos templates copy agent:security-reviewer --replace
 agentos templates copy skill:frontend/ai-slop-design-review
 ```
 
@@ -51,7 +52,7 @@ agent:<agent-name>
 skill:<category>/<skill-name>
 ```
 
-`templates copy` writes agents to `.agentos/agents/<id>.md` and skills to `.agentos/skills/<category>/<skill>/SKILL.md`. Agent copies are registered in `.agentos/project.yaml`; skill copies update `.agentos/skills.md`.
+`templates copy` writes agents to `.agentos/agents/<id>.md` and skills to `.agentos/skills/<category>/<skill>/SKILL.md`. Agent copies are registered in `.agentos/project.yaml`; skill copies update `.agentos/skills.md`. Existing files are not overwritten unless `--replace` is provided.
 
 ## Agent templates
 

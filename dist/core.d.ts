@@ -118,8 +118,24 @@ export declare function templatesAgentOS(options?: any): Promise<{
     root?: undefined;
     ok: boolean;
     text: string;
+    quarantine?: undefined;
     review?: undefined;
 } | {
+    ok: boolean;
+    root: string;
+    dryRun: boolean;
+    text: string;
+    quarantine?: undefined;
+    review?: undefined;
+} | {
+    ok: boolean;
+    root: string;
+    dryRun: boolean;
+    text: string;
+    review: any[];
+    quarantine: string;
+} | {
+    quarantine?: undefined;
     ok: boolean;
     root: string;
     dryRun: boolean;

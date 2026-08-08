@@ -113,9 +113,9 @@ agentos agents list
 agentos agents add <agent-id|template-file> [--name id] [--dry-run]
 agentos templates list
 agentos templates show <id>
-agentos templates copy <id> [--dry-run]
+agentos templates copy <id> [--dry-run] [--replace]
 agentos templates validate <file> --type agent|skill
-agentos templates import <url-or-file> --type agent|skill --name <id> [--mode summary|full] [--dry-run] [--yes]
+agentos templates import <url-or-file> --type agent|skill --name <id> [--mode summary|full] [--dry-run] [--yes] [--replace]
 agentos migrate claude --preserve [--dry-run]
 agentos prompt [claude|codex|opencode|hermes]
 ```
@@ -219,7 +219,14 @@ Write only after review:
 agentos templates import ./external-skill.md --type skill --name external-review --yes
 ```
 
-The importer shows source, SHA256, byte size, target path, and safety findings. Prompt-injection-like instructions block import. Secret-like words, dangerous command patterns, missing license hints, and large content produce warnings.
+The importer shows source, SHA256, byte size, target path, and safety findings. Prompt-injection-like instructions block import and are written to `.agentos/imports/quarantine/` for review instead of being materialized as runtime templates. Secret-like words, dangerous command patterns, missing license hints, and large content produce warnings.
+
+AgentOS refuses to overwrite existing copied/imported templates by default. Use `--replace` only after reviewing the existing local file and confirming replacement is intended:
+
+```bash
+agentos templates copy agent:project-manager --replace
+agentos templates import ./external-skill.md --type skill --name external-review --yes --replace
+```
 
 Safe-import docs: [docs/safe-imports.md](docs/safe-imports.md).
 
