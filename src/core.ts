@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { get as httpGet } from 'node:http';
 import { get as httpsGet } from 'node:https';
 import { basename, dirname, extname, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
@@ -394,8 +395,13 @@ function validateAgentTemplate(content, id) {
 
 export async function templatesAgentOS(options: any = {}) {
   const root = await findAgentOSRoot(options.cwd ?? process.cwd());
-  if (!root) return { ok: false, text: 'AgentOS templates import: FAIL\nNo .agentos directory found.' };
-  if (options.command !== 'import') return { ok: false, text: 'Usage: agentos templates import <url-or-file> --type agent|skill --name <id> [--mode summary|full] [--dry-run] [--yes]' };
+  if (!root) return { ok: false, text: 'AgentOS templates: FAIL\nNo .agentos directory found.' };
+  const command = options.command;
+  if (command === 'list') return templatesListAgentOS(root);
+  if (command === 'show') return templatesShowAgentOS(root, options.id);
+  if (command === 'copy') return templatesCopyAgentOS(root, options);
+  if (command === 'validate') return templatesValidateAgentOS(root, options);
+  if (command !== 'import') return { ok: false, text: 'Usage: agentos templates list | show <id> | copy <id> [--dry-run] | validate <file> --type agent|skill | import <url-or-file> --type agent|skill --name <id> [--mode summary|full] [--dry-run] [--yes]' };
   const source = String(options.source || '').trim();
   const type = String(options.type || '').trim().toLowerCase();
   const name = safeId(options.name || basename(source, extname(source)) || 'imported-template');
@@ -422,8 +428,124 @@ export async function templatesAgentOS(options: any = {}) {
   return { ok: true, root, dryRun, text: lines.join('\n'), review };
 }
 
+async function templatesListAgentOS(root) {
+  const entries = await templateRegistryEntries();
+  const lines = ['AgentOS template registry', `Root: ${root}`, '', 'Templates:'];
+  for (const entry of entries) lines.push(`- ${entry.id} -> ${entry.relPath}`);
+  lines.push('', 'Use: agentos templates show <id>', 'Use: agentos templates copy <id> [--dry-run]', 'Use: agentos templates validate <file> --type agent|skill');
+  return { ok: true, root, entries, text: lines.join('\n') };
+}
+
+async function templatesShowAgentOS(root, id) {
+  const entry = await findTemplateRegistryEntry(id);
+  if (!entry) return { ok: false, root, text: `AgentOS templates show: FAIL\nUnknown template id: ${id}. Run \`agentos templates list\`.` };
+  const content = await readFile(entry.absPath, 'utf8');
+  return { ok: true, root, entry, text: [`Template: ${entry.id}`, `Path: ${entry.relPath}`, '', content].join('\n') };
+}
+
+async function templatesCopyAgentOS(root, options: any = {}) {
+  const entry = await findTemplateRegistryEntry(options.id);
+  if (!entry) return { ok: false, root, text: `AgentOS templates copy: FAIL\nUnknown template id: ${options.id}. Run \`agentos templates list\`.` };
+  const dryRun = Boolean(options.dryRun);
+  const content = await readFile(entry.absPath, 'utf8');
+  const validation = validateTemplateContent(entry.type, content);
+  if (!validation.ok) return { ok: false, root, dryRun, text: [`AgentOS templates copy: FAIL`, `Template: ${entry.id}`, ...validation.messages.map((m) => `- ${m}`)].join('\n') };
+  const relPath = entry.type === 'agent' ? `.agentos/agents/${entry.name}.md` : `.agentos/skills/${entry.category}/${entry.name}/SKILL.md`;
+  const lines = [`AgentOS templates copy${dryRun ? ' dry run' : ''}`, `Root: ${root}`, `Template: ${entry.id}`, '', `${dryRun ? 'Would copy' : 'Copied'}: ${entry.relPath} -> ${relPath}`];
+  if (!dryRun) {
+    await mkdir(dirname(join(root, relPath)), { recursive: true });
+    await writeFile(join(root, relPath), content, 'utf8');
+    if (entry.type === 'agent') await registerProjectAgent(root, entry.name);
+    else await writeFile(join(root, '.agentos/skills.md'), await ensureLocalSkillsSection(root, await safeRead(join(root, '.agentos/skills.md'))), 'utf8');
+  }
+  return { ok: true, root, dryRun, entry, text: lines.join('\n') };
+}
+
+async function templatesValidateAgentOS(root, options: any = {}) {
+  const source = String(options.source || '').trim();
+  const type = String(options.type || '').trim().toLowerCase();
+  if (!source) return { ok: false, root, text: 'AgentOS templates validate: FAIL\nMissing template file.' };
+  if (!['agent', 'skill'].includes(type)) return { ok: false, root, text: 'AgentOS templates validate: FAIL\nUse --type agent or --type skill.' };
+  const content = await readFile(resolve(source), 'utf8');
+  const validation = validateTemplateContent(type, content);
+  const lines = [`AgentOS templates validate`, `Root: ${root}`, `Source: ${source}`, `Type: ${type}`, `Validation: ${validation.ok ? 'OK' : 'FAIL'}`, ...validation.messages.map((m) => `- ${m}`)];
+  return { ok: validation.ok, root, text: lines.join('\n'), validation };
+}
+
 function isPathLike(value) {
   return /[\\/.]/.test(String(value));
+}
+
+function packageRootDir() {
+  return dirname(dirname(fileURLToPath(import.meta.url)));
+}
+
+function templatesRootDir() {
+  return join(packageRootDir(), 'templates');
+}
+
+async function templateRegistryEntries() {
+  const root = templatesRootDir();
+  const entries: any[] = [];
+  const agentsDir = join(root, 'agents');
+  if (await exists(agentsDir)) {
+    for (const entry of await readdir(agentsDir, { withFileTypes: true })) {
+      if (entry.isFile() && entry.name.endsWith('.md')) {
+        const name = basename(entry.name, '.md');
+        entries.push({ id: `agent:${name}`, type: 'agent', name, relPath: `templates/agents/${entry.name}`, absPath: join(agentsDir, entry.name) });
+      }
+    }
+  }
+  const skillsDir = join(root, 'skills');
+  if (await exists(skillsDir)) {
+    for (const categoryEntry of await readdir(skillsDir, { withFileTypes: true })) {
+      if (!categoryEntry.isDirectory()) continue;
+      const category = categoryEntry.name;
+      const categoryDir = join(skillsDir, category);
+      for (const skillEntry of await readdir(categoryDir, { withFileTypes: true })) {
+        if (skillEntry.isFile() && skillEntry.name.endsWith('.md')) {
+          const name = basename(skillEntry.name, '.md');
+          entries.push({ id: `skill:${category}/${name}`, type: 'skill', category, name, relPath: `templates/skills/${category}/${skillEntry.name}`, absPath: join(categoryDir, skillEntry.name) });
+        }
+      }
+    }
+  }
+  return entries.sort((a, b) => a.id.localeCompare(b.id));
+}
+
+async function findTemplateRegistryEntry(id) {
+  const wanted = String(id || '').trim();
+  return (await templateRegistryEntries()).find((entry) => entry.id === wanted || entry.id.endsWith(`:${wanted}`));
+}
+
+function validateTemplateContent(type, content) {
+  const messages: string[] = [];
+  if (!content.includes('# ')) messages.push('missing required section: title heading');
+  if (type === 'agent') {
+    for (const section of ['## Responsibilities in', '## Responsibilities out', '## Skills']) {
+      if (!content.includes(section)) messages.push(`missing required section: ${section}`);
+    }
+  } else if (type === 'skill') {
+    for (const section of ['Trigger:', '## Procedure', '## Verification']) {
+      if (!content.includes(section)) messages.push(`missing required section: ${section}`);
+    }
+  } else {
+    messages.push('unknown template type');
+  }
+  if (!messages.length) messages.push('Template structure looks valid.');
+  return { ok: messages.length === 1 && messages[0] === 'Template structure looks valid.', messages };
+}
+
+async function registerProjectAgent(root, id) {
+  const projectPath = join(root, '.agentos/project.yaml');
+  const project = parseProjectYaml(await safeRead(projectPath));
+  const agents = project.agents && typeof project.agents === 'object' ? project.agents : {};
+  const enabled = new Set(Array.isArray(agents.enabled) ? agents.enabled.map((v) => normalizeAgentAlias(String(v))) : []);
+  enabled.add(normalizeAgentAlias(id));
+  const capabilities = agents.capabilities && typeof agents.capabilities === 'object' ? agents.capabilities : {};
+  if (id === 'project-manager' && !capabilities.planning) capabilities.planning = 'project-manager';
+  project.agents = { profile: 'custom', capabilities, enabled: [...enabled] };
+  await writeFile(projectPath, dumpProjectYaml(project), 'utf8');
 }
 
 type SkillCategory = 'core' | 'frontend' | 'backend' | 'fullstack' | 'github';

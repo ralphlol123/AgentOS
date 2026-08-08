@@ -114,13 +114,39 @@ Local skills are written under `.agentos/skills/` and indexed in `.agentos/skill
 
 ## Use templates
 
-List agent templates:
+List agent convenience templates:
 
 ```bash
 agentos agents list
 ```
 
-Add a built-in or local agent template:
+List the full repository template registry:
+
+```bash
+agentos templates list
+```
+
+Preview a template:
+
+```bash
+agentos templates show agent:project-manager
+```
+
+Copy a built-in registry template:
+
+```bash
+agentos templates copy agent:project-manager --dry-run
+agentos templates copy agent:project-manager
+agentos templates copy skill:frontend/ai-slop-design-review
+```
+
+Validate a template file:
+
+```bash
+agentos templates validate templates/agents/project-manager.md --type agent
+```
+
+Add a built-in or local agent template through the agent convenience command:
 
 ```bash
 agentos agents add project-manager

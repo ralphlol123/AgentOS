@@ -125,6 +125,34 @@ export declare function templatesAgentOS(options?: any): Promise<{
     dryRun: boolean;
     text: string;
     review: any[];
+} | {
+    ok: boolean;
+    root: any;
+    entries: any[];
+    text: string;
+} | {
+    ok: boolean;
+    root: any;
+    text: string;
+    entry?: undefined;
+} | {
+    ok: boolean;
+    root: any;
+    entry: any;
+    text: string;
+} | {
+    ok: boolean;
+    root: any;
+    text: string;
+    validation?: undefined;
+} | {
+    ok: boolean;
+    root: any;
+    text: string;
+    validation: {
+        ok: boolean;
+        messages: string[];
+    };
 }>;
 export declare function handoffAgentOS(options?: any): Promise<{
     ok: boolean;

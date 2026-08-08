@@ -845,3 +845,53 @@ test('templates import --yes writes imported skills and updates skills index', a
   const skillsMd = await readFile(join(root, '.agentos/skills.md'), 'utf8');
   assert.match(skillsMd, /Details: \.agentos\/skills\/imported\/safe-skill\/SKILL\.md/);
 });
+
+test('templates list and show expose repository template registry entries', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
+  const list = await templatesAgentOS({ cwd: root, command: 'list' });
+  assert.equal(list.ok, true);
+  assert.match(list.text, /AgentOS template registry/);
+  assert.match(list.text, /agent:project-manager/);
+  assert.match(list.text, /skill:frontend\/ai-slop-design-review/);
+
+  const shown = await templatesAgentOS({ cwd: root, command: 'show', id: 'agent:project-manager' });
+  assert.equal(shown.ok, true);
+  assert.match(shown.text, /Template: agent:project-manager/);
+  assert.match(shown.text, /# Project Manager/);
+});
+
+test('templates copy materializes repository agent and skill templates', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
+  const dry = await templatesAgentOS({ cwd: root, command: 'copy', id: 'skill:frontend/ai-slop-design-review', dryRun: true });
+  assert.equal(dry.ok, true);
+  assert.match(dry.text, /Would copy/);
+  assert.equal(await exists(join(root, '.agentos/skills/frontend/ai-slop-design-review/SKILL.md')), false);
+
+  const skill = await templatesAgentOS({ cwd: root, command: 'copy', id: 'skill:frontend/ai-slop-design-review' });
+  assert.equal(skill.ok, true);
+  assert.equal(await exists(join(root, '.agentos/skills/frontend/ai-slop-design-review/SKILL.md')), true);
+  const skillsMd = await readFile(join(root, '.agentos/skills.md'), 'utf8');
+  assert.match(skillsMd, /Details: \.agentos\/skills\/frontend\/ai-slop-design-review\/SKILL\.md/);
+
+  const agent = await templatesAgentOS({ cwd: root, command: 'copy', id: 'agent:security-reviewer' });
+  assert.equal(agent.ok, true);
+  assert.equal(await exists(join(root, '.agentos/agents/security-reviewer.md')), true);
+  const project = await readFile(join(root, '.agentos/project.yaml'), 'utf8');
+  assert.match(project, /- security-reviewer/);
+});
+
+test('templates validate accepts good templates and rejects missing sections', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
+  const good = await templatesAgentOS({ cwd: root, command: 'validate', source: join(process.cwd(), 'templates/agents/project-manager.md'), type: 'agent' });
+  assert.equal(good.ok, true);
+  assert.match(good.text, /Validation: OK/);
+
+  const badPath = join(root, 'bad-agent.md');
+  await writeFile(badPath, '# Bad Agent\n\nNo required sections.\n');
+  const bad = await templatesAgentOS({ cwd: root, command: 'validate', source: badPath, type: 'agent' });
+  assert.equal(bad.ok, false);
+  assert.match(bad.text, /missing required section/);
+});
