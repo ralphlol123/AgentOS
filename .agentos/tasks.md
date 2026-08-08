@@ -13,11 +13,12 @@
 ## Now
 
 - [x] Update AgentOS dogfood tasks/handoff to current reality.
-- [ ] Wait for Ralph's next concrete AgentOS priority. Do not resume KargaX AgentOS and do not start `agentos run` unless Ralph explicitly reopens either.
+- [x] Prepare implementation plan for Local Skills + Claude Migration / Custom Agents + project-manager without executing feature work.
+- [ ] Wait for Ralph to explicitly start the prepared sprint. Do not resume KargaX AgentOS and do not start `agentos run` unless Ralph explicitly reopens either.
 
 ## Next
 
-- [ ] When usage budget recovers, choose from the roadmap instead of resuming stale local chat todos.
+- [ ] When usage budget recovers, execute from `.hermes/plans/2026-08-08_agentos-local-skills-custom-agents.md` instead of resuming stale local chat todos.
 - [ ] Consider a small low-risk AgentOS cleanup before larger sprints: default Obsidian destination or dogfood-state maintenance only.
 
 ## Later

@@ -36,12 +36,13 @@ Deferred roadmap state:
 
 ## Last completed step
 
-Updated dogfood task state to stop claiming token-efficiency hardening still needs commit/push and to record KargaX rollback/deferred sprint status.
+Committed the dogfood state-only update as `890e928 chore: update AgentOS dogfood state`, then prepared the next sprint plan without implementing feature code.
 
 ## Files changed
 
 - `.agentos/tasks.md`
 - `.agentos/handoff.md`
+- `.hermes/plans/2026-08-08_agentos-local-skills-custom-agents.md`
 
 ## Tests run
 
