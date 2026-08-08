@@ -5,7 +5,7 @@ AgentOS can import useful agent or skill material from local files or web URLs, 
 ## Command
 
 ```bash
-agentos templates import <url-or-file> --type agent|skill --name <id> [--mode summary|full] [--dry-run] [--yes]
+agentos templates import <url-or-file> --type agent|skill --name <id> [--mode summary|full] [--dry-run] [--yes] [--replace]
 ```
 
 ## Default behavior
@@ -56,11 +56,19 @@ The MVP scanner reports:
 - missing license hints;
 - large content over the compact threshold.
 
-Prompt-injection-like content blocks import:
+Prompt-injection-like content blocks runtime materialization:
 
 ```text
 BLOCK: prompt-injection-like instruction detected.
 ```
+
+Blocked imports are written to a quarantine review file under:
+
+```text
+.agentos/imports/quarantine/
+```
+
+The quarantine file preserves the original content, source, SHA256, and review findings so the source can be inspected and cleaned without creating `.agentos/agents/` or `.agentos/skills/` runtime files.
 
 Warnings do not block import, but they are intended to force human/agent review before `--yes`.
 
@@ -82,6 +90,22 @@ Skill imports also update:
 
 ```text
 .agentos/skills.md
+```
+
+## Overwrite protection
+
+AgentOS refuses to overwrite existing project-local template files by default. This protects local edits made after a template was copied or imported.
+
+If the target already exists, the command fails with recovery text and no file is changed. Replace only after review:
+
+```bash
+agentos templates import ./external-skill.md --type skill --name external-skill --yes --replace
+```
+
+The same rule applies to registry copies:
+
+```bash
+agentos templates copy agent:project-manager --replace
 ```
 
 ## Attribution metadata

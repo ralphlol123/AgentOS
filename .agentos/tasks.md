@@ -7,26 +7,26 @@
 - [x] `agentos run` Phase 2 placed on hold per Ralph.
 - [x] Token-efficiency hardening completed, reviewed, committed, pushed, and verified at `c9c9fc8`.
 - [x] KargaX AgentOS experiment findings recorded and KargaX workspace rolled back to `.claude`.
-- [x] Merged `feat/local-skills-custom-agents`, `feat/template-library`, and `feat/docs-and-release-readiness` into `main`.
-- [x] Verified merged `main` after PR #3.
-- [x] Created `feat/template-registry-polish` from verified `main`.
-- [x] Added RED tests for `agentos templates list/show/copy/validate`; watched them fail.
-- [x] Implemented template registry list/show/copy/validate and watched tests pass.
-- [x] Updated README and quickstart/templates docs for registry commands.
-- [x] Ran safe throwaway-repo smoke with packed/installed AgentOS; result `SAFE_THROWAWAY_REPO_SMOKE_PASS`.
+- [x] Merged `feat/local-skills-custom-agents`, `feat/template-library`, `feat/docs-and-release-readiness`, and `feat/template-registry-polish` into `main`.
+- [x] Verified merged `main` after PR #4.
+- [x] Created `feat/import-safety-hardening` from verified `main`.
+- [x] Added RED tests for overwrite protection, `--replace`, quarantine, URL fetch failures, and risky-content warnings.
+- [x] Implemented hardening and watched tests pass: 54 tests / 0 failures.
+- [x] Updated README, quickstart, templates, and safe-import docs for hardening behavior.
+- [x] Ran packed installed CLI hardening smoke; result `IMPORT_SAFETY_HARDENING_SMOKE_PASS`.
 - [x] Ran full verification: check, test, smoke, package-manager tests, publish dry-run, doctor, status, diff-check.
 
 ## Now
 
-- [ ] Review final diff, commit, and push `feat/template-registry-polish`.
+- [ ] Review final diff, commit, and push `feat/import-safety-hardening`.
 
 ## Next
 
-- [ ] Open/review PR for `feat/template-registry-polish`.
-- [ ] Decide release path: publish `0.1.0`, bump first, or continue polish.
+- [ ] Open/review PR for `feat/import-safety-hardening`.
+- [ ] After merge, create `chore/release-0.1.0` for changelog/release notes/final publish prep.
 
 ## Later
 
-- [ ] Stronger safe-import license/review/quarantine flow.
+- [ ] Real npm publish only after explicit package/account/version approval.
 - [ ] Keep `agentos run` on hold unless Ralph explicitly reopens it.
 - [ ] Do not re-enable AgentOS in KargaX unless Ralph explicitly asks.

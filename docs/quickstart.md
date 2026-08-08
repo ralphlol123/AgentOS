@@ -137,6 +137,7 @@ Copy a built-in registry template:
 ```bash
 agentos templates copy agent:project-manager --dry-run
 agentos templates copy agent:project-manager
+agentos templates copy agent:project-manager --replace
 agentos templates copy skill:frontend/ai-slop-design-review
 ```
 
