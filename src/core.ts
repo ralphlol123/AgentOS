@@ -1035,6 +1035,320 @@ async function ensureLocalSkillsSection(root, existingSkillsMd) {
   return ensureManagedBlock(base, 'AgentOS Local Skills', block);
 }
 
+export async function runHandoffAgentOS(options: any = {}) {
+  const root = await findAgentOSRoot(options.cwd ?? process.cwd());
+  if (!root) return { ok: false, text: 'AgentOS run handoff: FAIL\nNo .agentos directory found here or in parent directories.' };
+
+  const dryRun = Boolean(options.dryRun);
+  const engine = normalizeEngine(options.engine ?? 'unknown');
+  const role = slug(options.role || 'run');
+  const phase = slug(options.phase || 'task');
+  const repo = String(options.repo || '').trim() || 'not specified';
+  const reason = String(options.reason || 'manual-pause').trim() || 'manual-pause';
+  const targetWorktree = resolveRunHandoffWorktree(root, options.cwd ?? process.cwd(), options.worktree);
+  if (!await exists(targetWorktree)) return { ok: false, text: `AgentOS run handoff: FAIL\nWorktree/path does not exist: ${targetWorktree}` };
+
+  const git = await collectRunHandoffGitState(targetWorktree);
+  const stamp = timestampForFilename(new Date());
+  const filename = `${stamp}-${role}-${phase}-handoff.md`;
+  const handoffRel = `.agentos/runs/${filename}`;
+  const handoffPath = join(root, handoffRel);
+  const note = renderRunHandoffNote({ root, targetWorktree, engine, role, phase, repo, reason, git });
+  const oldTasks = await safeRead(join(root, '.agentos/tasks.md'));
+  const tasksUpdate = renderRunHandoffTasksUpdate({ engine, role, phase, reason, handoffRel, oldTasks });
+  const handoffUpdate = renderRunHandoffStateUpdate({ engine, role, phase, repo, reason, handoffRel, targetWorktree });
+
+  const lines = [
+    `AgentOS run handoff${dryRun ? ' dry run' : ''}`,
+    `Root: ${root}`,
+    `Engine: ${engine}`,
+    `Reason: ${reason}`,
+    `Worktree: ${targetWorktree}`,
+    '',
+    `${dryRun ? 'Would write' : 'Wrote'}: ${handoffRel}`,
+    `${dryRun ? 'Would update' : 'Updated'}: .agentos/tasks.md`,
+    `${dryRun ? 'Would update' : 'Updated'}: .agentos/handoff.md`,
+    '',
+    'Git status:',
+    git.status.trim() || '(empty)',
+    '',
+    'Changed files:',
+    git.changedFiles.length ? git.changedFiles.map((file) => `- ${file}`).join('\n') : '- None detected.',
+    '',
+    'Next: human chooses whether to wait, resume the same engine, or continue manually with another engine.',
+    'No automatic engine switching. No engine was launched or closed.',
+  ];
+
+  if (!dryRun) {
+    await mkdir(join(root, '.agentos/runs'), { recursive: true });
+    await writeFile(handoffPath, note, 'utf8');
+    await writeFile(join(root, '.agentos/tasks.md'), tasksUpdate, 'utf8');
+    await writeFile(join(root, '.agentos/handoff.md'), handoffUpdate, 'utf8');
+  }
+
+  return { ok: true, dryRun, root, engine, reason, handoffPath, handoffRel, git, text: lines.join('\n') };
+}
+
+function resolveRunHandoffWorktree(root, cwd, worktree) {
+  if (!worktree) return resolve(cwd);
+  const raw = String(worktree).trim();
+  return resolve(raw.startsWith('/') ? raw : join(root, raw));
+}
+
+async function collectRunHandoffGitState(worktree) {
+  const [statusResult, diffStatResult, cachedDiffStatResult, namesResult, cachedNamesResult] = await Promise.all([
+    runReadOnlyGit(worktree, ['status', '--short', '--branch']),
+    runReadOnlyGit(worktree, ['diff', '--stat']),
+    runReadOnlyGit(worktree, ['diff', '--cached', '--stat']),
+    runReadOnlyGit(worktree, ['diff', '--name-only']),
+    runReadOnlyGit(worktree, ['diff', '--cached', '--name-only']),
+  ]);
+  const diffFiles = namesResult.ok ? namesResult.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean) : [];
+  const cachedFiles = cachedNamesResult.ok ? cachedNamesResult.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean) : [];
+  const statusFiles = statusResult.ok ? parseGitStatusFiles(statusResult.stdout) : [];
+  const changedFiles = Array.from(new Set([...diffFiles, ...cachedFiles, ...statusFiles]));
+  const snippets = [];
+  let totalChars = 0;
+  for (const file of changedFiles.slice(0, 8)) {
+    const [unstaged, staged] = await Promise.all([
+      runReadOnlyGit(worktree, ['diff', '--', file]),
+      runReadOnlyGit(worktree, ['diff', '--cached', '--', file]),
+    ]);
+    const body = [staged.ok ? staged.stdout : staged.stderr || staged.stdout, unstaged.ok ? unstaged.stdout : unstaged.stderr || unstaged.stdout].filter(Boolean).join('\n');
+    const clipped = clipText(body, Math.max(0, 12000 - totalChars));
+    totalChars += clipped.length;
+    if (clipped.trim()) snippets.push({ file, diff: clipped });
+    if (totalChars >= 12000) break;
+  }
+  return {
+    status: statusResult.ok ? statusResult.stdout : gitErrorText(statusResult),
+    diffStat: [
+      diffStatResult.ok ? diffStatResult.stdout : gitErrorText(diffStatResult),
+      cachedDiffStatResult.ok ? cachedDiffStatResult.stdout : gitErrorText(cachedDiffStatResult),
+    ].filter((text) => text && text.trim()).join('\n'),
+    changedFiles,
+    snippets,
+    errors: [statusResult, diffStatResult, cachedDiffStatResult, namesResult, cachedNamesResult].filter((result) => !result.ok).map(gitErrorText),
+  };
+}
+
+async function runReadOnlyGit(cwd, args) {
+  try {
+    const { stdout, stderr } = await execFileAsync('git', args, { cwd, maxBuffer: 1024 * 1024 });
+    return { ok: true, stdout, stderr, args };
+  } catch (error) {
+    return { ok: false, stdout: error.stdout || '', stderr: error.stderr || error.message || String(error), args };
+  }
+}
+
+function gitErrorText(result) {
+  return [`$ git ${result.args.join(' ')}`, result.stderr || result.stdout || 'Git command failed.'].join('\n').trim();
+}
+
+function parseGitStatusFiles(status) {
+  return String(status || '').split(/\r?\n/).flatMap((line) => {
+    if (!line.trim() || line.startsWith('##')) return [];
+    const payload = line.length > 3 ? line.slice(3).trim() : line.trim();
+    if (!payload) return [];
+    if (payload.includes(' -> ')) return [payload.split(' -> ').pop().trim()].filter(Boolean);
+    return [payload];
+  });
+}
+
+function renderRunHandoffNote({ root, targetWorktree, engine, role, phase, repo, reason, git }) {
+  const relativeWorktree = targetWorktree.startsWith(root) ? relative(root, targetWorktree) || '.' : targetWorktree;
+  return `# Engine Run Handoff — ${role} / ${phase}
+
+AgentOS generated this handoff from local ground truth and supplied run metadata. If the stopped engine did not provide a final summary before exhaustion, treat completion details as unknown and inspect diffs before continuing.
+
+## Stop / risk reason
+
+- Engine: ${engine}
+- Reason: ${reason}
+- Confidence: user-reported/local-git-state
+- Timestamp: ${new Date().toISOString()}
+
+## Scope
+
+- Workspace: ${root}
+- Repo: ${repo}
+- Worktree: ${relativeWorktree}
+- Role: ${role}
+- Phase/task: ${phase}
+- Protected paths: \`.env\`, secrets, production config, unrelated repos, destructive Git operations
+
+## What the engine finished
+
+- Not recorded by AgentOS. If the engine is still alive, paste or link its final summary into a follow-up run note.
+- This handoff is grounded in the current filesystem and Git diff, not hidden engine reasoning.
+
+## What changed
+
+### Git status
+
+\`\`\`text
+${git.status.trim() || '(empty)'}
+\`\`\`
+
+### Diff stat
+
+\`\`\`text
+${git.diffStat.trim() || '(empty)'}
+\`\`\`
+
+### Changed files
+
+${git.changedFiles.length ? git.changedFiles.map((file) => `- ${file}`).join('\n') : '- None detected.'}
+
+### Relevant diff snippets
+
+${git.snippets.length ? git.snippets.map((item) => `#### ${item.file}\n\n\`\`\`diff\n${item.diff.trim()}\n\`\`\``).join('\n\n') : '- No diff snippets available.'}
+
+## What remains
+
+- Human or next engine must inspect the current diff and determine remaining implementation work.
+- Do not restart from scratch; continue from the existing worktree state.
+
+## Verification
+
+- Commands run by AgentOS for this handoff:
+  - \`git status --short --branch\`
+  - \`git diff --stat\`
+  - \`git diff --cached --stat\`
+  - \`git diff --name-only\`
+  - \`git diff --cached --name-only\`
+- Full build/test/QA was not run by \`agentos run handoff\`.
+
+## Risks and caveats
+
+${git.errors.length ? git.errors.map((error) => `- Git inspection warning: ${oneLine(error, 220)}`).join('\n') : '- Completion details may be incomplete if the engine exhausted quota before summarizing.'}
+
+## Safe continuation instructions
+
+Before editing, the next human/engine must run:
+
+\`\`\`bash
+git status --short --branch
+git diff --stat
+git diff
+\`\`\`
+
+Rules:
+
+- No automatic engine switching happened.
+- Continue from the existing worktree; do not restart from scratch.
+- Preserve existing diffs unless clearly wrong.
+- Do not reset, clean, delete, commit, push, merge, or remove worktrees unless Ralph explicitly approves.
+- If switching engines, read the relevant \`.agentos/engines/<engine>.md\` adapter first.
+`;
+}
+
+function renderRunHandoffTasksUpdate({ engine, role, phase, reason, handoffRel, oldTasks }) {
+  const done = sectionLines(extractSection(oldTasks, 'Done'));
+  const now = sectionLines(extractSection(oldTasks, 'Now'));
+  const next = sectionLines(extractSection(oldTasks, 'Next'));
+  const later = sectionLines(extractSection(oldTasks, 'Later'));
+  const handoffTask = `- [ ] ${role} paused after ${engine} ${reason}; handoff: \`${handoffRel}\`.`;
+  const nextTask = '- [ ] Human chooses whether to wait, resume the same engine, or continue manually with another engine. No automatic engine switching.';
+  const laterTask = '- [ ] Add proactive quota/risk detection after manual handoff is proven.';
+  return `# Tasks
+
+## Done
+
+${done.length ? done.join('\n') : '- [x] Engine Run Handoff Notes plan saved.'}
+
+## Now
+
+${[handoffTask, ...now.filter((line) => line !== handoffTask)].join('\n')}
+
+## Next
+
+${appendUniqueTask(next, nextTask).join('\n')}
+
+## Later
+
+${appendUniqueTask(later, laterTask).join('\n')}
+`;
+}
+
+function renderRunHandoffStateUpdate({ engine, role, phase, repo, reason, handoffRel, targetWorktree }) {
+  return `# Handoff
+
+## Current objective
+
+Engine Run Handoff Notes captured a ${role} handoff for ${phase}.
+
+## Scope
+
+- Repo: ${repo}
+- Worktree: ${targetWorktree}
+- Engine: ${engine}
+- Reason: ${reason}
+
+## Current state
+
+- ${role} is paused after ${engine} ${reason}.
+- Handoff note: \`${handoffRel}\`.
+- AgentOS did not switch engines, launch a replacement engine, close a terminal, commit, push, merge, reset, clean, or remove a worktree.
+- The human chooses the next step.
+
+## Last completed step
+
+- Wrote engine-neutral handoff note from local Git/file state.
+
+## Files changed
+
+- ${handoffRel}
+- .agentos/tasks.md
+- .agentos/handoff.md
+
+## Tests run
+
+- \`git status --short --branch\`
+- \`git diff --stat\`
+- \`git diff --cached --stat\`
+- \`git diff --name-only\`
+- \`git diff --cached --name-only\`
+
+## Known failures
+
+- None recorded by AgentOS handoff.
+
+## Next exact action
+
+Human chooses whether to wait, resume the same engine, or continue manually with another engine. The next engine must inspect \`git status --short --branch\`, \`git diff --stat\`, and \`git diff\` before editing.
+
+## Protected files / do not touch
+
+- Do not edit secrets or \`.env\` files.
+- Do not run destructive Git commands.
+- Do not auto-switch engines.
+
+## Open decisions
+
+- Which engine or human continues this work.
+`;
+}
+
+function sectionLines(section) {
+  return String(section || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+}
+
+function appendUniqueTask(lines, task) {
+  return lines.includes(task) ? lines : [...lines, task];
+}
+
+function slug(value) {
+  const text = String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return text || 'run';
+}
+
+function clipText(value, max) {
+  const text = String(value || '');
+  if (max <= 0) return '[diff truncated]';
+  return text.length > max ? `${text.slice(0, max).trimEnd()}\n[diff truncated]` : text;
+}
+
 export async function handoffAgentOS(options: any = {}) {
   const root = await findAgentOSRoot(options.cwd ?? process.cwd());
   if (!root) return { ok: false, text: 'No AgentOS root found.' };

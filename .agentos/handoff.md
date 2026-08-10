@@ -2,86 +2,103 @@
 
 ## Current objective
 
-Generalize Ralph's KargaX commit-message workflow into a reusable AgentOS `conventional-commit` skill template, then prepare for the release branch after this PR merges.
+Engine Run Handoff Notes first implementation is complete on branch `feat/engine-run-handoff-notes`. Await Ralph's approval before commit/push. Worktrees Optional + Installation Wizard and release prep remain intentionally on hold per Ralph.
 
 ## Scope
 
 - Repo: `agentos-for-projects` only.
-- Branch: `feat/conventional-commit-skill-template`.
-- In scope:
-  - `templates/skills/github/conventional-commit.md`
-  - built-in skill catalog entry
-  - template/catalog tests
-  - README/templates docs
-- Out of scope:
-  - publishing to npm
-  - editing KargaX repos
-  - changing release version
+- Branch: `feat/engine-run-handoff-notes`.
+- Implemented:
+  - `agentos run handoff` CLI route
+  - `runHandoffAgentOS` core function
+  - engine-neutral `.agentos/runs/*handoff.md` generation
+  - read-only Git status/diff stat/changed files/bounded diff snippets
+  - `.agentos/tasks.md` and `.agentos/handoff.md` updates that preserve existing task sections
+  - README and smoke/test coverage
+- Out of scope/not implemented:
+  - automatic engine switching
+  - launching OpenCode/Codex/Claude
+  - terminal/process management
+  - quota API detection
+  - lock files
+  - commits/pushes/PRs
+  - editing KargaX or Photobooth repos
 
 ## Current state
 
-- Started from latest `origin/main`, which already included import safety hardening.
-- Inspected KargaX source skill at `/home/app/www/kargax/new/.opencode/skills/kargax-commit/SKILL.md`.
-- Generalized its reusable behavior:
-  - inspect latest git state before message generation
-  - prefer staged diff when present
-  - do not stage/commit/push without explicit user request
-  - stop on secrets/sensitive files/unrelated concerns
-  - optionally run configured quality checks and re-inspect after formatter changes
-  - choose Conventional Commit type/scope from the actual diff
-  - imperative subject + past-tense outcome body bullets
-- Added `templates/skills/github/conventional-commit.md`.
-- Added `conventional-commit` to the `github` built-in skill catalog so `github-pack` and detected Git workspaces include it.
-- Updated tests and docs.
-- Packed installed CLI smoke passed for template list/show/copy/validate, overwrite protection, `--replace`, and `github-pack` materialization.
-- Full verification gate passed.
+- Canonical plan saved:
+  - `.agentos/plans/2026-08-10-engine-run-handoff-notes.md`
+- Obsidian copy saved:
+  - `/mnt/c/_/Obsidian/Ralph/Projects/AgentOS/Plans/2026-08-10/engine-run-handoff-notes.md`
+- New command:
+
+```bash
+agentos run handoff \
+  --engine claude-code \
+  --role implementation \
+  --phase smoke \
+  --reason quota-risk
+```
+
+- The command writes `.agentos/runs/<timestamp>-<role>-<phase>-handoff.md`, updates task/handoff state, and never launches or closes an engine.
+- Worktrees Optional + Installation Wizard remains on hold:
+  - `.agentos/plans/2026-08-10-worktrees-optional-install-wizard.md`
+  - `/mnt/c/_/Obsidian/Ralph/Projects/AgentOS/Plans/2026-08-10/worktrees-optional-install-wizard.md`
+- Release branch `chore/release-0.1.0` remains on hold per Ralph.
 
 ## Last completed step
 
-- Full verification gate exited 0.
+- Implemented and verified the first production-ready Engine Run Handoff Notes slice.
 
 ## Files changed
 
-- `.agentos/handoff.md`
+- `.agentos/plans/2026-08-10-engine-run-handoff-notes.md`
 - `.agentos/tasks.md`
+- `.agentos/handoff.md`
 - `README.md`
-- `docs/templates.md`
+- `src/cli.ts`
 - `src/core.ts`
 - `test/core.test.js`
-- `templates/skills/github/conventional-commit.md`
-- generated `dist/core.js`
-- generated `dist/core.js.map`
+- `test/smoke.js`
+- generated build output under `dist/`
+- Obsidian note: `/mnt/c/_/Obsidian/Ralph/Projects/AgentOS/Plans/2026-08-10/engine-run-handoff-notes.md`
 
 ## Tests run
 
-- `bun run test` — passed, 54 tests / 0 failures.
-- Packed installed CLI smoke — passed with `COMMIT_SKILL_TEMPLATE_SMOKE_PASS`.
-- Full gate — passed:
-  - `bun run check`
-  - `bun run test`
-  - `bun run smoke`
-  - `bun run test:package-managers`
-  - `npm publish --dry-run --access public`
-  - `node dist/cli.js doctor`
-  - `node dist/cli.js status`
-  - `git diff --check`
+```bash
+bun run check
+bun run test
+npm pack --dry-run
+```
+
+Also dogfooded packed CLI behavior in a temporary initialized Git repo:
+
+```bash
+node dist/cli.js run handoff --engine claude-code --role implementation --phase smoke --reason quota-risk
+node dist/cli.js status
+```
 
 ## Known failures
 
-- None.
+- None in final verification.
 
 ## Next exact action
 
-1. Commit and push `feat/conventional-commit-skill-template`.
-2. Open PR and merge.
-3. After merge, start `chore/release-0.1.0`.
+Wait for Ralph. If Ralph approves this branch, run final diff review, then commit/push only with explicit approval.
 
 ## Protected files / do not touch
 
 - Do not edit `/home/app/www/kargax/new`.
+- Do not edit Photobooth repos as part of this AgentOS package feature.
 - Do not publish npm package yet.
-- Do not start release branch until this skill-template branch is pushed/merged.
+- Do not start release branch while release is on hold.
+- Do not implement Worktrees Optional + Installation Wizard while it is on hold.
+- Do not auto-switch engines; this feature is handoff notes only.
+- Do not bulk-load the Obsidian vault; use linked notes only.
 
 ## Open decisions
 
-- Whether to merge this small skill-template PR before starting `chore/release-0.1.0`.
+- Whether to add proactive quota/risk detection later.
+- Whether to add `--summary-file` for engine-written final summaries later.
+- Whether phase-level summary generation belongs in the next slice.
+- Whether lock files are needed later, or whether human-readable handoff notes are enough for the no-auto-switch model.

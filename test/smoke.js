@@ -33,6 +33,8 @@ console.log('\n--- doctor from root ---');
 console.log(run(['doctor']));
 console.log('\n--- compact dry-run from root ---');
 console.log(run(['compact', '--dry-run']));
+console.log('\n--- run handoff dry-run from root ---');
+console.log(run(['run', 'handoff', '--engine', 'claude-code', '--role', 'implementation', '--phase', 'smoke', '--reason', 'manual-pause', '--dry-run']));
 console.log('\n--- link-obsidian dry-run from root ---');
 await mkdir(join(root, 'obsidian-vault'), { recursive: true });
 console.log(run(['link-obsidian', '--vault', join(root, 'obsidian-vault'), '--dest', 'Projects/AgentOS', '--create', '--dry-run']));
