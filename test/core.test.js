@@ -191,6 +191,32 @@ test('doctor --fix preserves declared custom local agents and their capability m
   assert.match(agentFile, /custom security review/);
 });
 
+test('link-obsidian creates a basename --link note inside --dest', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true });
+  const vault = join(root, 'vault');
+  await mkdirp(vault);
+
+  const result = await linkObsidianAgentOS({
+    cwd: root,
+    vault,
+    dest: 'Projects/KargaX/AgentOS',
+    link: 'KargaX AgentOS Index.md',
+    create: true,
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.linked, ['Projects/KargaX/AgentOS/KargaX AgentOS Index.md']);
+  assert.equal(await exists(join(vault, 'Projects/KargaX/AgentOS/KargaX AgentOS Index.md')), true);
+  assert.equal(await exists(join(vault, 'KargaX AgentOS Index.md')), false);
+  const knowledge = await readFile(join(root, '.agentos/knowledge.md'), 'utf8');
+  assert.match(knowledge, /Destination: `Projects\/KargaX\/AgentOS`/);
+  assert.match(knowledge, /\[\[Projects\/KargaX\/AgentOS\/KargaX AgentOS Index\]\]/);
+  const projectYaml = await readFile(join(root, '.agentos/project.yaml'), 'utf8');
+  assert.match(projectYaml, /destination: Projects\/KargaX\/AgentOS/);
+  assert.match(projectYaml, /- Projects\/KargaX\/AgentOS\/KargaX AgentOS Index\.md/);
+});
+
 test('project-manager is an optional built-in planning-only role, not enabled by default', async () => {
   const detectedRoot = await tempProject();
   await initAgentOS({ cwd: detectedRoot, mode: 'new', yes: true });
