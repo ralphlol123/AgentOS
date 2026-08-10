@@ -182,7 +182,7 @@ export async function linkObsidianAgentOS(options: any = {}) {
   const dryRun = Boolean(options.dryRun);
 
   if (!await exists(vault)) return { ok: false, text: `AgentOS link-obsidian: FAIL\nVault path does not exist: ${vault}` };
-  const linked = rawLink ? (rawLink.toLowerCase().endsWith('.md') ? [rawLink] : defaultObsidianNotes(rawLink, projectName)) : defaultObsidianNotes(destination, projectName);
+  const linked = resolveObsidianLinks({ rawLink, destination, projectName });
   const missing = [];
   for (const note of linked) {
     const notePath = join(vault, note);
@@ -2331,6 +2331,17 @@ function timestampForFilename(date) {
   return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
 }
 
+
+function resolveObsidianLinks({ rawLink, destination, projectName }) {
+  if (!rawLink) return defaultObsidianNotes(destination, projectName);
+  const link = normalizeVaultRelativePath(rawLink);
+  if (link.toLowerCase().endsWith('.md')) {
+    // A bare note name should be created under --dest. If the caller supplies
+    // a folder-qualified note path, preserve it as an explicit vault-relative allowlist path.
+    return [link.includes('/') ? link : `${normalizeVaultRelativePath(destination)}/${link}`];
+  }
+  return defaultObsidianNotes(link, projectName);
+}
 
 function defaultObsidianNotes(destination, projectName) {
   const base = normalizeVaultRelativePath(destination);
