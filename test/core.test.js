@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
-import { initAgentOS, statusAgentOS, handoffAgentOS, doctorAgentOS, promptAgentOS, compactAgentOS, linkObsidianAgentOS, migrateClaudeAgentOS, agentsAgentOS, skillsAgentOS, templatesAgentOS } from '../dist/core.js';
+import { initAgentOS, statusAgentOS, handoffAgentOS, doctorAgentOS, promptAgentOS, compactAgentOS, linkObsidianAgentOS, migrateClaudeAgentOS, agentsAgentOS, skillsAgentOS, templatesAgentOS, runHandoffAgentOS } from '../dist/core.js';
 
 async function exists(path) {
   try {
@@ -367,6 +367,73 @@ test('prompt renders engine-specific AgentOS task prefix', async () => {
   assert.match(prompt.text, /Now:/);
   assert.match(prompt.text, /only the assigned repo\/agent\/engine context needed/);
   assert.doesNotMatch(prompt.text, /agents\/\*/);
+});
+
+test('run handoff dry-run reports recovery note without writing files', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true });
+  spawnSync('git', ['init'], { cwd: root, encoding: 'utf8' });
+  spawnSync('git', ['config', 'user.email', 'agentos@example.local'], { cwd: root, encoding: 'utf8' });
+  spawnSync('git', ['config', 'user.name', 'AgentOS Test'], { cwd: root, encoding: 'utf8' });
+  await writeFile(join(root, 'feature.txt'), 'before\n');
+  spawnSync('git', ['add', 'feature.txt'], { cwd: root, encoding: 'utf8' });
+  spawnSync('git', ['commit', '-m', 'chore: baseline'], { cwd: root, encoding: 'utf8' });
+  await writeFile(join(root, 'feature.txt'), 'before\nafter\n');
+  await writeFile(join(root, 'staged.txt'), 'staged\n');
+  spawnSync('git', ['add', 'staged.txt'], { cwd: root, encoding: 'utf8' });
+  await writeFile(join(root, 'new-file.txt'), 'new\n');
+
+  const result = await runHandoffAgentOS({ cwd: root, engine: 'claude-code', role: 'implementation', phase: 'quota-risk', reason: 'quota-risk', dryRun: true });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.dryRun, true);
+  assert.match(result.text, /AgentOS run handoff dry run/);
+  assert.match(result.text, /Would write: \.agentos\/runs\/.+implementation-quota-risk-handoff\.md/);
+  assert.match(result.text, /feature\.txt/);
+  assert.match(result.text, /staged\.txt/);
+  assert.match(result.text, /new-file\.txt/);
+  assert.ok(result.git.changedFiles.includes('staged.txt'));
+  assert.ok(result.git.changedFiles.includes('new-file.txt'));
+  assert.match(result.text, /No automatic engine switching/);
+  const runs = await readdir(join(root, '.agentos/runs'));
+  assert.equal(runs.some((file) => /handoff\.md$/.test(file)), false);
+});
+
+test('run handoff writes grounded note and updates AgentOS state', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true });
+  spawnSync('git', ['init'], { cwd: root, encoding: 'utf8' });
+  spawnSync('git', ['config', 'user.email', 'agentos@example.local'], { cwd: root, encoding: 'utf8' });
+  spawnSync('git', ['config', 'user.name', 'AgentOS Test'], { cwd: root, encoding: 'utf8' });
+  await writeFile(join(root, 'api.ts'), 'export const value = 1;\n');
+  await writeFile(join(root, '.agentos/tasks.md'), '# Tasks\n\n## Done\n\n- [x] Existing milestone kept.\n\n## Now\n\n- [ ] Release branch is on hold.\n\n## Next\n\n- [ ] Existing next task kept.\n\n## Later\n\n- [ ] Existing later task kept.\n');
+  spawnSync('git', ['add', 'api.ts'], { cwd: root, encoding: 'utf8' });
+  spawnSync('git', ['commit', '-m', 'chore: baseline'], { cwd: root, encoding: 'utf8' });
+  await writeFile(join(root, 'api.ts'), 'export const value = 2;\n');
+
+  const result = await runHandoffAgentOS({ cwd: root, engine: 'claude', role: 'backend-engineer', repo: 'api', phase: 'quota-risk', reason: 'quota-limit' });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.engine, 'claude-code');
+  assert.match(result.handoffPath, /backend-engineer-quota-risk-handoff\.md$/);
+  const note = await readFile(result.handoffPath, 'utf8');
+  assert.match(note, /# Engine Run Handoff — backend-engineer \/ quota-risk/);
+  assert.match(note, /Engine: claude-code/);
+  assert.match(note, /Reason: quota-limit/);
+  assert.match(note, /api\.ts/);
+  assert.match(note, /git status --short --branch/);
+  assert.match(note, /No automatic engine switching/);
+  assert.match(note, /Do not reset, clean, delete, commit, push, merge, or remove worktrees/);
+  const tasks = await readFile(join(root, '.agentos/tasks.md'), 'utf8');
+  assert.match(tasks, /backend-engineer paused after claude-code quota-limit/);
+  assert.match(tasks, /\.agentos\/runs\/.+backend-engineer-quota-risk-handoff\.md/);
+  assert.match(tasks, /Existing milestone kept/);
+  assert.match(tasks, /Release branch is on hold/);
+  assert.match(tasks, /Existing next task kept/);
+  assert.match(tasks, /Existing later task kept/);
+  const handoff = await readFile(join(root, '.agentos/handoff.md'), 'utf8');
+  assert.match(handoff, /Engine Run Handoff Notes/);
+  assert.match(handoff, /human chooses the next step/);
 });
 
 test('generated adapters steer engines toward selective context loading', async () => {

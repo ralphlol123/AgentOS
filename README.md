@@ -29,6 +29,7 @@ AgentOS v0.1 is a TypeScript CLI/package that supports:
 - guarded import of useful web/file agents or skills;
 - Obsidian link-only knowledge setup;
 - deterministic live-context compaction;
+- engine-neutral run handoff notes with read-only Git grounding;
 - doctor/status/handoff checks and JSON health output;
 - Claude legacy migration preservation.
 
@@ -104,6 +105,7 @@ More detail: [docs/quickstart.md](docs/quickstart.md).
 agentos init [--new|--existing] [--agents minimal|detected|frontend,qa,release] [--dry-run]
 agentos status
 agentos handoff
+agentos run handoff [--engine name] [--role role] [--repo repo] [--worktree path] [--phase slug] [--reason reason] [--dry-run]
 agentos doctor [--fix] [--json]
 agentos compact [--dry-run]
 agentos link-obsidian [--vault <path> --dest <folder> --link <note> --create]
@@ -119,6 +121,29 @@ agentos templates import <url-or-file> --type agent|skill --name <id> [--mode su
 agentos migrate claude --preserve [--dry-run]
 agentos prompt [claude|codex|opencode|hermes]
 ```
+
+## Run handoff notes
+
+Use `agentos run handoff` when an engine is near quota, hit a provider/rate-limit error, was manually paused, or left partial work that another human/engine may need to continue.
+
+```bash
+agentos run handoff \
+  --engine claude-code \
+  --role backend-engineer \
+  --repo photobooth-be \
+  --worktree worktrees/photobooth-be__feat-event-template-system \
+  --phase event-template-system \
+  --reason quota-risk
+```
+
+The command writes an engine-neutral note under `.agentos/runs/`, captures read-only Git state (`status`, `diff --stat`, changed files, bounded diff snippets), and updates `.agentos/tasks.md` plus `.agentos/handoff.md`.
+
+Safety rules:
+
+- AgentOS does **not** automatically switch engines.
+- AgentOS does **not** launch OpenCode/Codex/Claude or close terminals.
+- AgentOS does **not** commit, push, merge, reset, clean, or remove worktrees.
+- The next human/engine must inspect `git status --short --branch`, `git diff --stat`, and `git diff` before editing.
 
 ## Agent profiles
 

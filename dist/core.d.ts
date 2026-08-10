@@ -170,6 +170,33 @@ export declare function templatesAgentOS(options?: any): Promise<{
         messages: string[];
     };
 }>;
+export declare function runHandoffAgentOS(options?: any): Promise<{
+    engine?: undefined;
+    dryRun?: undefined;
+    root?: undefined;
+    ok: boolean;
+    text: string;
+    reason?: undefined;
+    handoffPath?: undefined;
+    handoffRel?: undefined;
+    git?: undefined;
+} | {
+    ok: boolean;
+    dryRun: boolean;
+    root: string;
+    engine: string;
+    reason: string;
+    handoffPath: string;
+    handoffRel: string;
+    git: {
+        status: any;
+        diffStat: string;
+        changedFiles: any[];
+        snippets: any[];
+        errors: string[];
+    };
+    text: string;
+}>;
 export declare function handoffAgentOS(options?: any): Promise<{
     ok: boolean;
     text: string;
