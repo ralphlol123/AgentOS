@@ -64,6 +64,27 @@ export declare function linkObsidianAgentOS(options?: any): Promise<{
     linked: string[];
     text: string;
 }>;
+export declare function obsidianAgentOS(options?: any): Promise<{
+    ok: boolean;
+    vault: string;
+    destination: string;
+    linked: any;
+    text: string;
+    mode?: undefined;
+    workspacePath?: undefined;
+} | {
+    vault?: undefined;
+    destination?: undefined;
+    mode?: undefined;
+    ok: boolean;
+    text: string;
+} | {
+    ok: boolean;
+    mode: string;
+    vault: string;
+    destination: string;
+    text: string;
+}>;
 export declare function migrateClaudeAgentOS(options?: any): Promise<{
     dryRun?: undefined;
     ok: boolean;
@@ -77,10 +98,10 @@ export declare function migrateClaudeAgentOS(options?: any): Promise<{
 }>;
 export declare function skillsAgentOS(options?: any): Promise<{
     dryRun?: undefined;
+    mode?: undefined;
     root?: undefined;
     ok: boolean;
     text: string;
-    mode?: undefined;
     skills?: undefined;
 } | {
     ok: boolean;
