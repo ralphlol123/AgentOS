@@ -27,7 +27,7 @@ AgentOS v0.1 is a TypeScript CLI/package that supports:
 - local custom agents under `.agentos/agents/`;
 - reusable repository templates under `templates/`;
 - guarded import of useful web/file agents or skills;
-- Obsidian link-only knowledge setup;
+- Obsidian workspace-folder knowledge/output setup;
 - deterministic live-context compaction;
 - engine-neutral run handoff notes with read-only Git grounding;
 - doctor/status/handoff checks and JSON health output;
@@ -109,6 +109,8 @@ agentos run handoff [--engine name] [--role role] [--repo repo] [--worktree path
 agentos doctor [--fix] [--json]
 agentos compact [--dry-run]
 agentos link-obsidian [--vault <path> --dest <folder> --link <note> --create]
+agentos obsidian link-workspace --vault <path> --dest <folder> [--create] [--dry-run]
+agentos obsidian status
 agentos skills list
 agentos skills add [--detected] [skill-id|category-pack,...] [--mode summary|full] [--dry-run]
 agentos agents list
@@ -257,24 +259,37 @@ agentos templates import ./external-skill.md --type skill --name external-review
 
 Safe-import docs: [docs/safe-imports.md](docs/safe-imports.md).
 
-## Obsidian link-only knowledge
+## Obsidian workspace-folder knowledge
 
-Interactive:
+Preferred setup links one Obsidian folder/workspace per AgentOS workspace:
 
 ```bash
-agentos link-obsidian
+agentos obsidian link-workspace \
+  --vault /mnt/c/_/Obsidian/Ralph \
+  --dest "Projects/KargaX/AgentOS" \
+  --create
+
+agentos obsidian status
 ```
 
-Automation:
+This writes `.agentos/knowledge.md`, patches `.agentos/project.yaml`, and optionally creates the destination folder only. It intentionally does **not** create note files, plans, summaries, or templates. Claude Code, Codex, OpenCode, Hermes, or another engine may create/edit Markdown inside the linked workspace only when a task explicitly allows it.
+
+Safety rules:
+
+- AgentOS does not bulk-load the Obsidian vault.
+- The linked destination folder is the default Obsidian boundary.
+- Runtime state stays in `.agentos/`.
+- Durable notes, summaries, plans, decisions, and runbooks belong inside the linked Obsidian workspace when exported or written.
+
+Legacy exact-note linking remains available:
 
 ```bash
 agentos link-obsidian \
   --vault /mnt/c/_/Obsidian/Ralph \
   --dest "Projects/AgentOS" \
+  --link "AgentOS Index.md" \
   --create
 ```
-
-AgentOS links specific notes only. It does not bulk-load the vault.
 
 When `--dest` is omitted, AgentOS defaults to:
 

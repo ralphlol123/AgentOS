@@ -179,8 +179,8 @@ export async function linkObsidianAgentOS(options = {}) {
     if (missing.length && !create) {
         return { ok: false, text: `AgentOS link-obsidian: FAIL\nMissing linked notes. Re-run with --create to create them:\n${missing.map((n) => `- ${n}`).join('\n')}` };
     }
-    const knowledge = knowledgeMd({ vault, destination, linked });
-    const projectPatched = ensureObsidianProjectConfig(project, { vault, destination, linked });
+    const knowledge = knowledgeMd({ vault, destination, linked, mode: 'link-only' });
+    const projectPatched = ensureObsidianProjectConfig(project, { vault, destination, linked, mode: 'link-only' });
     const lines = [
         `AgentOS link-obsidian${dryRun ? ' dry run' : ''}`,
         `Root: ${root}`,
@@ -190,8 +190,7 @@ export async function linkObsidianAgentOS(options = {}) {
         '',
         `${dryRun ? 'Would write' : 'Wrote'}: .agentos/knowledge.md`,
         `${dryRun ? 'Would patch' : 'Patched'}: .agentos/project.yaml`,
-        `${dryRun ? 'Would ensure' : 'Ensured'} Obsidian notes:
-${linked.map((n) => `- ${n}`).join('\n')}`,
+        `${dryRun ? 'Would ensure' : 'Ensured'} Obsidian notes:\n${linked.map((n) => `- ${n}`).join('\n')}`,
         '',
         'Safety: AgentOS links specific notes only. It does not bulk-load the Obsidian vault.',
     ];
@@ -219,6 +218,113 @@ ${linked.map((n) => `- ${n}`).join('\n')}`,
         }
     }
     return { ok: true, vault, destination, linked, text: lines.join('\n') };
+}
+export async function obsidianAgentOS(options = {}) {
+    const command = String(options.command || 'status');
+    if (command === 'note' || command === 'export') {
+        return {
+            ok: false,
+            text: [
+                `AgentOS obsidian ${command}: NOT IMPLEMENTED`,
+                'Note creation helpers are intentionally not implemented.',
+                'Use Claude Code, Codex, OpenCode, or Hermes to create or edit Markdown files inside the linked Obsidian workspace when the task explicitly allows it.',
+            ].join('\n'),
+        };
+    }
+    if (command === 'link-workspace')
+        return linkObsidianWorkspaceAgentOS(options);
+    if (command === 'status')
+        return obsidianStatusAgentOS(options);
+    return {
+        ok: false,
+        text: 'Usage: agentos obsidian link-workspace --vault <path> --dest <folder> [--create] [--dry-run]\n       agentos obsidian status',
+    };
+}
+async function linkObsidianWorkspaceAgentOS(options = {}) {
+    const root = await findAgentOSRoot(options.cwd ?? process.cwd());
+    if (!root)
+        return { ok: false, text: 'AgentOS obsidian link-workspace: FAIL\nNo .agentos directory found.' };
+    const project = await safeRead(join(root, '.agentos/project.yaml'));
+    const rawVault = String(options.vault || '').trim();
+    if (!rawVault)
+        return { ok: false, text: 'AgentOS obsidian link-workspace: FAIL\nMissing --vault <path>.' };
+    const vault = resolve(rawVault);
+    if (!await exists(vault))
+        return { ok: false, text: `AgentOS obsidian link-workspace: FAIL\nVault path does not exist: ${vault}` };
+    const destination = normalizeVaultRelativePath(options.dest || `Projects/${title(firstYamlValue(project, 'name') ?? basename(root)).replace(/\s+/g, ' ')}/AgentOS`);
+    if (!isSafeVaultRelativePath(destination))
+        return { ok: false, text: `AgentOS obsidian link-workspace: FAIL\nDestination must be a safe vault-relative folder: ${destination}` };
+    const linked = Array.isArray(options.linked) ? options.linked.map(normalizeVaultRelativePath) : [];
+    const dryRun = Boolean(options.dryRun);
+    const create = Boolean(options.create);
+    const workspacePath = join(vault, destination);
+    const knowledge = knowledgeMd({ vault, destination, linked, mode: 'workspace-folder' });
+    const projectPatched = ensureObsidianProjectConfig(project, { vault, destination, linked, mode: 'workspace-folder' });
+    const lines = [
+        `AgentOS obsidian link-workspace${dryRun ? ' dry run' : ''}`,
+        `Root: ${root}`,
+        `Vault: ${vault}`,
+        `Destination: ${destination}`,
+        'Mode: workspace-folder',
+        '',
+        `${dryRun ? 'Would write' : 'Wrote'}: .agentos/knowledge.md`,
+        `${dryRun ? 'Would patch' : 'Patched'}: .agentos/project.yaml`,
+        create ? `${dryRun ? 'Would create' : 'Created'} workspace folder: ${destination}` : 'Workspace folder creation: skipped (use --create to mkdir only; no notes are created)',
+        '',
+        'Safety: AgentOS confines Obsidian reads/writes to this workspace folder. It does not bulk-load the vault.',
+        'Note creation: intentionally delegated to Claude Code, Codex, OpenCode, or Hermes when explicitly tasked.',
+    ];
+    if (!dryRun) {
+        try {
+            await mkdir(join(root, '.agentos'), { recursive: true });
+            if (create)
+                await mkdir(workspacePath, { recursive: true });
+            await writeFile(join(root, '.agentos/knowledge.md'), knowledge, 'utf8');
+            await writeFile(join(root, '.agentos/project.yaml'), projectPatched, 'utf8');
+            await fixAgentOSAdapters(root);
+            const doctor = await doctorAgentOS({ cwd: root });
+            lines.push('', doctor.text);
+        }
+        catch (error) {
+            if (error && error.code === 'EACCES') {
+                return { ok: false, vault, destination, linked, text: obsidianPermissionErrorText(error, vault, destination) };
+            }
+            throw error;
+        }
+    }
+    return { ok: true, mode: 'workspace-folder', vault, destination, linked, workspacePath, text: lines.join('\n') };
+}
+async function obsidianStatusAgentOS(options = {}) {
+    const root = await findAgentOSRoot(options.cwd ?? process.cwd());
+    if (!root)
+        return { ok: false, text: 'AgentOS Obsidian: NOT FOUND\nNo .agentos directory found.' };
+    const project = await safeRead(join(root, '.agentos/project.yaml'));
+    const config = obsidianConfigFromProject(project);
+    if (!config)
+        return { ok: false, text: 'AgentOS Obsidian: NOT CONFIGURED\nRun `agentos obsidian link-workspace --vault <path> --dest <folder>`.' };
+    const workspace = config.vault && config.destination ? join(config.vault, config.destination) : '';
+    const diagnostics = [];
+    if (config.vault && !await exists(config.vault))
+        diagnostics.push(`Vault missing: ${config.vault}`);
+    if (workspace && !await exists(workspace))
+        diagnostics.push(`Workspace folder missing: ${workspace}`);
+    const ok = diagnostics.length === 0;
+    return {
+        ok,
+        mode: config.mode,
+        vault: config.vault,
+        destination: config.destination,
+        text: [
+            `AgentOS Obsidian: ${ok ? 'OK' : 'NEEDS ATTENTION'}`,
+            `Mode: ${config.mode}`,
+            `Vault: ${config.vault}`,
+            `Workspace: ${config.destination}`,
+            workspace ? `Workspace path: ${workspace}` : null,
+            `Linked notes: ${config.linked.length ? config.linked.join(', ') : 'none; engines may create/edit files inside the workspace when explicitly tasked'}`,
+            'Safety: no bulk vault access; writes confined to workspace folder',
+            diagnostics.length ? `Diagnostics:\n${diagnostics.map((d) => `- ${d}`).join('\n')}` : null,
+        ].filter(Boolean).join('\n'),
+    };
 }
 function obsidianPermissionErrorText(error, vault, destination) {
     const path = error.path || join(vault, destination);
@@ -1992,8 +2098,12 @@ function memoryMd({ mode, workspaceKind }) {
 }
 function knowledgeMd(options = {}) {
     const linked = options.linked || [];
-    const obsidian = options.vault ? `\n## Obsidian\n\nVault: \`${options.vault}\`\nDestination: \`${options.destination}\`\nMode: \`link-only\`\n\nLinked notes:\n${linked.map((note) => `- [[${note.replace(/\.md$/, '')}]]`).join('\n') || '- None linked yet.'}\n` : '';
-    return `# Knowledge\n\nLong-term knowledge links for this project.\n\nRules:\n- Do not bulk-load external vaults or folders.\n- Read only linked notes relevant to the current task.\n- Keep runtime context small; use handoff/tasks for current state.\n${obsidian}`;
+    const mode = options.mode || 'link-only';
+    const workspacePath = options.vault && options.destination ? join(options.vault, options.destination) : '';
+    const obsidian = options.vault && mode === 'workspace-folder'
+        ? `\n## Obsidian\n\nVault: \`${options.vault}\`\nDestination: \`${options.destination}\`\nMode: \`workspace-folder\`\nWorkspace folder: \`${workspacePath}\`\n\nRules:\n- Agents may read/write only inside this folder unless Ralph explicitly allows another path.\n- Do not bulk-load the Obsidian vault.\n- Runtime state stays in \`.agentos/\`.\n- Durable notes, plans, summaries, decisions, and runbooks for this AgentOS workspace may be written here when the task explicitly allows it.\n\nLinked notes:\n${linked.map((note) => `- [[${note.replace(/\.md$/, '')}]]`).join('\n') || '- None linked yet; engines may create files inside the workspace when explicitly tasked.'}\n`
+        : options.vault ? `\n## Obsidian\n\nVault: \`${options.vault}\`\nDestination: \`${options.destination}\`\nMode: \`link-only\`\n\nLinked notes:\n${linked.map((note) => `- [[${note.replace(/\.md$/, '')}]]`).join('\n') || '- None linked yet.'}\n` : '';
+    return `# Knowledge\n\nLong-term knowledge links for this project.\n\nRules:\n- Do not bulk-load external vaults or folders.\n- Read only linked notes or the linked workspace folder relevant to the current task.\n- Keep runtime context small; use handoff/tasks for current state.\n${obsidian}`;
 }
 function skillsMd(agentSelection) {
     const enabled = new Set(agentSelection.enabled);
@@ -2211,16 +2321,30 @@ function renderEnginePrompt({ engine, root, project, handoff, tasks }) {
     const workspaceKind = firstYamlValue(project, 'workspace_kind') ?? 'unknown';
     const currentObjective = extractSection(handoff, 'Current objective') || '(none)';
     const now = extractSection(tasks, 'Now') || '(none)';
+    const obsidianLine = obsidianPromptLine(project);
     return [
         'Follow AgentOS for Projects.',
         `Project: ${projectName}; root: ${root}; kind: ${workspaceKind}; engine: ${engine}.`,
         `Read: AGENTS.md; ${engineAdapterLine(engine)}; .agentos/project.yaml; memory.md; handoff.md; tasks.md. Then load skills.md plus only the assigned repo/agent/engine context needed for the task.`,
+        obsidianLine,
         'Rules: declare role + scope before editing; edit only in scope; no secrets/.env/migrations/prod config without approval; no commit/push unless asked; verify; update handoff/tasks if state changes.',
         ...engineSpecificRules(engine),
         `Current objective: ${oneLine(currentObjective)}`,
         `Now: ${oneLine(now)}`,
         'If a user task is included, perform only that task under these rules; otherwise wait for the task.',
-    ].join('\n');
+    ].filter(Boolean).join('\n');
+}
+function obsidianPromptLine(project) {
+    const config = obsidianConfigFromProject(project);
+    if (!config || !config.vault || !config.destination)
+        return null;
+    if (config.mode === 'workspace-folder') {
+        return `Obsidian workspace: ${join(config.vault, config.destination)}. For Obsidian notes, plans, summaries, decisions, or durable knowledge, read/write only inside that folder when explicitly tasked. Do not bulk-load the Obsidian vault.`;
+    }
+    if (config.linked.length) {
+        return `Obsidian links: ${config.linked.join(', ')}. Read only linked notes relevant to the task. Do not bulk-load the Obsidian vault.`;
+    }
+    return null;
 }
 function engineAdapterLine(engine) {
     if (engine === 'claude-code')
@@ -2405,6 +2529,10 @@ function defaultObsidianNotes(destination, projectName) {
 function normalizeVaultRelativePath(value) {
     return String(value || '').replace(/^['"]|['"]$/g, '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/g, '');
 }
+function isSafeVaultRelativePath(value) {
+    const normalized = normalizeVaultRelativePath(value);
+    return Boolean(normalized) && !normalized.split('/').some((part) => part === '..' || part === '.');
+}
 function obsidianNoteTemplate(note, projectName, linked) {
     const titleText = basename(note, '.md');
     const isOverview = /overview/i.test(titleText);
@@ -2413,16 +2541,36 @@ function obsidianNoteTemplate(note, projectName, linked) {
         : `## Notes\n\nAdd durable knowledge here. Keep execution logs in AgentOS runs/handoff, not this note.\n`;
     return `# ${titleText}\n\n${body}\n`;
 }
-function ensureObsidianProjectConfig(project, { vault, destination, linked }) {
+function ensureObsidianProjectConfig(project, { vault, destination, linked, mode = 'link-only' }) {
     const data = parseProjectYaml(project);
     data.knowledge = data.knowledge && typeof data.knowledge === 'object' ? data.knowledge : {};
     data.knowledge.obsidian = {
-        mode: 'link-only',
+        mode,
         vault,
         destination,
         linked,
     };
+    if (mode === 'workspace-folder') {
+        data.knowledge.obsidian.rules = {
+            no_bulk_vault_access: true,
+            writes_confined_to_destination: true,
+        };
+    }
     return dumpProjectYaml(data);
+}
+function obsidianConfigFromProject(project) {
+    const data = parseProjectYaml(project);
+    const obsidian = data.knowledge && typeof data.knowledge === 'object' && data.knowledge.obsidian && typeof data.knowledge.obsidian === 'object'
+        ? data.knowledge.obsidian
+        : null;
+    if (!obsidian)
+        return null;
+    return {
+        mode: stringValue(obsidian.mode, 'link-only'),
+        vault: stringValue(obsidian.vault),
+        destination: normalizeVaultRelativePath(obsidian.destination),
+        linked: Array.isArray(obsidian.linked) ? obsidian.linked.map((note) => normalizeVaultRelativePath(note)).filter(Boolean) : [],
+    };
 }
 function firstYamlValue(text, key) {
     const value = parseProjectYaml(text)[key];

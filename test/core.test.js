@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
-import { initAgentOS, statusAgentOS, handoffAgentOS, doctorAgentOS, promptAgentOS, compactAgentOS, linkObsidianAgentOS, migrateClaudeAgentOS, agentsAgentOS, skillsAgentOS, templatesAgentOS, runHandoffAgentOS } from '../dist/core.js';
+import { initAgentOS, statusAgentOS, handoffAgentOS, doctorAgentOS, promptAgentOS, compactAgentOS, linkObsidianAgentOS, obsidianAgentOS, migrateClaudeAgentOS, agentsAgentOS, skillsAgentOS, templatesAgentOS, runHandoffAgentOS } from '../dist/core.js';
 
 async function exists(path) {
   try {
@@ -666,6 +666,75 @@ Implement deterministic compaction.
   assert.match(archive, /Duplicate stale now item/);
 });
 
+
+test('obsidian link-workspace records a folder boundary without note creation helpers', async () => {
+  const root = await tempProject();
+  const vault = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true });
+
+  const result = await obsidianAgentOS({ command: 'link-workspace', cwd: root, vault, dest: 'Projects/KargaX/AgentOS', create: true });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.mode, 'workspace-folder');
+  assert.equal(result.destination, 'Projects/KargaX/AgentOS');
+  assert.match(result.text, /AgentOS obsidian link-workspace/);
+  assert.match(result.text, /Mode: workspace-folder/);
+  assert.match(result.text, /Created workspace folder: Projects\/KargaX\/AgentOS/);
+  assert.doesNotMatch(result.text, /Ensured Obsidian notes/);
+  assert.equal(await exists(join(vault, 'Projects/KargaX/AgentOS')), true);
+  assert.equal(await exists(join(vault, 'Projects/KargaX/AgentOS/KargaX AgentOS Index.md')), false);
+  assert.equal(await exists(join(vault, 'Projects/KargaX/AgentOS/Agentos Test Overview.md')), false);
+
+  const knowledge = await readFile(join(root, '.agentos/knowledge.md'), 'utf8');
+  const project = await readFile(join(root, '.agentos/project.yaml'), 'utf8');
+  assert.match(knowledge, /Mode: `workspace-folder`/);
+  assert.match(knowledge, /Workspace folder: `.*\/Projects\/KargaX\/AgentOS`/);
+  assert.match(knowledge, /Agents may read\/write only inside this folder/);
+  assert.match(knowledge, /Do not bulk-load the Obsidian vault/);
+  assert.match(project, /mode: workspace-folder/);
+  assert.match(project, /writes_confined_to_destination: true/);
+});
+
+test('obsidian status reports configured workspace-folder boundary', async () => {
+  const root = await tempProject();
+  const vault = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true });
+  await obsidianAgentOS({ command: 'link-workspace', cwd: root, vault, dest: 'Projects/KargaX/AgentOS', create: true });
+
+  const status = await obsidianAgentOS({ command: 'status', cwd: root });
+
+  assert.equal(status.ok, true);
+  assert.match(status.text, /AgentOS Obsidian: OK/);
+  assert.match(status.text, /Mode: workspace-folder/);
+  assert.match(status.text, /Workspace: Projects\/KargaX\/AgentOS/);
+  assert.match(status.text, /Safety: no bulk vault access; writes confined to workspace folder/);
+});
+
+test('prompt includes Obsidian workspace boundary when configured', async () => {
+  const root = await tempProject();
+  const vault = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true });
+  await obsidianAgentOS({ command: 'link-workspace', cwd: root, vault, dest: 'Projects/KargaX/AgentOS', create: true });
+
+  const prompt = await promptAgentOS({ cwd: root, engine: 'claude' });
+
+  assert.equal(prompt.ok, true);
+  assert.match(prompt.text, /Obsidian workspace:/);
+  assert.match(prompt.text, /Projects\/KargaX\/AgentOS/);
+  assert.match(prompt.text, /read\/write only inside that folder/i);
+  assert.match(prompt.text, /Do not bulk-load the Obsidian vault/);
+});
+
+test('obsidian command rejects note creation helpers', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true });
+
+  const result = await obsidianAgentOS({ command: 'note', cwd: root, subcommand: 'add', note: 'KargaX Architecture.md' });
+
+  assert.equal(result.ok, false);
+  assert.match(result.text, /Note creation helpers are intentionally not implemented/);
+  assert.match(result.text, /Use Claude Code, Codex, OpenCode, or Hermes/);
+});
 
 test('link-obsidian creates link-only knowledge config and default notes', async () => {
   const root = await tempProject();
