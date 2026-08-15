@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
+import { createRequire } from 'node:module';
 import { agentsAgentOS, compactAgentOS, doctorAgentOS, handoffAgentOS, initAgentOS, linkObsidianAgentOS, migrateClaudeAgentOS, obsidianAgentOS, promptAgentOS, runHandoffAgentOS, skillsAgentOS, statusAgentOS, templatesAgentOS } from './core.js';
-const VERSION = '0.1.0';
+const require = createRequire(import.meta.url);
+const VERSION = require('../package.json').version;
 async function main() {
     const [, , command = 'help', ...args] = process.argv;
     const flags = parseFlags(args);
