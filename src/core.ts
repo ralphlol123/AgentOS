@@ -1,4 +1,4 @@
-import { access, copyFile, mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
+import { access, copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { get as httpGet } from 'node:http';
@@ -403,10 +403,11 @@ function claudeCanonicalBlock() {
 
 export async function skillsAgentOS(options: any = {}) {
   const root = await findAgentOSRoot(options.cwd ?? process.cwd());
-  if (!root) return { ok: false, text: 'AgentOS skills add: FAIL\nNo .agentos directory found.' };
+  if (!root) return { ok: false, text: 'AgentOS skills: FAIL\nNo .agentos directory found.' };
   if (options.list) return listSkillTemplates(root);
-  const mode: 'summary' | 'full' = options.mode === 'full' ? 'full' : 'summary';
   const dryRun = Boolean(options.dryRun);
+  if (options.remove) return removeLocalSkills(root, options.remove, dryRun);
+  const mode: 'summary' | 'full' = options.mode === 'full' ? 'full' : 'summary';
 
   const repos = parseReposFromProjectYaml(await safeRead(join(root, '.agentos/project.yaml')), { includeRoot: true });
   const hasGit = await exists(join(root, '.git'));
@@ -440,8 +441,78 @@ export async function skillsAgentOS(options: any = {}) {
 function listSkillTemplates(root) {
   const lines = ['AgentOS skill templates', `Root: ${root}`, '', 'Built-in packs:', ...SKILL_CATEGORIES.map((category) => `- ${category}-pack`), '', 'Built-in skills:'];
   for (const skill of SKILL_CATALOG) lines.push(`- ${skill.id} (${skill.category}) — ${skill.summary}`);
-  lines.push('', 'Repo templates: templates/skills/<category>/<skill>.md', 'Use: agentos skills add <skill-id|category-pack> [--mode summary|full]');
+  lines.push('', 'Repo templates: templates/skills/<category>/<skill>.md', 'Use: agentos skills add <skill-id|category-pack> [--mode summary|full]', 'Remove: agentos skills remove <skill-id> [--dry-run]');
   return { ok: true, root, skills: SKILL_CATALOG.map((s) => s.id), text: lines.join('\n') };
+}
+
+async function removeLocalSkills(root, rawRemove, dryRun: boolean) {
+  const ids = (Array.isArray(rawRemove) ? rawRemove : String(rawRemove).split(','))
+    .map((s) => String(s).trim())
+    .filter(Boolean);
+  if (!ids.length) throw new Error('agentos skills remove requires at least one local skill id.');
+
+  const installed = await listLocalSkillFiles(root);
+  const byId = new Map<string, typeof installed>();
+  for (const entry of installed) {
+    if (!byId.has(entry.id)) byId.set(entry.id, []);
+    byId.get(entry.id)!.push(entry);
+  }
+  const missing = ids.filter((id) => !byId.has(id));
+  if (missing.length) throw new Error(`Skill not installed locally: ${missing.join(', ')}`);
+
+  const lines = [`AgentOS skills remove${dryRun ? ' dry run' : ''}`, `Root: ${root}`, ''];
+  const removed: string[] = [];
+  for (const id of ids) {
+    for (const entry of byId.get(id)!) {
+      const relDir = dirname(entry.relPath);
+      lines.push(`${dryRun ? 'Would remove' : 'Removed'}: ${relDir}/`);
+      if (!dryRun) await rm(dirname(entry.abs), { recursive: true, force: true });
+    }
+    removed.push(id);
+  }
+
+  if (!dryRun) {
+    const skillsMdPath = join(root, '.agentos/skills.md');
+    const existing = await safeRead(skillsMdPath);
+    const cleaned = removeSkillReferencesFromSkillsMd(existing, ids);
+    await writeFile(skillsMdPath, await ensureLocalSkillsSection(root, cleaned), 'utf8');
+    lines.push('Updated: .agentos/skills.md');
+  } else {
+    lines.push('Would update: .agentos/skills.md');
+  }
+  lines.push('', 'Native engine skill copies under .claude/skills/ and .opencode/skills/ are left untouched.');
+  return { ok: true, root, dryRun, removed, text: lines.join('\n') };
+}
+
+function removeSkillReferencesFromSkillsMd(content: string, ids: string[]) {
+  if (!content) return content;
+  const idSet = new Set(ids);
+  const bulletMatchers = ids.map((id) => new RegExp(`^\\s*-\\s+${escapeRegExp(id)}(?:\\s|$|[—:-])`));
+  const pathMatchers = ids.map((id) => new RegExp(`\\.agentos/skills/[^/]+/${escapeRegExp(id)}/SKILL\\.md`));
+  const lines = content.split(/\r?\n/);
+  const kept: string[] = [];
+  let skipping = false;
+  for (const line of lines) {
+    const startsRemovedBullet = bulletMatchers.some((rx) => rx.test(line));
+    const referencesRemovedPath = pathMatchers.some((rx) => rx.test(line));
+    if (startsRemovedBullet || (!skipping && referencesRemovedPath)) {
+      skipping = true;
+      continue;
+    }
+    if (skipping) {
+      if (/^\s*-\s+/.test(line) || /^#{1,6}\s+/.test(line)) {
+        skipping = false;
+      } else {
+        continue;
+      }
+    }
+    kept.push(line);
+  }
+  return kept
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(new RegExp(`\\n\\s*Details: \\.agentos/skills/[^/]+/(${[...idSet].map(escapeRegExp).join('|')})/SKILL\\.md.*`, 'g'), '')
+    .trimEnd() + '\n';
 }
 
 export async function agentsAgentOS(options: any = {}) {
@@ -1781,7 +1852,10 @@ function ensureManagedBlock(content, title, block) {
   }
   if (content.includes(start)) {
     const legacy = new RegExp(`${escapeRegExp(start)}\\n/AGENTS\\.md\\n/CLAUDE\\.md\\n/\\.hermes\\.md\\n?`, 'm');
-    return content.replace(legacy, normalizedBlock);
+    const legacyNext = content.replace(legacy, normalizedBlock);
+    if (legacyNext !== content) return legacyNext;
+    const section = new RegExp(`${escapeRegExp(start)}[\\s\\S]*?(?=\\n#\\s+|$)`);
+    return content.replace(section, normalizedBlock);
   }
   const trimmed = content.trimEnd();
   return `${trimmed}${trimmed ? '\n\n' : ''}${normalizedBlock}`;

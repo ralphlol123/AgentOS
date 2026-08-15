@@ -113,6 +113,7 @@ agentos obsidian link-workspace --vault <path> --dest <folder> [--create] [--dry
 agentos obsidian status
 agentos skills list
 agentos skills add [--detected] [skill-id|category-pack,...] [--mode summary|full] [--dry-run]
+agentos skills remove <skill-id> [--dry-run]
 agentos agents list
 agentos agents add <agent-id|template-file> [--name id] [--dry-run]
 agentos templates list
@@ -197,6 +198,15 @@ Skills are written project-locally:
 ```
 
 `.agentos/skills.md` remains an on-demand index. Agents should load only skills relevant to the current role/task.
+
+Remove a project-local AgentOS skill with dry-run first:
+
+```bash
+agentos skills remove conventional-commit --dry-run
+agentos skills remove conventional-commit
+```
+
+Removal deletes matching `.agentos/skills/**/<skill-id>/` folders and updates `.agentos/skills.md`. It intentionally leaves native engine copies under `.claude/skills/` and `.opencode/skills/` untouched.
 
 ## Templates
 

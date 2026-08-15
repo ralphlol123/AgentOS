@@ -2,7 +2,7 @@
 
 ## Current objective
 
-Engine Run Handoff Notes first implementation is complete on branch `feat/engine-run-handoff-notes`. Await Ralph's approval before commit/push. Worktrees Optional + Installation Wizard and release prep remain intentionally on hold per Ralph.
+`agentos skills remove <skill-id>` has been built and verified for easier local AgentOS skill cleanup. Engine Run Handoff Notes first implementation is also complete on branch `feat/engine-run-handoff-notes`. Worktrees Optional + Installation Wizard and release prep remain intentionally on hold per Ralph.
 
 ## Scope
 
@@ -33,6 +33,21 @@ Engine Run Handoff Notes first implementation is complete on branch `feat/engine
 - New command:
 
 ```bash
+agentos skills remove <skill-id> [--dry-run]
+```
+
+- Behavior:
+  - `--dry-run` reports matching local skill folders without deleting.
+  - Apply removes `.agentos/skills/**/<skill-id>/` directories.
+  - `.agentos/skills.md` is regenerated/cleaned so removed skill references disappear.
+  - Native copies under `.claude/skills/` and `.opencode/skills/` are intentionally untouched.
+  - Missing local skills fail loudly.
+- Package version bumped to `0.2.0` for the new command.
+- Latest packed tarball:
+  - `/tmp/agentos-skills-remove-pack-dMF4DW/agentos-for-projects-0.2.0.tgz`
+- Existing handoff command remains:
+
+```bash
 agentos run handoff \
   --engine claude-code \
   --role implementation \
@@ -48,7 +63,7 @@ agentos run handoff \
 
 ## Last completed step
 
-- Implemented and verified the first production-ready Engine Run Handoff Notes slice.
+- Built and verified `agentos skills remove <skill-id>` plus the version bump to `0.2.0`.
 
 ## Files changed
 
@@ -56,45 +71,38 @@ agentos run handoff \
 - `.agentos/tasks.md`
 - `.agentos/handoff.md`
 - `README.md`
+- `package.json`
+- `package-lock.json`
 - `src/cli.ts`
 - `src/core.ts`
 - `test/core.test.js`
-- `test/smoke.js`
 - generated build output under `dist/`
 - Obsidian note: `/mnt/c/_/Obsidian/Ralph/Projects/AgentOS/Plans/2026-08-10/engine-run-handoff-notes.md`
 
 ## Tests run
 
 ```bash
-bun run check
-bun run test
-npm pack --dry-run
+npm test -- --test-name-pattern='skills remove'
+npm test -- --test-name-pattern='skills remove|skills add with a specific|templates import --yes'
+npm test
+npm pack --pack-destination /tmp/agentos-skills-remove-pack-dMF4DW
 ```
 
-Also dogfooded packed CLI behavior in a temporary initialized Git repo:
+Also dogfooded CLI behavior in a temporary initialized workspace:
 
 ```bash
-node dist/cli.js run handoff --engine claude-code --role implementation --phase smoke --reason quota-risk
-node dist/cli.js status
+node dist/cli.js skills add systematic-debugging,conventional-commit
+node dist/cli.js skills remove systematic-debugging --dry-run
+node dist/cli.js skills remove systematic-debugging
 ```
 
-## Known failures
+## Known warnings / failures
 
 - None in final verification.
 
 ## Next exact action
 
-Wait for Ralph. If Ralph approves this branch, run final diff review, then commit/push only with explicit approval.
-
-## Protected files / do not touch
-
-- Do not edit `/home/app/www/kargax/new`.
-- Do not edit Photobooth repos as part of this AgentOS package feature.
-- Do not publish npm package yet.
-- Do not start release branch while release is on hold.
-- Do not implement Worktrees Optional + Installation Wizard while it is on hold.
-- Do not auto-switch engines; this feature is handoff notes only.
-- Do not bulk-load the Obsidian vault; use linked notes only.
+PR branch is pushed. Automated PR creation is blocked in this environment because GitHub CLI is unavailable and no GitHub API token is configured. Use the compare URL or retry after adding auth.
 
 ## Open decisions
 
