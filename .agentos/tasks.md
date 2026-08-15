@@ -20,7 +20,8 @@
 
 ## Next
 
-- [ ] If Ralph approves this branch: run final diff review, commit exact intended files, push, and prepare/provide PR.
+- [x] Committed and pushed this branch after Ralph requested PR creation.
+- [ ] Create the GitHub PR manually from the compare URL, or retry automated PR creation after GitHub auth is available.
 - [ ] If Ralph approves Engine Run Handoff Notes: run final diff review, commit branch, and open/push only with explicit approval.
 - [ ] When Ralph resumes release prep: create `chore/release-0.1.0`, update release notes/CHANGELOG, run final dry-run + packed install smoke, and publish only after explicit approval.
 - [ ] When Ralph resumes Worktrees Optional + Installation Wizard: start a feature branch from latest `main` and implement the first slice from the saved plan.

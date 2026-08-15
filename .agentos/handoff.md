@@ -102,7 +102,7 @@ node dist/cli.js skills remove systematic-debugging
 
 ## Next exact action
 
-If Ralph approves, run final diff review, commit exact intended files, push the branch, and prepare/provide the PR link/body. Do not commit/push without explicit approval.
+PR branch is pushed. Automated PR creation is blocked in this environment because GitHub CLI is unavailable and no GitHub API token is configured. Use the compare URL or retry after adding auth.
 
 ## Open decisions
 
