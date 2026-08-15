@@ -115,6 +115,12 @@ export declare function skillsAgentOS(options?: any): Promise<{
     root: any;
     skills: string[];
     text: string;
+} | {
+    ok: boolean;
+    root: any;
+    dryRun: boolean;
+    removed: string[];
+    text: string;
 }>;
 export declare function agentsAgentOS(options?: any): Promise<{
     dryRun?: undefined;

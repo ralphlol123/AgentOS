@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir, writeFile, stat } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, writeFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -886,6 +886,69 @@ test('skills add --dry-run reports planned writes without touching the filesyste
   assert.equal(await exists(join(root, '.agentos/skills/core/systematic-debugging/SKILL.md')), false);
 });
 
+test('skills remove --dry-run reports matching local skills without deleting files', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
+  await skillsAgentOS({ cwd: root, add: 'systematic-debugging,frontend-build-verification' });
+
+  const result = await skillsAgentOS({ cwd: root, remove: 'systematic-debugging', dryRun: true });
+  assert.equal(result.ok, true);
+  assert.equal(result.dryRun, true);
+  assert.deepEqual(result.removed, ['systematic-debugging']);
+  assert.match(result.text, /AgentOS skills remove dry run/);
+  assert.match(result.text, /Would remove: \.agentos\/skills\/core\/systematic-debugging\//);
+  assert.match(result.text, /Would update: \.agentos\/skills\.md/);
+  assert.equal(await exists(join(root, '.agentos/skills/core/systematic-debugging/SKILL.md')), true);
+});
+
+test('skills remove deletes the AgentOS-local skill and updates the skills index only', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
+  await skillsAgentOS({ cwd: root, add: 'systematic-debugging,frontend-build-verification' });
+  await mkdir(join(root, '.claude/skills/systematic-debugging'), { recursive: true });
+  await writeFile(join(root, '.claude/skills/systematic-debugging/SKILL.md'), '# Native copy\n');
+  await mkdir(join(root, '.opencode/skills/systematic-debugging'), { recursive: true });
+  await writeFile(join(root, '.opencode/skills/systematic-debugging/SKILL.md'), '# Native copy\n');
+
+  const result = await skillsAgentOS({ cwd: root, remove: 'systematic-debugging' });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.removed, ['systematic-debugging']);
+  assert.equal(await exists(join(root, '.agentos/skills/core/systematic-debugging/SKILL.md')), false);
+  assert.equal(await exists(join(root, '.agentos/skills/frontend/frontend-build-verification/SKILL.md')), true);
+  assert.equal(await exists(join(root, '.claude/skills/systematic-debugging/SKILL.md')), true);
+  assert.equal(await exists(join(root, '.opencode/skills/systematic-debugging/SKILL.md')), true);
+
+  const skillsMd = await readFile(join(root, '.agentos/skills.md'), 'utf8');
+  assert.doesNotMatch(skillsMd, /systematic-debugging/);
+  assert.doesNotMatch(skillsMd, /### core/);
+  assert.match(skillsMd, /frontend-build-verification/);
+  assert.match(skillsMd, /Details: \.agentos\/skills\/frontend\/frontend-build-verification\/SKILL\.md/);
+});
+
+test('skills remove handles imported/local project skills and strips unmanaged index references', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
+  await mkdir(join(root, '.agentos/skills/github/kargax-commit'), { recursive: true });
+  await writeFile(join(root, '.agentos/skills/github/kargax-commit/SKILL.md'), '# KargaX Commit\n');
+  await writeFile(join(root, '.agentos/skills.md'), `# Skills\n\n## release-manager\n\n- kargax-commit — use before commits.\n  Details: .agentos/skills/github/kargax-commit/SKILL.md\n  Claude-native copy: .claude/skills/kargax-commit/SKILL.md\n\n- conventional-commit — keep this one.\n  Details: .agentos/skills/github/conventional-commit/SKILL.md\n`);
+
+  const result = await skillsAgentOS({ cwd: root, remove: 'kargax-commit' });
+  assert.equal(result.ok, true);
+  assert.equal(await exists(join(root, '.agentos/skills/github/kargax-commit/SKILL.md')), false);
+  const skillsMd = await readFile(join(root, '.agentos/skills.md'), 'utf8');
+  assert.doesNotMatch(skillsMd, /kargax-commit/);
+  assert.match(skillsMd, /conventional-commit/);
+});
+
+test('skills remove rejects missing local skills loudly', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
+  await assert.rejects(
+    () => skillsAgentOS({ cwd: root, remove: 'not-installed' }),
+    /Skill not installed locally: not-installed/,
+  );
+});
+
 test('skills add --detected materializes core, frontend, backend, fullstack, and github skills for a full-stack multi-repo', async () => {
   const root = await tempProject();
   await mkdirp(join(root, 'frontend'));
@@ -937,6 +1000,18 @@ test('CLI skills add --detected materializes skills for a project', async () => 
   const result = spawnSync(process.execPath, [join(process.cwd(), 'dist/cli.js'), 'skills', 'add', '--detected'], { cwd: root, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /AgentOS skills add/);
+  assert.equal(await exists(join(root, '.agentos/skills/core/systematic-debugging/SKILL.md')), true);
+});
+
+test('CLI skills remove supports dry-run for an installed local skill', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
+  await skillsAgentOS({ cwd: root, add: 'systematic-debugging' });
+
+  const result = spawnSync(process.execPath, [join(process.cwd(), 'dist/cli.js'), 'skills', 'remove', 'systematic-debugging', '--dry-run'], { cwd: root, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /AgentOS skills remove dry run/);
+  assert.match(result.stdout, /Would remove: \.agentos\/skills\/core\/systematic-debugging\//);
   assert.equal(await exists(join(root, '.agentos/skills/core/systematic-debugging/SKILL.md')), true);
 });
 

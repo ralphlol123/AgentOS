@@ -16,12 +16,11 @@
 
 ## Now
 
-- [ ] Review/commit/push Engine Run Handoff Notes branch only after Ralph confirms.
-- [ ] Release branch `chore/release-0.1.0` is on hold per Ralph.
-- [ ] Worktrees Optional + Installation Wizard implementation is on hold per Ralph; plan remains saved in AgentOS and Obsidian.
+- [x] Built `agentos skills remove <skill-id>` with dry-run/apply behavior, local skill folder deletion, `.agentos/skills.md` cleanup, native `.claude/skills/` and `.opencode/skills/` preservation, docs/help updates, and version bump to `0.2.0`. Verified with targeted tests, full `npm test`, packed tarball, and temp-workspace dogfood.
 
 ## Next
 
+- [ ] If Ralph approves this branch: run final diff review, commit exact intended files, push, and prepare/provide PR.
 - [ ] If Ralph approves Engine Run Handoff Notes: run final diff review, commit branch, and open/push only with explicit approval.
 - [ ] When Ralph resumes release prep: create `chore/release-0.1.0`, update release notes/CHANGELOG, run final dry-run + packed install smoke, and publish only after explicit approval.
 - [ ] When Ralph resumes Worktrees Optional + Installation Wizard: start a feature branch from latest `main` and implement the first slice from the saved plan.

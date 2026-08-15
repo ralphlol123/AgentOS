@@ -101,16 +101,17 @@ async function main() {
         process.exitCode = result.ok ? 0 : 1;
         return;
       }
-      if (sub !== 'add') {
-        console.log('Usage: agentos skills list | agentos skills add [--detected] [skill-id|category-pack,...] [--mode summary|full] [--dry-run]');
+      if (sub !== 'add' && sub !== 'remove') {
+        console.log('Usage: agentos skills list | agentos skills add [--detected] [skill-id|category-pack,...] [--mode summary|full] [--dry-run] | agentos skills remove <skill-id> [--dry-run]');
         process.exitCode = sub ? 1 : 0;
         return;
       }
       const { flags: subFlags, positionals } = parseFlagsAndPositionals(rest);
       const result = await skillsAgentOS({
         cwd: process.cwd(),
-        detected: Boolean(subFlags.detected),
-        add: positionals.length ? positionals.join(',') : undefined,
+        detected: sub === 'add' ? Boolean(subFlags.detected) : false,
+        add: sub === 'add' && positionals.length ? positionals.join(',') : undefined,
+        remove: sub === 'remove' && positionals.length ? positionals.join(',') : undefined,
         mode: subFlags.mode,
         dryRun: subFlags['dry-run'],
       });
