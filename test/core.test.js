@@ -316,6 +316,52 @@ test('doctor --fix refreshes stale child pointers with selective context wording
   }
 });
 
+test('child repo pointers expose parent AgentOS skills and engine adapters for subrepo-launched engines', async () => {
+  const root = await tempProject();
+  await mkdirp(join(root, 'kargax-fe'));
+  await mkdirp(join(root, 'kargax-be'));
+  await writeFile(join(root, 'kargax-fe/package.json'), JSON.stringify({ scripts: { build: 'nuxt build' }, dependencies: { nuxt: '^4.0.0' } }, null, 2));
+  await writeFile(join(root, 'kargax-be/package.json'), JSON.stringify({ scripts: { build: 'nest build' }, dependencies: { '@nestjs/core': '^10.0.0' } }, null, 2));
+
+  await initAgentOS({ cwd: root, mode: 'existing', yes: true });
+
+  const agents = await readFile(join(root, 'kargax-fe/AGENTS.md'), 'utf8');
+  const claude = await readFile(join(root, 'kargax-fe/CLAUDE.md'), 'utf8');
+
+  assert.match(agents, /OpenCode|opencode/);
+  assert.match(agents, /Codex|codex/);
+  assert.match(agents, /parent AgentOS root/i);
+  assert.match(agents, /\.\.\/\.agentos\/skills\.md/);
+  assert.match(agents, /\.\.\/\.agentos\/engines\/opencode\.md/);
+  assert.match(agents, /conventional-commit|kargax-commit/);
+  assert.match(agents, /do not require Ralph to repeat/i);
+
+  assert.match(claude, /\.\.\/\.agentos\/skills\.md/);
+  assert.match(claude, /\.\.\/\.agentos\/engines\/claude-code\.md/);
+  assert.match(claude, /parent AgentOS root/i);
+});
+
+test('doctor reports and fixes child repo pointers that do not expose skills.md', async () => {
+  const root = await tempProject();
+  await mkdirp(join(root, 'frontend'));
+  await writeFile(join(root, 'frontend/package.json'), JSON.stringify({ scripts: { build: 'vite build' }, dependencies: { vite: '^5.0.0' } }, null, 2));
+  await initAgentOS({ cwd: root, mode: 'existing', yes: true });
+  await writeFile(join(root, 'frontend/AGENTS.md'), '# AGENTS.md\n\nAgentOS child repo: frontend (./frontend).\nParent context: `../AGENTS.md`, `../.agentos/project.yaml`, `../.agentos/repos/frontend.md`.\n');
+  await writeFile(join(root, 'frontend/CLAUDE.md'), '# CLAUDE.md\n\nAgentOS child repo: frontend (./frontend).\nBefore acting read `../CLAUDE.md`, `../.agentos/handoff.md`, `../.agentos/tasks.md`, `../.agentos/repos/frontend.md`.\n');
+
+  const before = await doctorAgentOS({ cwd: root });
+  assert.equal(before.ok, false);
+  assert.match(before.text, /frontend\/AGENTS\.md.*skills\.md/);
+
+  await doctorAgentOS({ cwd: root, fix: true });
+
+  const agents = await readFile(join(root, 'frontend/AGENTS.md'), 'utf8');
+  const claude = await readFile(join(root, 'frontend/CLAUDE.md'), 'utf8');
+  assert.match(agents, /\.\.\/\.agentos\/skills\.md/);
+  assert.match(agents, /\.\.\/\.agentos\/engines\/opencode\.md/);
+  assert.match(claude, /\.\.\/\.agentos\/skills\.md/);
+});
+
 test('status, handoff, and doctor summarize a healthy initialized workspace', async () => {
   const root = await tempProject();
   await initAgentOS({ cwd: root, mode: 'new', yes: true });

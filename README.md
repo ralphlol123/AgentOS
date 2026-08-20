@@ -208,6 +208,36 @@ agentos skills remove conventional-commit
 
 Removal deletes matching `.agentos/skills/**/<skill-id>/` folders and updates `.agentos/skills.md`. It intentionally leaves native engine copies under `.claude/skills/` and `.opencode/skills/` untouched.
 
+## Child repo engine launch
+
+For multi-repo workspaces, `agentos init --existing` and `agentos doctor --fix` maintain child repo pointer files such as:
+
+```text
+frontend/AGENTS.md
+frontend/CLAUDE.md
+backend/AGENTS.md
+backend/CLAUDE.md
+```
+
+These files are for engines launched from inside a repo directory, for example:
+
+```bash
+cd kargax-fe
+opencode
+
+cd ../kargax-be
+claude
+```
+
+The child pointer tells OpenCode/Codex/Hermes/Claude to treat `..` as the parent AgentOS root, read `../.agentos/skills.md`, and then load only the specific `../.agentos/skills/**/SKILL.md` cards relevant to the task. Commit-message requests should resolve AgentOS skills such as `conventional-commit` or a project-local `kargax-commit` from the skills index without the user repeating the full path.
+
+Run this after upgrading an older workspace so stale child pointers are repaired:
+
+```bash
+agentos doctor --fix
+agentos doctor
+```
+
 ## Templates
 
 The repo ships portable source templates:
