@@ -2,112 +2,113 @@
 
 ## Current objective
 
-`agentos skills remove <skill-id>` has been built and verified for easier local AgentOS skill cleanup. Engine Run Handoff Notes first implementation is also complete on branch `feat/engine-run-handoff-notes`. Worktrees Optional + Installation Wizard and release prep remain intentionally on hold per Ralph.
+Subrepo-launched engine access is implemented on `feat/subrepo-engine-skill-access`: when OpenCode/Codex/Hermes/Claude starts inside a child repo such as `kargax-fe` or `kargax-be`, the generated child pointers now send the engine back to the parent AgentOS root and parent skill index.
 
 ## Scope
 
 - Repo: `agentos-for-projects` only.
-- Branch: `feat/engine-run-handoff-notes`.
+- Branch: `feat/subrepo-engine-skill-access`.
+- Version: `0.3.0`.
 - Implemented:
-  - `agentos run handoff` CLI route
-  - `runHandoffAgentOS` core function
-  - engine-neutral `.agentos/runs/*handoff.md` generation
-  - read-only Git status/diff stat/changed files/bounded diff snippets
-  - `.agentos/tasks.md` and `.agentos/handoff.md` updates that preserve existing task sections
-  - README and smoke/test coverage
+  - stronger child `AGENTS.md` pointer for OpenCode, Codex, Hermes, and other AGENTS.md engines.
+  - stronger child `CLAUDE.md` pointer for Claude Code.
+  - child pointers explicitly reference `../.agentos/skills.md` and relevant engine adapters.
+  - commit-message skill hints for `kargax-commit` / `conventional-commit` so Ralph does not need to repeat the skill path every time.
+  - `doctor` detects child pointers that do not expose parent skills/engine adapters.
+  - `doctor --fix` repairs stale child pointers.
+  - README docs and regression tests.
 - Out of scope/not implemented:
-  - automatic engine switching
-  - launching OpenCode/Codex/Claude
-  - terminal/process management
-  - quota API detection
-  - lock files
-  - commits/pushes/PRs
-  - editing KargaX or Photobooth repos
+  - automatic engine launching.
+  - changing OpenCode/Claude native global behavior.
+  - editing KargaX source repos.
 
 ## Current state
 
-- Canonical plan saved:
-  - `.agentos/plans/2026-08-10-engine-run-handoff-notes.md`
-- Obsidian copy saved:
-  - `/mnt/c/_/Obsidian/Ralph/Projects/AgentOS/Plans/2026-08-10/engine-run-handoff-notes.md`
-- New command:
+New behavior for child repo pointer files:
 
-```bash
-agentos skills remove <skill-id> [--dry-run]
+```text
+kargax-fe/AGENTS.md
+kargax-fe/CLAUDE.md
+kargax-be/AGENTS.md
+kargax-be/CLAUDE.md
 ```
 
-- Behavior:
-  - `--dry-run` reports matching local skill folders without deleting.
-  - Apply removes `.agentos/skills/**/<skill-id>/` directories.
-  - `.agentos/skills.md` is regenerated/cleaned so removed skill references disappear.
-  - Native copies under `.claude/skills/` and `.opencode/skills/` are intentionally untouched.
-  - Missing local skills fail loudly.
-- Package version bumped to `0.2.0` for the new command.
-- Latest packed tarball:
-  - `/tmp/agentos-skills-remove-pack-dMF4DW/agentos-for-projects-0.2.0.tgz`
-- Existing handoff command remains:
+These now tell engines launched from child repos to treat `..` as the parent AgentOS root and read:
 
-```bash
-agentos run handoff \
-  --engine claude-code \
-  --role implementation \
-  --phase smoke \
-  --reason quota-risk
+```text
+../AGENTS.md
+../.agentos/project.yaml
+../.agentos/handoff.md
+../.agentos/tasks.md
+../.agentos/skills.md
+../.agentos/repos/<repo>.md
+../.agentos/engines/opencode.md      # OpenCode
+../.agentos/engines/codex.md         # Codex
+../.agentos/engines/claude-code.md   # Claude
 ```
 
-- The command writes `.agentos/runs/<timestamp>-<role>-<phase>-handoff.md`, updates task/handoff state, and never launches or closes an engine.
-- Worktrees Optional + Installation Wizard remains on hold:
-  - `.agentos/plans/2026-08-10-worktrees-optional-install-wizard.md`
-  - `/mnt/c/_/Obsidian/Ralph/Projects/AgentOS/Plans/2026-08-10/worktrees-optional-install-wizard.md`
-- Release branch `chore/release-0.1.0` remains on hold per Ralph.
+Then engines should load only the specific `../.agentos/skills/**/SKILL.md` files relevant to the task.
 
 ## Last completed step
 
-- Built and verified `agentos skills remove <skill-id>` plus the version bump to `0.2.0`.
+- Built and verified subrepo engine skill-access improvement.
+- Bumped package version to `0.3.0`.
+- Packed tarball:
+  - `/tmp/agentos-subrepo-skill-pack-Es8UaX/agentos-for-projects-0.3.0.tgz`
 
 ## Files changed
 
-- `.agentos/plans/2026-08-10-engine-run-handoff-notes.md`
-- `.agentos/tasks.md`
 - `.agentos/handoff.md`
+- `.agentos/tasks.md`
 - `README.md`
 - `package.json`
 - `package-lock.json`
-- `src/cli.ts`
 - `src/core.ts`
 - `test/core.test.js`
 - generated build output under `dist/`
-- Obsidian note: `/mnt/c/_/Obsidian/Ralph/Projects/AgentOS/Plans/2026-08-10/engine-run-handoff-notes.md`
 
 ## Tests run
 
 ```bash
-npm test -- --test-name-pattern='skills remove'
-npm test -- --test-name-pattern='skills remove|skills add with a specific|templates import --yes'
+npm test -- --test-name-pattern='child repo pointers expose|doctor reports and fixes child repo pointers|doctor --fix refreshes stale child pointers'
 npm test
-npm pack --pack-destination /tmp/agentos-skills-remove-pack-dMF4DW
+npm pack --pack-destination /tmp/agentos-subrepo-skill-pack-Es8UaX
 ```
 
-Also dogfooded CLI behavior in a temporary initialized workspace:
+Results:
 
-```bash
-node dist/cli.js skills add systematic-debugging,conventional-commit
-node dist/cli.js skills remove systematic-debugging --dry-run
-node dist/cli.js skills remove systematic-debugging
+```text
+69 tests passed
+0 failed
+agentos --version -> 0.3.0
 ```
+
+Dogfood temp workspace verified:
+
+- `doctor` fails stale `kargax-fe` child pointers missing `../.agentos/skills.md` and engine adapters.
+- `doctor --fix` rewrites the child pointers.
+- `doctor` returns OK after repair.
+- fixed child `AGENTS.md` includes `../.agentos/skills.md`, `../.agentos/engines/opencode.md`, `../.agentos/engines/codex.md`, and `kargax-commit` / `conventional-commit` guidance.
+- fixed child `CLAUDE.md` includes `../.agentos/skills.md` and `../.agentos/engines/claude-code.md`.
 
 ## Known warnings / failures
 
-- None in final verification.
+- No test failures in final verification.
+- Temporary dogfood workspace had expected warnings for missing dev/test commands and non-git child repos.
 
 ## Next exact action
 
-PR branch is pushed. Automated PR creation is blocked in this environment because GitHub CLI is unavailable and no GitHub API token is configured. Use the compare URL or retry after adding auth.
+Commit and push `feat/subrepo-engine-skill-access`, then prepare PR details. After merge/install in KargaX, run:
+
+```bash
+cd /home/app/www/kargax/new
+agentos doctor --fix
+agentos doctor
+```
 
 ## Open decisions
 
-- How to make subrepo-launched engines inherit parent AgentOS context and skill access without repeated user prompts: OpenCode/Claude/Codex/Hermes started inside `be`/`fe` should discover parent `.agentos/`, read `.agentos/skills.md`, and resolve AgentOS-local skills like `kargax-commit` / `conventional-commit` automatically.
+- Whether to add stronger OpenCode-native `.opencode` integration later; current fix uses repo-visible `AGENTS.md` pointers.
 - Whether to add proactive quota/risk detection later.
 - Whether to add `--summary-file` for engine-written final summaries later.
-- Whether phase-level summary generation belongs in the next slice.
-- Whether lock files are needed later, or whether human-readable handoff notes are enough for the no-auto-switch model.
+- Whether phase-level summary generation belongs in a later slice.

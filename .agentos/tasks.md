@@ -13,22 +13,22 @@
 - [x] Packed installed CLI smoke passed for `conventional-commit` template and `github-pack` inclusion.
 - [x] PR #6 merged `feat/conventional-commit-skill-template` into `main`.
 - [x] Local cleanup completed: checked out updated `main` and deleted the merged local feature branch.
+- [x] Built and merged AgentOS `0.2.0`: Obsidian workspace-folder support, `agentos skills remove`, and CLI package-version source of truth.
+- [x] Recorded and pushed roadmap item for subrepo-launched engine access to AgentOS skills.
+- [x] Built `feat/subrepo-engine-skill-access`: child repo pointers now direct OpenCode/Codex/Hermes/Claude to parent `.agentos/skills.md` and engine adapters; `doctor` reports stale child pointers and `doctor --fix` repairs them; version bumped to `0.3.0`.
 
 ## Now
 
-- [x] Built `agentos skills remove <skill-id>` with dry-run/apply behavior, local skill folder deletion, `.agentos/skills.md` cleanup, native `.claude/skills/` and `.opencode/skills/` preservation, docs/help updates, and version bump to `0.2.0`. Verified with targeted tests, full `npm test`, packed tarball, and temp-workspace dogfood.
+- [ ] Commit and push `feat/subrepo-engine-skill-access`, then prepare PR details.
 
 ## Next
 
-- [x] Committed and pushed this branch after Ralph requested PR creation.
-- [ ] Create the GitHub PR manually from the compare URL, or retry automated PR creation after GitHub auth is available.
-- [ ] If Ralph approves Engine Run Handoff Notes: run final diff review, commit branch, and open/push only with explicit approval.
-- [ ] When Ralph resumes release prep: create `chore/release-0.1.0`, update release notes/CHANGELOG, run final dry-run + packed install smoke, and publish only after explicit approval.
+- [ ] In KargaX after install, run `agentos doctor --fix` from workspace root so `kargax-be`/`kargax-fe` child pointers pick up parent AgentOS skill access.
+- [ ] When Ralph resumes release prep: update release notes/CHANGELOG, run final dry-run + packed install smoke, and publish only after explicit approval.
 - [ ] When Ralph resumes Worktrees Optional + Installation Wizard: start a feature branch from latest `main` and implement the first slice from the saved plan.
 
 ## Later
 
-- [ ] Fix subrepo-launched engine access to AgentOS context/skills: when OpenCode, Claude, Codex, or Hermes starts inside a child repo such as `kargax-be` or `kargax-fe`, it should automatically discover the parent workspace `.agentos/`, read `.agentos/skills.md`, and load requested AgentOS skills such as `kargax-commit` / `conventional-commit` without Ralph repeating the requirement every time. Likely scope: stronger child repo pointer/adapters, `doctor --fix` repair, and smoke tests from backend/frontend subdirectories.
 - [ ] Resume `agentos run` Phase 2 after release.
 - [ ] Add richer local skill authoring/import UX.
 - [ ] Add more specialized reusable agent templates when real projects justify them.

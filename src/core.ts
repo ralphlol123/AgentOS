@@ -1588,8 +1588,12 @@ export async function doctorAgentOS(options: any = {}) {
     const subAgents = await safeRead(agentsPath);
     const subClaude = await safeRead(claudePath);
     if (!subAgents.includes('../.agentos/project.yaml')) problems.push(`${repo.path}/AGENTS.md does not point to parent AgentOS project.yaml`);
+    if (!subAgents.includes('../.agentos/skills.md')) problems.push(`${repo.path}/AGENTS.md does not point to parent AgentOS skills.md`);
+    if (!subAgents.includes('../.agentos/engines/opencode.md')) problems.push(`${repo.path}/AGENTS.md does not point to OpenCode engine adapter`);
     if (!subAgents.includes(`../.agentos/repos/${repo.name}.md`)) problems.push(`${repo.path}/AGENTS.md does not point to its repo context`);
     if (!subClaude.includes('../CLAUDE.md') || !subClaude.includes('../.agentos/handoff.md')) problems.push(`${repo.path}/CLAUDE.md does not point to parent Claude/AgentOS context`);
+    if (!subClaude.includes('../.agentos/skills.md')) problems.push(`${repo.path}/CLAUDE.md does not point to parent AgentOS skills.md`);
+    if (!subClaude.includes('../.agentos/engines/claude-code.md')) problems.push(`${repo.path}/CLAUDE.md does not point to Claude engine adapter`);
   }
 
   const diagnostics = [];
@@ -1900,8 +1904,8 @@ function adapterLooksCurrent(content, section) {
     '../.agentos/engines/*',
   ];
   if (content.includes('undefined/undefined/undefined')) return false;
-  if (content.includes('AgentOS child repo:') && section.startsWith('# CLAUDE.md')) return content.includes('../.agentos/handoff.md') && !content.includes('---') && !content.includes('../.agentos/agents/*');
-  if (content.includes('AgentOS child repo:') && section.startsWith('# AGENTS.md')) return content.includes('../.agentos/repos/') && !content.includes('---') && !content.includes('../.agentos/agents/*') && !content.includes('../.agentos/engines/*');
+  if (content.includes('AgentOS child repo:') && section.startsWith('# CLAUDE.md')) return content.includes('../.agentos/handoff.md') && content.includes('../.agentos/skills.md') && content.includes('../.agentos/engines/claude-code.md') && content.includes('parent AgentOS root') && !content.includes('---') && !content.includes('../.agentos/agents/*');
+  if (content.includes('AgentOS child repo:') && section.startsWith('# AGENTS.md')) return content.includes('../.agentos/repos/') && content.includes('../.agentos/skills.md') && content.includes('../.agentos/engines/opencode.md') && content.includes('../.agentos/engines/codex.md') && content.includes('parent AgentOS root') && !content.includes('---') && !content.includes('../.agentos/agents/*') && !content.includes('../.agentos/engines/*');
   if (stale.some((token) => content.includes(token))) return false;
   if (section.startsWith('# AGENTS.md') && content.includes('Repos: current repo (single-repo workspace)') && !section.includes('Repos: current repo (single-repo workspace)')) return false;
   if (section.startsWith('# CLAUDE.md') && !content.includes('.agentos/engines/claude-code.md')) return false;
@@ -2105,7 +2109,23 @@ function subrepoAgentsPointer(repo) {
     '# AGENTS.md',
     '',
     `AgentOS child repo: ${repo.name} (${repo.path}).`,
-    'Parent context: `../AGENTS.md`, `../.agentos/project.yaml`, `../.agentos/memory.md`, `../.agentos/handoff.md`, `../.agentos/tasks.md`, `../.agentos/repos/' + repo.name + '.md`; then load skills/agent/engine files only when relevant.',
+    '',
+    'This repo is not the whole product. The parent AgentOS root is `..`; treat `../.agentos/` as the canonical workspace context.',
+    '',
+    'For OpenCode, Codex, Hermes, and other AGENTS.md-based engines launched from this child repo, read in order:',
+    '- `../AGENTS.md`',
+    '- `../.agentos/project.yaml`',
+    '- `../.agentos/memory.md`',
+    '- `../.agentos/handoff.md`',
+    '- `../.agentos/tasks.md`',
+    '- `../.agentos/skills.md`',
+    '- `../.agentos/repos/' + repo.name + '.md`',
+    '- `../.agentos/engines/opencode.md` when using OpenCode',
+    '- `../.agentos/engines/codex.md` when using Codex',
+    '- load only when relevant: the specific `../.agentos/skills/**/SKILL.md` files for the requested role/task',
+    '',
+    'If Ralph asks for a commit message or mentions a project skill such as `kargax-commit` or `conventional-commit`, use `../.agentos/skills.md` to locate that AgentOS skill and load its `SKILL.md`; do not require Ralph to repeat the AgentOS skill path every time.',
+    '',
     'Rules: do not treat this repo as the whole product; declare scope; edit only in scope; no commit/push unless asked; update parent handoff/tasks.',
     '',
   ].join('\n');
@@ -2116,7 +2136,22 @@ function subrepoClaudePointer(repo) {
     '# CLAUDE.md',
     '',
     `AgentOS child repo: ${repo.name} (${repo.path}).`,
-    'Before acting read `../CLAUDE.md`, `../AGENTS.md`, `../.agentos/project.yaml`, `../.agentos/handoff.md`, `../.agentos/tasks.md`, `../.agentos/repos/' + repo.name + '.md`; then load skills/agent files only when relevant.',
+    '',
+    'This repo is not the whole product. The parent AgentOS root is `..`; treat `../.agentos/` as the canonical workspace context.',
+    '',
+    'Before acting read in order:',
+    '- `../CLAUDE.md`',
+    '- `../AGENTS.md`',
+    '- `../.agentos/project.yaml`',
+    '- `../.agentos/handoff.md`',
+    '- `../.agentos/tasks.md`',
+    '- `../.agentos/skills.md`',
+    '- `../.agentos/repos/' + repo.name + '.md`',
+    '- `../.agentos/engines/claude-code.md`',
+    '- load only when relevant: the specific `../.agentos/skills/**/SKILL.md` files for the requested role/task',
+    '',
+    'If Ralph asks for a commit message or mentions a project skill such as `kargax-commit` or `conventional-commit`, use `../.agentos/skills.md` to locate that AgentOS skill and load its `SKILL.md`; do not require Ralph to repeat the AgentOS skill path every time.',
+    '',
     'Declare scope; edit only in scope; no commit/push unless asked; update parent handoff/tasks.',
     '',
   ].join('\n');
