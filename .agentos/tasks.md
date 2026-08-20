@@ -28,6 +28,7 @@
 
 ## Later
 
+- [ ] Fix subrepo-launched engine access to AgentOS context/skills: when OpenCode, Claude, Codex, or Hermes starts inside a child repo such as `kargax-be` or `kargax-fe`, it should automatically discover the parent workspace `.agentos/`, read `.agentos/skills.md`, and load requested AgentOS skills such as `kargax-commit` / `conventional-commit` without Ralph repeating the requirement every time. Likely scope: stronger child repo pointer/adapters, `doctor --fix` repair, and smoke tests from backend/frontend subdirectories.
 - [ ] Resume `agentos run` Phase 2 after release.
 - [ ] Add richer local skill authoring/import UX.
 - [ ] Add more specialized reusable agent templates when real projects justify them.

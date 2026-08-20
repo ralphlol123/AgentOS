@@ -106,6 +106,7 @@ PR branch is pushed. Automated PR creation is blocked in this environment becaus
 
 ## Open decisions
 
+- How to make subrepo-launched engines inherit parent AgentOS context and skill access without repeated user prompts: OpenCode/Claude/Codex/Hermes started inside `be`/`fe` should discover parent `.agentos/`, read `.agentos/skills.md`, and resolve AgentOS-local skills like `kargax-commit` / `conventional-commit` automatically.
 - Whether to add proactive quota/risk detection later.
 - Whether to add `--summary-file` for engine-written final summaries later.
 - Whether phase-level summary generation belongs in the next slice.
