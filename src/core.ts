@@ -1,4 +1,4 @@
-import { access, copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { access, copyFile, mkdir, readFile, readdir, rename, rm, stat, lstat, realpath, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { get as httpGet } from 'node:http';
@@ -24,8 +24,10 @@ const REQUIRED_FILES = [
 
 export async function initAgentOS(options: any = {}) {
   const cwd = resolve(options.cwd ?? process.cwd());
+  await assertWorkspaceBoundaries(cwd);
   const mode = options.mode ?? await inferMode(cwd);
   const repos = await detectRepos(cwd);
+  await assertRepoBoundaries(cwd, repos);
   const workspaceKind = repos.length > 1 ? 'multi-repo' : 'single-repo';
   const projectName = basename(cwd);
   const agentSelection = resolveAgentSelection(options.agents ?? 'detected', repos);
@@ -129,6 +131,7 @@ export async function promptAgentOS(options: any = {}) {
 export async function compactAgentOS(options: any = {}) {
   const root = await findAgentOSRoot(options.cwd ?? process.cwd());
   if (!root) return { ok: false, text: 'AgentOS compact: FAIL\nNo .agentos directory found.' };
+  await assertWorkspaceBoundaries(root);
 
   const handoffPath = join(root, '.agentos/handoff.md');
   const tasksPath = join(root, '.agentos/tasks.md');
@@ -171,6 +174,7 @@ export async function compactAgentOS(options: any = {}) {
 export async function linkObsidianAgentOS(options: any = {}) {
   const root = await findAgentOSRoot(options.cwd ?? process.cwd());
   if (!root) return { ok: false, text: 'AgentOS link-obsidian: FAIL\nNo .agentos directory found.' };
+  await assertWorkspaceBoundaries(root);
   await assertProjectYamlWellFormed(join(root, '.agentos/project.yaml'));
   const project = await safeRead(join(root, '.agentos/project.yaml'));
   const projectName = firstYamlValue(project, 'name') ?? basename(root);
@@ -184,6 +188,9 @@ export async function linkObsidianAgentOS(options: any = {}) {
 
   if (!await exists(vault)) return { ok: false, text: `AgentOS link-obsidian: FAIL\nVault path does not exist: ${vault}` };
   const linked = resolveObsidianLinks({ rawLink, destination, projectName });
+  await assertBoundaryTarget(vault, destination);
+  for (const note of linked) await assertBoundaryTarget(vault, note);
+  await assertRepoBoundaries(root, parseReposFromProjectYaml(project, { includeRoot: true }));
   const missing = [];
   for (const note of linked) {
     const notePath = join(vault, note);
@@ -258,6 +265,7 @@ export async function obsidianAgentOS(options: any = {}) {
 async function linkObsidianWorkspaceAgentOS(options: any = {}) {
   const root = await findAgentOSRoot(options.cwd ?? process.cwd());
   if (!root) return { ok: false, text: 'AgentOS obsidian link-workspace: FAIL\nNo .agentos directory found.' };
+  await assertWorkspaceBoundaries(root);
   await assertProjectYamlWellFormed(join(root, '.agentos/project.yaml'));
   const project = await safeRead(join(root, '.agentos/project.yaml'));
   const rawVault = String(options.vault || '').trim();
@@ -270,6 +278,13 @@ async function linkObsidianWorkspaceAgentOS(options: any = {}) {
   const dryRun = Boolean(options.dryRun);
   const create = Boolean(options.create);
   const workspacePath = join(vault, destination);
+  await assertBoundaryTarget(vault, destination);
+  for (const note of linked) {
+    assertRelativeBoundaryPath(note);
+    if (!note.startsWith(`${destination}/`)) throw new Error(`Unsafe linked note outside workspace boundary: ${note}`);
+    await assertBoundaryTarget(vault, note);
+  }
+  await assertRepoBoundaries(root, parseReposFromProjectYaml(project, { includeRoot: true }));
   const knowledge = knowledgeMd({ vault, destination, linked, mode: 'workspace-folder' });
   const projectPatched = ensureObsidianProjectConfig(project, { vault, destination, linked, mode: 'workspace-folder' });
   const lines = [
@@ -351,6 +366,8 @@ function obsidianPermissionErrorText(error, vault, destination) {
 export async function migrateClaudeAgentOS(options: any = {}) {
   const root = await findAgentOSRoot(options.cwd ?? process.cwd());
   if (!root) return { ok: false, text: 'AgentOS migrate claude: FAIL\nNo .agentos directory found.' };
+  await assertWorkspaceBoundaries(root);
+  for (const path of ['.claude/agents', '.claude/settings.local.json', '.claude/settings.json', '.claude/README.agentos.md']) await assertBoundaryTarget(root, path);
   if (!options.preserve) return { ok: false, text: 'AgentOS migrate claude: FAIL\nUse --preserve to keep existing .claude files as legacy backups.' };
   const dryRun = Boolean(options.dryRun);
   const stamp = timestampForFilename(new Date());
@@ -406,6 +423,7 @@ function claudeCanonicalBlock() {
 export async function skillsAgentOS(options: any = {}) {
   const root = await findAgentOSRoot(options.cwd ?? process.cwd());
   if (!root) return { ok: false, text: 'AgentOS skills: FAIL\nNo .agentos directory found.' };
+  await assertWorkspaceBoundaries(root);
   if (options.list) return listSkillTemplates(root);
   const dryRun = Boolean(options.dryRun);
   if (options.remove) return removeLocalSkills(root, options.remove, dryRun);
@@ -520,6 +538,7 @@ function removeSkillReferencesFromSkillsMd(content: string, ids: string[]) {
 export async function agentsAgentOS(options: any = {}) {
   const root = await findAgentOSRoot(options.cwd ?? process.cwd());
   if (!root) return { ok: false, text: 'AgentOS agents: FAIL\nNo .agentos directory found.' };
+  await assertWorkspaceBoundaries(root);
   if (options.list) return listAgentTemplates(root);
   const raw = String(options.add || '').trim();
   if (!raw) throw new Error('agentos agents add requires an agent id or template file.');
@@ -569,6 +588,7 @@ function validateAgentTemplate(content, id) {
 export async function templatesAgentOS(options: any = {}) {
   const root = await findAgentOSRoot(options.cwd ?? process.cwd());
   if (!root) return { ok: false, text: 'AgentOS templates: FAIL\nNo .agentos directory found.' };
+  await assertWorkspaceBoundaries(root);
   const command = options.command;
   if (command === 'list') return templatesListAgentOS(root);
   if (command === 'show') return templatesShowAgentOS(root, options.id);
@@ -1213,6 +1233,7 @@ async function ensureLocalSkillsSection(root, existingSkillsMd) {
 export async function runHandoffAgentOS(options: any = {}) {
   const root = await findAgentOSRoot(options.cwd ?? process.cwd());
   if (!root) return { ok: false, text: 'AgentOS run handoff: FAIL\nNo .agentos directory found here or in parent directories.' };
+  await assertWorkspaceBoundaries(root);
 
   const dryRun = Boolean(options.dryRun);
   const engine = normalizeEngine(options.engine ?? 'unknown');
@@ -1833,12 +1854,65 @@ async function runCommand(command: string, args: string[], cwd?: string) {
 }
 
 
+function assertRelativeBoundaryPath(value: string) {
+  // Validate the original token, before normalizing away absolute/traversal syntax.
+  if (!value || value.includes('\0') || value.includes('\\') || value.startsWith('/') || /^[a-z]:/i.test(value) || value.split('/').includes('..')) {
+    throw new Error(`Unsafe boundary path; expected a workspace-relative path: ${value}`);
+  }
+}
+
+// Reject symlink components, including dangling links, before any mutation.
+// The selected root may itself be reached through an alias; anchor it once.
+async function assertBoundaryTarget(root: string, path: string) {
+  assertRelativeBoundaryPath(path);
+  const anchor = await realpath(root);
+  let current = anchor;
+  for (const part of path.split('/').filter(part => part && part !== '.')) {
+    current = join(current, part);
+    try {
+      const info = await lstat(current);
+      if (info.isSymbolicLink()) throw new Error(`Unsafe symlink boundary target: ${current}`);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+  }
+}
+
+async function assertManagedTree(root: string, rel: string) {
+  await assertBoundaryTarget(root, rel);
+  let info;
+  try { info = await lstat(join(root, rel)); }
+  catch (error) { if (error.code === 'ENOENT') return; throw error; }
+  if (info.isDirectory()) {
+    for (const entry of await readdir(join(root, rel))) await assertManagedTree(root, `${rel}/${entry}`);
+  }
+}
+
+async function assertWorkspaceBoundaries(root: string) {
+  await assertManagedTree(root, '.agentos');
+  for (const name of ['AGENTS.md', 'CLAUDE.md', '.hermes.md']) {
+    await assertBoundaryTarget(root, name);
+    await assertBoundaryTarget(root, `${name}.agentos.bak`);
+  }
+}
+
+async function assertRepoBoundaries(root, repos) {
+  for (const repo of repos) {
+    await assertBoundaryTarget(root, repo.path);
+    for (const name of ['AGENTS.md', 'CLAUDE.md', '.gitignore', 'AGENTS.md.agentos.bak', 'CLAUDE.md.agentos.bak']) {
+      await assertBoundaryTarget(root, `${repo.path}/${name}`);
+    }
+  }
+}
+
 async function fixAgentOSAdapters(root) {
+  await assertWorkspaceBoundaries(root);
   const projectPath = join(root, '.agentos/project.yaml');
   await assertProjectYamlWellFormed(projectPath);
   const project = await safeRead(projectPath);
   const childRepos = parseReposFromProjectYaml(project);
   const allRepos = parseReposFromProjectYaml(project, { includeRoot: true });
+  await assertRepoBoundaries(root, allRepos);
   await ensureProjectYamlEngine(projectPath, 'opencode');
   await writeIfMissing(join(root, '.agentos/knowledge.md'), knowledgeMd());
   const agentSelection = await agentSelectionFromProject(project, childRepos, root);
@@ -2380,7 +2454,13 @@ async function safeRead(path) { try { return await readFile(path, 'utf8'); } cat
 async function findAgentOSRoot(start) {
   let dir = resolve(start);
   while (true) {
-    if (await exists(join(dir, '.agentos'))) return dir;
+    try {
+      const info = await lstat(join(dir, '.agentos'));
+      if (info.isSymbolicLink() || !info.isDirectory()) throw new Error(`Unsafe AgentOS root boundary: ${join(dir, '.agentos')}`);
+      return dir;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
     const parent = dirname(dir);
     if (parent === dir) return null;
     dir = parent;
@@ -2608,6 +2688,8 @@ function defaultObsidianNotes(destination, projectName) {
 }
 
 function normalizeVaultRelativePath(value) {
+  if (/^["']|["']$/.test(String(value || ''))) throw new Error('Unsafe quoted boundary path; pass the literal relative path without embedded quotes.');
+  if (value) assertRelativeBoundaryPath(String(value));
   return String(value || '').replace(/^['"]|['"]$/g, '').replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/g, '');
 }
 
