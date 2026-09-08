@@ -8,6 +8,26 @@ AgentOS conservatively rejects symlinks (including dangling links) in `.agentos/
 
 These checks protect against existing unsafe paths, not concurrent filesystem replacement by another process. They are not an OS sandbox or a transactional filesystem. Do not run concurrent writers in the same checkout. General read-only commands and user-selected import sources are not restricted to the output boundary.
 
+## Atomic state writes and rollback
+
+Every critical AgentOS text file — `.agentos/project.yaml`, `handoff.md`, `tasks.md`, `knowledge.md`, `skills.md`, managed agent/engine/repo markdown, and root/child adapter files (`AGENTS.md`, `CLAUDE.md`, `.hermes.md`, child repo pointers) plus their `.agentos.bak` backups — is replaced through a single atomic-write primitive: the new content is written to a uniquely named temporary file in the *same directory* as the destination, flushed and fsync'd, closed, given the destination's existing file mode (or the OS default for a brand-new file), then renamed over the destination in one filesystem `rename()` call. `rename()` never follows a symlink at the destination — it replaces the link entry itself — and this primitive does not change Task 2's symlink/boundary checks, which still run before any of this. If the temp file can't be renamed (or any earlier step fails), the temp file is removed; no partial or zero-byte destination file is ever left behind.
+
+Commands that touch more than one output — `doctor --fix`, `agentos obsidian link` / `link-workspace`, `agents add` and agent template copy, `skills add` / `skills remove` and skill template copy/import, `compact`, and `agentos run handoff` — run their entire write phase as one in-process mutation transaction. Before each write/create/remove, the transaction snapshots either the target's existing bytes and mode (if it already existed) or its topmost not-yet-existing ancestor directory (if it's new), so a brand-new nested folder can be removed as a whole on rollback. If any later step in the same command throws, every tracked path is restored to its pre-command bytes, mode, or absence, in reverse order, before the error is re-raised; dry-run and dependency/config validation still happen before any of this and are unaffected.
+
+Guarantees:
+
+- Byte-for-byte restoration: if a multi-file command fails partway, files it had already rewritten are restored to their exact pre-command bytes and permission bits — not approximated or re-derived.
+- Existence restoration: outputs that did not exist before a failed command (new agent/skill files, new adapter backups, newly created nested folders, new Obsidian notes/workspace folders) do not exist afterward either.
+- Removal restoration: directories/files a command intentionally deletes (e.g. `skills remove`) are recreated with their original content if a later step in the same command then fails.
+- No leftover temp artifacts: the atomic-write temp file naming pattern (`.<name>.agentos-tmp-<pid>-<timestamp>-<random>`) is always cleaned up, on both the success and failure paths.
+
+Limitations — read these as scope boundaries, not gaps to file issues against:
+
+- **Command-level, not crash-level.** Rollback runs from inside the same Node.js process that performed the writes. It defends against a failing write/rename call (permission errors, disk-full, an injected fault) partway through a command; it is best-effort against the *process itself* being killed (`SIGKILL`, power loss, `OOM`) mid-command — a kill during the final `rename()` of one file can still leave that one file updated with everything before it unrolled-back, because there is no crash recovery journal replayed on the next run.
+- **Atomicity is per-file, not cross-file.** Each individual `rename()` is atomic at the filesystem level. The *set* of files a multi-output command touches is not a single atomic filesystem transaction — there is no all-or-nothing, cross-file commit point below the application-level transaction described above. Two files can never be observed half-written, but a hard process kill between two files' renames can still leave the set inconsistent (see above).
+- **No defense against a concurrent hostile filesystem replacement.** As with the boundary checks, this primitive assumes a single writer. It does not protect against another process concurrently replacing a tracked path (e.g. swapping a directory for a symlink) between the snapshot and the eventual write/rollback; do not run concurrent AgentOS writers against the same checkout.
+- **Scaffold directories are not snapshotted.** Perpetual, potentially large directories that are guaranteed to already exist once a workspace is initialized (`.agentos`, `.agentos/runs`, `.claude`) are created with a plain idempotent `mkdir -p` rather than tracked for rollback, so a failed command can't unnecessarily roll back an entire run-log history. Only the specific new files a command writes inside them are tracked.
+
 
 Project-owned context layer for model-agnostic coding agents.
 

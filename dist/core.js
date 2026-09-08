@@ -1,9 +1,10 @@
-import { access, copyFile, mkdir, readFile, readdir, rename, rm, lstat, realpath, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdir, open, readFile, readdir, rename, rm, stat, lstat, realpath, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { createHash, randomBytes } from 'node:crypto';
 import { get as httpGet } from 'node:http';
 import { get as httpsGet } from 'node:https';
-import { basename, dirname, extname, join, relative, resolve } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
@@ -20,6 +21,209 @@ const REQUIRED_FILES = [
     'AGENTS.md',
     'CLAUDE.md',
 ];
+// --- Atomic state writes -------------------------------------------------
+//
+// Every critical AgentOS text file (project.yaml, handoff/tasks/knowledge/
+// skills.md, managed agent/engine/repo markdown, root/child adapter files,
+// and the .agentos.bak backups made when patching them) is replaced through
+// writeFileAtomic: the new content lands in a uniquely named temp file in
+// the SAME directory, is written, fsync'd, and closed, then rename()'d over
+// the destination. rename() never follows a symlink at the destination (it
+// replaces the link itself rather than writing through it), and callers
+// still run Task 2's assertBoundaryTarget/assertWorkspaceBoundaries checks
+// before any of this, so this primitive does not change symlink handling.
+//
+// Commands with more than one output (doctor --fix, obsidian link and
+// link-workspace, agents add / agent template copy, skills add/remove /
+// skill template copy/import, compact, run handoff) run their entire write
+// phase inside withMutationTransaction(fn). Every tracked writeFileAtomic /
+// mkdirTracked / removeTracked call snapshots the first not-yet-existing
+// ancestor of its target (or the target itself, if it already exists)
+// before mutating anything; if any later step in the same transaction
+// throws, every tracked path is restored to its pre-transaction bytes,
+// mode, or absence before the error is re-thrown.
+const mutationTransactionStorage = new AsyncLocalStorage();
+function currentMutationTransaction() {
+    return mutationTransactionStorage.getStore();
+}
+async function withMutationTransaction(fn) {
+    const tx = new MutationTransaction();
+    try {
+        return await mutationTransactionStorage.run(tx, fn);
+    }
+    catch (error) {
+        await tx.rollback();
+        throw error;
+    }
+}
+class MutationTransaction {
+    roots = [];
+    snapshots = new Map();
+    async track(path) {
+        const abs = resolve(path);
+        if (this.isCovered(abs))
+            return;
+        const root = await trackingRootFor(abs);
+        // Widen: if the discovered root turns out to be an ancestor of an
+        // already-tracked (narrower) root, drop the narrower entry so rollback
+        // never restores an inner snapshot over an outer one in the wrong order.
+        for (const existing of this.roots.filter((r) => isDescendantPath(root, r))) {
+            this.snapshots.delete(existing);
+            this.roots = this.roots.filter((r) => r !== existing);
+        }
+        if (this.isCovered(root))
+            return;
+        this.snapshots.set(root, await snapshotPath(root));
+        this.roots.push(root);
+    }
+    isCovered(abs) {
+        return this.roots.some((root) => abs === root || isDescendantPath(root, abs));
+    }
+    async rollback() {
+        for (const root of [...this.roots].reverse()) {
+            await restorePathSnapshot(root, this.snapshots.get(root));
+        }
+    }
+}
+function isDescendantPath(root, candidate) {
+    if (root === candidate)
+        return false;
+    const rel = relative(root, candidate);
+    return Boolean(rel) && rel !== '..' && !rel.startsWith(`..${'/'}`) && !isAbsolute(rel);
+}
+// Walks up from `path` to find the highest ancestor that does not exist yet
+// (so rollback can delete the whole thing), or `path` itself if it already
+// exists (so rollback restores just its previous bytes/mode).
+async function trackingRootFor(path) {
+    const abs = resolve(path);
+    if (await exists(abs))
+        return abs;
+    let current = abs;
+    while (true) {
+        const parent = dirname(current);
+        if (parent === current)
+            return current;
+        if (await exists(parent))
+            return current;
+        current = parent;
+    }
+}
+async function snapshotPath(path) {
+    let info;
+    try {
+        info = await lstat(path);
+    }
+    catch (error) {
+        if (error.code === 'ENOENT')
+            return { kind: 'absent' };
+        throw error;
+    }
+    if (info.isSymbolicLink())
+        throw new Error(`Refusing to snapshot a symlink for atomic rollback: ${path}`);
+    if (info.isDirectory()) {
+        const children = new Map();
+        for (const name of await readdir(path))
+            children.set(name, await snapshotPath(join(path, name)));
+        return { kind: 'dir', mode: info.mode, children };
+    }
+    return { kind: 'file', mode: info.mode, content: await readFile(path) };
+}
+async function restorePathSnapshot(path, snapshot) {
+    await rm(path, { recursive: true, force: true });
+    if (snapshot.kind === 'absent')
+        return;
+    if (snapshot.kind === 'file') {
+        await mkdir(dirname(path), { recursive: true });
+        await writeFileAtomicUntracked(path, snapshot.content, { mode: snapshot.mode });
+        return;
+    }
+    await mkdir(path, { recursive: true });
+    await chmod(path, snapshot.mode & 0o777);
+    for (const [name, child] of snapshot.children)
+        await restorePathSnapshot(join(path, name), child);
+}
+async function mkdirTracked(path) {
+    const tx = currentMutationTransaction();
+    if (tx)
+        await tx.track(path);
+    return mkdir(path, { recursive: true });
+}
+async function removeTracked(path) {
+    const tx = currentMutationTransaction();
+    if (tx)
+        await tx.track(path);
+    return rm(path, { recursive: true, force: true });
+}
+async function copyFileTracked(src, dst) {
+    const tx = currentMutationTransaction();
+    if (tx)
+        await tx.track(dst);
+    const content = await readFile(src);
+    return writeFileAtomicUntracked(dst, content);
+}
+export async function writeFileAtomic(path, content, options = {}) {
+    const tx = currentMutationTransaction();
+    if (tx)
+        await tx.track(path);
+    return writeFileAtomicUntracked(path, content, options);
+}
+async function existingFileMode(path) {
+    try {
+        return (await stat(path)).mode;
+    }
+    catch (error) {
+        if (error.code === 'ENOENT')
+            return undefined;
+        throw error;
+    }
+}
+function uniqueTempPath(dir, name) {
+    return join(dir, `.${name}.agentos-tmp-${process.pid}-${Date.now().toString(36)}-${randomBytes(4).toString('hex')}`);
+}
+async function writeFileAtomicUntracked(path, content, options = {}) {
+    const tmpPath = uniqueTempPath(dirname(path), basename(path));
+    const targetMode = options.mode !== undefined ? options.mode : await existingFileMode(path);
+    try {
+        const handle = await open(tmpPath, 'wx', 0o666);
+        try {
+            await handle.writeFile(content);
+            maybeInjectAtomicFault(path, 'before-sync', { tmpPath });
+            await handle.sync();
+        }
+        finally {
+            await handle.close();
+        }
+        if (targetMode !== undefined)
+            await chmod(tmpPath, targetMode & 0o777);
+        maybeInjectAtomicFault(path, 'before-rename', { tmpPath });
+        await rename(tmpPath, path);
+    }
+    catch (error) {
+        await rm(tmpPath, { force: true }).catch(() => { });
+        throw error;
+    }
+}
+// Narrowly scoped, one-shot fault injection for atomic-write rollback tests.
+// This is only reachable by importing these functions directly from
+// core.js/dist output; no CLI flag or command option threads user input
+// into this hook, so it cannot be triggered by normal CLI usage.
+let pendingAtomicFault = null;
+export function __setAtomicWriteFaultForTests(path, point, onTrigger) {
+    pendingAtomicFault = { path: resolve(path), point, onTrigger };
+}
+export function __clearAtomicWriteFaultForTests() {
+    pendingAtomicFault = null;
+}
+function maybeInjectAtomicFault(path, point, context) {
+    if (!pendingAtomicFault || pendingAtomicFault.point !== point || pendingAtomicFault.path !== resolve(path))
+        return;
+    const fault = pendingAtomicFault;
+    pendingAtomicFault = null;
+    fault.onTrigger?.(context);
+    const error = new Error(`Injected atomic-write test fault (${point}) for ${fault.path}`);
+    error.code = 'EAGENTOSTESTFAULT';
+    throw error;
+}
 export async function initAgentOS(options = {}) {
     const cwd = resolve(options.cwd ?? process.cwd());
     await assertWorkspaceBoundaries(cwd);
@@ -147,10 +351,12 @@ export async function compactAgentOS(options = {}) {
         `${options.dryRun ? 'Would rewrite' : 'Rewrote'}: .agentos/tasks.md`,
     ];
     if (!options.dryRun) {
-        await mkdir(runsDir, { recursive: true });
-        await writeFile(archivePath, renderCompactArchive({ oldHandoff, oldTasks, compactHandoff, compactTasks }), 'utf8');
-        await writeFile(handoffPath, compactHandoff, 'utf8');
-        await writeFile(tasksPath, compactTasks, 'utf8');
+        await withMutationTransaction(async () => {
+            await mkdir(runsDir, { recursive: true });
+            await writeFileAtomic(archivePath, renderCompactArchive({ oldHandoff, oldTasks, compactHandoff, compactTasks }));
+            await writeFileAtomic(handoffPath, compactHandoff);
+            await writeFileAtomic(tasksPath, compactTasks);
+        });
         const doctor = await doctorAgentOS({ cwd: root });
         lines.push('', doctor.text);
     }
@@ -206,16 +412,18 @@ export async function linkObsidianAgentOS(options = {}) {
     if (!dryRun) {
         try {
             await mkdir(join(root, '.agentos'), { recursive: true });
-            await writeFile(join(root, '.agentos/knowledge.md'), knowledge, 'utf8');
-            await writeFile(join(root, '.agentos/project.yaml'), projectPatched, 'utf8');
-            for (const note of linked) {
-                const notePath = join(vault, note);
-                if (!await exists(notePath)) {
-                    await mkdir(dirname(notePath), { recursive: true });
-                    await writeFile(notePath, obsidianNoteTemplate(note, projectName, linked), 'utf8');
+            await withMutationTransaction(async () => {
+                await writeFileAtomic(join(root, '.agentos/knowledge.md'), knowledge);
+                await writeFileAtomic(join(root, '.agentos/project.yaml'), projectPatched);
+                for (const note of linked) {
+                    const notePath = join(vault, note);
+                    if (!await exists(notePath)) {
+                        await mkdirTracked(dirname(notePath));
+                        await writeFileAtomic(notePath, obsidianNoteTemplate(note, projectName, linked));
+                    }
                 }
-            }
-            await fixAgentOSAdapters(root);
+                await fixAgentOSAdapters(root);
+            });
             const doctor = await doctorAgentOS({ cwd: root });
             lines.push('', doctor.text);
         }
@@ -296,11 +504,13 @@ async function linkObsidianWorkspaceAgentOS(options = {}) {
     if (!dryRun) {
         try {
             await mkdir(join(root, '.agentos'), { recursive: true });
-            if (create)
-                await mkdir(workspacePath, { recursive: true });
-            await writeFile(join(root, '.agentos/knowledge.md'), knowledge, 'utf8');
-            await writeFile(join(root, '.agentos/project.yaml'), projectPatched, 'utf8');
-            await fixAgentOSAdapters(root);
+            await withMutationTransaction(async () => {
+                if (create)
+                    await mkdirTracked(workspacePath);
+                await writeFileAtomic(join(root, '.agentos/knowledge.md'), knowledge);
+                await writeFileAtomic(join(root, '.agentos/project.yaml'), projectPatched);
+                await fixAgentOSAdapters(root);
+            });
             const doctor = await doctorAgentOS({ cwd: root });
             lines.push('', doctor.text);
         }
@@ -409,7 +619,7 @@ async function ensureClaudeCanonicalBlock(path) {
     const content = await safeRead(path);
     if (content.includes('AgentOS canonical Claude Code context'))
         return;
-    await writeFile(path, content.trim() ? `${block}\n\n${content.trim()}\n` : block, 'utf8');
+    await writeFileAtomic(path, content.trim() ? `${block}\n\n${content.trim()}\n` : block);
 }
 function claudeCanonicalBlock() {
     return `# AgentOS canonical Claude Code context\n\nUse AgentOS as the source of truth for this workspace. Read \`AGENTS.md\`, \`.agentos/project.yaml\`, \`.agentos/memory.md\`, \`.agentos/handoff.md\`, \`.agentos/tasks.md\`, \`.agentos/skills.md\`, and only the relevant repo/agent/engine/skill files for the assigned task.\n\nDo not use \`.claude/agents*\` or \`.claude/settings*.json*\` as canonical project instructions. Those files are preserved legacy fallback/reference only.\n`;
@@ -436,15 +646,18 @@ export async function skillsAgentOS(options = {}) {
     for (const skill of skills) {
         const relPath = skillRelPath(skill);
         lines.push(`${dryRun ? 'Would write' : 'Wrote'}: ${relPath}`);
-        if (!dryRun) {
-            await mkdir(dirname(join(root, relPath)), { recursive: true });
-            await writeFile(join(root, relPath), renderSkillTemplate(skill, mode), 'utf8');
-        }
     }
     if (!dryRun) {
-        const skillsMdPath = join(root, '.agentos/skills.md');
-        const existing = await safeRead(skillsMdPath);
-        await writeFile(skillsMdPath, await ensureLocalSkillsSection(root, existing), 'utf8');
+        await withMutationTransaction(async () => {
+            for (const skill of skills) {
+                const relPath = skillRelPath(skill);
+                await mkdirTracked(dirname(join(root, relPath)));
+                await writeFileAtomic(join(root, relPath), renderSkillTemplate(skill, mode));
+            }
+            const skillsMdPath = join(root, '.agentos/skills.md');
+            const existing = await safeRead(skillsMdPath);
+            await writeFileAtomic(skillsMdPath, await ensureLocalSkillsSection(root, existing));
+        });
         lines.push('Updated: .agentos/skills.md');
     }
     else {
@@ -481,16 +694,21 @@ async function removeLocalSkills(root, rawRemove, dryRun) {
         for (const entry of byId.get(id)) {
             const relDir = dirname(entry.relPath);
             lines.push(`${dryRun ? 'Would remove' : 'Removed'}: ${relDir}/`);
-            if (!dryRun)
-                await rm(dirname(entry.abs), { recursive: true, force: true });
         }
         removed.push(id);
     }
     if (!dryRun) {
-        const skillsMdPath = join(root, '.agentos/skills.md');
-        const existing = await safeRead(skillsMdPath);
-        const cleaned = removeSkillReferencesFromSkillsMd(existing, ids);
-        await writeFile(skillsMdPath, await ensureLocalSkillsSection(root, cleaned), 'utf8');
+        await withMutationTransaction(async () => {
+            for (const id of ids) {
+                for (const entry of byId.get(id)) {
+                    await removeTracked(dirname(entry.abs));
+                }
+            }
+            const skillsMdPath = join(root, '.agentos/skills.md');
+            const existing = await safeRead(skillsMdPath);
+            const cleaned = removeSkillReferencesFromSkillsMd(existing, ids);
+            await writeFileAtomic(skillsMdPath, await ensureLocalSkillsSection(root, cleaned));
+        });
         lines.push('Updated: .agentos/skills.md');
     }
     else {
@@ -558,9 +776,11 @@ export async function agentsAgentOS(options = {}) {
     project.agents = { profile: 'custom', capabilities, enabled: [...enabled] };
     const lines = [`AgentOS agents add${dryRun ? ' dry run' : ''}`, `Root: ${root}`, `Agent: ${id}`, '', `${dryRun ? 'Would write' : 'Wrote'}: ${relPath}`, `${dryRun ? 'Would patch' : 'Patched'}: .agentos/project.yaml`];
     if (!dryRun) {
-        await mkdir(dirname(join(root, relPath)), { recursive: true });
-        await writeFile(join(root, relPath), content, 'utf8');
-        await writeFile(projectPath, dumpProjectYaml(project), 'utf8');
+        await withMutationTransaction(async () => {
+            await mkdirTracked(dirname(join(root, relPath)));
+            await writeFileAtomic(join(root, relPath), content);
+            await writeFileAtomic(projectPath, dumpProjectYaml(project));
+        });
     }
     return { ok: true, root, id, dryRun, text: lines.join('\n') };
 }
@@ -635,10 +855,12 @@ export async function templatesAgentOS(options = {}) {
     }
     lines.push(`${dryRun ? (replace ? 'Would replace' : 'Would write') : writeVerb}: ${relPath}`);
     if (!dryRun) {
-        await mkdir(dirname(targetPath), { recursive: true });
-        await writeFile(targetPath, converted, 'utf8');
-        if (type === 'skill')
-            await writeFile(join(root, '.agentos/skills.md'), await ensureLocalSkillsSection(root, await safeRead(join(root, '.agentos/skills.md'))), 'utf8');
+        await withMutationTransaction(async () => {
+            await mkdirTracked(dirname(targetPath));
+            await writeFileAtomic(targetPath, converted);
+            if (type === 'skill')
+                await writeFileAtomic(join(root, '.agentos/skills.md'), await ensureLocalSkillsSection(root, await safeRead(join(root, '.agentos/skills.md'))));
+        });
     }
     else {
         lines.push('Dry run only. Re-run with --yes to write after reviewing attribution/license and safety findings.');
@@ -680,12 +902,14 @@ async function templatesCopyAgentOS(root, options = {}) {
     if (!dryRun) {
         if (entry.type === 'agent')
             await assertProjectYamlWellFormed(join(root, '.agentos/project.yaml'));
-        await mkdir(dirname(targetPath), { recursive: true });
-        await writeFile(targetPath, content, 'utf8');
-        if (entry.type === 'agent')
-            await registerProjectAgent(root, entry.name);
-        else
-            await writeFile(join(root, '.agentos/skills.md'), await ensureLocalSkillsSection(root, await safeRead(join(root, '.agentos/skills.md'))), 'utf8');
+        await withMutationTransaction(async () => {
+            await mkdirTracked(dirname(targetPath));
+            await writeFileAtomic(targetPath, content);
+            if (entry.type === 'agent')
+                await registerProjectAgent(root, entry.name);
+            else
+                await writeFileAtomic(join(root, '.agentos/skills.md'), await ensureLocalSkillsSection(root, await safeRead(join(root, '.agentos/skills.md'))));
+        });
     }
     return { ok: true, root, dryRun, entry, text: lines.join('\n') };
 }
@@ -774,8 +998,10 @@ async function quarantineImportedTemplate(root, name, type, fetched, review) {
         '```',
         '',
     ].join('\n');
-    await mkdir(dirname(join(root, relPath)), { recursive: true });
-    await writeFile(join(root, relPath), content, 'utf8');
+    await withMutationTransaction(async () => {
+        await mkdirTracked(dirname(join(root, relPath)));
+        await writeFileAtomic(join(root, relPath), content);
+    });
     return relPath;
 }
 function validateTemplateContent(type, content) {
@@ -812,7 +1038,7 @@ async function registerProjectAgent(root, id) {
     if (id === 'project-manager' && !capabilities.planning)
         capabilities.planning = 'project-manager';
     project.agents = { profile: 'custom', capabilities, enabled: [...enabled] };
-    await writeFile(projectPath, dumpProjectYaml(project), 'utf8');
+    await writeFileAtomic(projectPath, dumpProjectYaml(project));
 }
 const SKILL_CATALOG = [
     {
@@ -1294,10 +1520,12 @@ export async function runHandoffAgentOS(options = {}) {
         'No automatic engine switching. No engine was launched or closed.',
     ];
     if (!dryRun) {
-        await mkdir(join(root, '.agentos/runs'), { recursive: true });
-        await writeFile(handoffPath, note, 'utf8');
-        await writeFile(join(root, '.agentos/tasks.md'), tasksUpdate, 'utf8');
-        await writeFile(join(root, '.agentos/handoff.md'), handoffUpdate, 'utf8');
+        await withMutationTransaction(async () => {
+            await mkdir(join(root, '.agentos/runs'), { recursive: true });
+            await writeFileAtomic(handoffPath, note);
+            await writeFileAtomic(join(root, '.agentos/tasks.md'), tasksUpdate);
+            await writeFileAtomic(join(root, '.agentos/handoff.md'), handoffUpdate);
+        });
     }
     return { ok: true, dryRun, root, engine, reason, handoffPath, handoffRel, git, text: lines.join('\n') };
 }
@@ -1593,7 +1821,7 @@ export async function doctorAgentOS(options = {}) {
     let projectConfigError = null;
     if (options.fix) {
         try {
-            await fixAgentOSAdapters(root);
+            await withMutationTransaction(() => fixAgentOSAdapters(root));
         }
         catch (error) {
             if (!(error instanceof ProjectConfigError))
@@ -1982,7 +2210,7 @@ async function ensureChildRepoGitignore(repoRoot) {
     const content = await safeRead(gitignorePath);
     const next = ensureManagedBlock(content, 'AgentOS parent-workspace pointer files', CHILD_REPO_GITIGNORE_BLOCK);
     if (next !== content)
-        await writeFile(gitignorePath, next, 'utf8');
+        await writeFileAtomic(gitignorePath, next);
 }
 function ensureManagedBlock(content, title, block) {
     const start = `# ${title}`;
@@ -2008,15 +2236,15 @@ function escapeRegExp(value) {
 }
 async function ensureAgentOSSection(path, section) {
     if (!await exists(path))
-        return writeFile(path, section, 'utf8');
+        return writeFileAtomic(path, section);
     const content = await readFile(path, 'utf8');
     if (adapterLooksCurrent(content, section))
         return;
     if (!hasAgentOSMarker(content) && !content.includes('AgentOS for Projects')) {
-        await copyFile(path, `${path}.agentos.bak`);
-        return writeFile(path, `${content.trim()}\n\n---\n\n${section}`, 'utf8');
+        await copyFileTracked(path, `${path}.agentos.bak`);
+        return writeFileAtomic(path, `${content.trim()}\n\n---\n\n${section}`);
     }
-    await writeFile(path, replaceAgentOSSection(content, section), 'utf8');
+    await writeFileAtomic(path, replaceAgentOSSection(content, section));
 }
 function hasAgentOSMarker(content) {
     return ['AgentOS for Projects bootloader.', 'AgentOS child repo:', 'This workspace uses **AgentOS for Projects**.', 'This project uses **AgentOS for Projects**.', 'This repo is part of a parent'].some((m) => content.includes(m));
@@ -2490,7 +2718,7 @@ async function ensureProjectYamlEngine(path, engine) {
     data.engines.allowed = Array.isArray(data.engines.allowed) ? data.engines.allowed : [];
     if (!data.engines.allowed.includes(engine))
         data.engines.allowed.push(engine);
-    await writeFile(path, dumpProjectYaml(data), 'utf8');
+    await writeFileAtomic(path, dumpProjectYaml(data));
 }
 async function ensureProjectYamlAgents(path, agentSelection) {
     if (!await exists(path))
@@ -2498,19 +2726,19 @@ async function ensureProjectYamlAgents(path, agentSelection) {
     const content = await readFile(path, 'utf8');
     const data = parseProjectYaml(content);
     data.agents = agentConfigObject(agentSelection);
-    await writeFile(path, dumpProjectYaml(data), 'utf8');
+    await writeFileAtomic(path, dumpProjectYaml(data));
 }
 async function createOrPatchRootFile(path, section) {
     if (!await exists(path))
-        return writeFile(path, section, 'utf8');
+        return writeFileAtomic(path, section);
     const content = await readFile(path, 'utf8');
     if (content.includes('AgentOS for Projects'))
         return;
-    await copyFile(path, `${path}.agentos.bak`);
-    await writeFile(path, `${content.trim()}\n\n---\n\n${section}`, 'utf8');
+    await copyFileTracked(path, `${path}.agentos.bak`);
+    await writeFileAtomic(path, `${content.trim()}\n\n---\n\n${section}`);
 }
 async function writeIfMissing(path, content) { if (!await exists(path))
-    await writeFile(path, content, 'utf8'); }
+    await writeFileAtomic(path, content); }
 async function exists(path) { try {
     await access(path);
     return true;

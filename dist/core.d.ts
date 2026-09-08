@@ -1,3 +1,8 @@
+export declare function writeFileAtomic(path: string, content: string | Buffer, options?: {
+    mode?: number;
+}): Promise<void>;
+export declare function __setAtomicWriteFaultForTests(path: string, point: 'before-sync' | 'before-rename', onTrigger?: (context: any) => void): void;
+export declare function __clearAtomicWriteFaultForTests(): void;
 export declare function initAgentOS(options?: any): Promise<{
     mode: any;
     workspaceKind: string;

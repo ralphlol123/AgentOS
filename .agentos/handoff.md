@@ -2,10 +2,10 @@
 
 ## Current objective
 
-Task 2: filesystem boundary containment on `fix/filesystem-boundary-containment`.
-Implemented directly by Hermes, without Claude Code/OpenCode. Task 1 merged as PR #13 (`0109318`).
+Task 3: atomic state writes and best-effort command rollback on `fix/atomic-state-writes`.
+Implemented with Claude Code from merged Task 2 (`a21c718`). Critical state replacements now use same-directory temporary files, fsync/close, mode preservation, atomic rename, and cleanup. Multi-output mutation commands roll back original bytes/existence when a later in-process write fails.
 
-Verification: `npm run check`, `npm test` (91 passed), and `git diff --check` passed. Tests exercise real temporary workspaces and byte/existence snapshots for rejected paths, dangling roots, symlink targets, imports/removal, and valid Obsidian links. Native independent review identified three issues; all have RED-to-GREEN regression coverage. Final native independent review: PASS. Delivery: one scoped local Task 2 commit; push/merge remain pending, no push requested.
+Verification: `npm run check`, 18 focused atomic/rollback tests, full `npm test` (109 passed), and `git diff --check` passed independently after implementation. Final independent review: PASS. Package version is unchanged. Branch delivery is via PR; merge pending.
 
 Below is historical rollout context, not the active implementation task.
 
@@ -103,7 +103,7 @@ Dogfood temp workspace verified:
 
 ## Next exact action
 
-Commit and push `feat/subrepo-engine-skill-access`, then prepare PR details. After merge/install in KargaX, run:
+Merge the Task 3 PR after GitHub checks and human review. After merge/install in KargaX, run:
 
 ```bash
 cd /home/app/www/kargax/new

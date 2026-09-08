@@ -20,15 +20,16 @@
 ## Reliability improvement slices
 
 - [x] Task 1: fail closed on invalid project config; merged as PR #13.
-- [x] Task 2: filesystem boundary containment implemented directly by Hermes on `fix/filesystem-boundary-containment`; 91 tests pass; final native independent review PASS. Delivered as one scoped local commit; push/merge remain pending. No Claude Code/OpenCode used.
+- [x] Task 2: filesystem boundary containment; 91 tests passed; merged as PR #14 (`a21c718`).
+- [x] Task 3: atomic state writes and best-effort command rollback implemented with Claude Code on `fix/atomic-state-writes`; 18 focused tests and 109 full tests pass; final independent review PASS. Branch delivery is via PR; merge pending.
 
 ## Now
 
-- [ ] Commit and push `feat/subrepo-engine-skill-access`, then prepare PR details.
+- [ ] Merge the Task 3 PR after GitHub checks and human review.
 
 ## Next
 
-- [ ] In KargaX after install, run `agentos doctor --fix` from workspace root so `kargax-be`/`kargax-fe` child pointers pick up parent AgentOS skill access.
+- [ ] Install/verify current AgentOS in KargaX, run `agentos doctor --fix`, then smoke-test child-repo skill access.
 - [ ] When Ralph resumes release prep: update release notes/CHANGELOG, run final dry-run + packed install smoke, and publish only after explicit approval.
 - [ ] When Ralph resumes Worktrees Optional + Installation Wizard: start a feature branch from latest `main` and implement the first slice from the saved plan.
 
