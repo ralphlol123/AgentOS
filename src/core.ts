@@ -1,4 +1,4 @@
-import { access, chmod, copyFile, mkdir, open, readFile, readdir, rename, rm, stat, lstat, realpath, writeFile } from 'node:fs/promises';
+import { access, chmod, copyFile, link, mkdir, open, readFile, readdir, rename, rm, stat, lstat, realpath, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomBytes } from 'node:crypto';
@@ -155,11 +155,40 @@ async function removeTracked(path: string) {
   return rm(path, { recursive: true, force: true });
 }
 
-async function copyFileTracked(src: string, dst: string) {
+// Atomic, exclusive "create if it doesn't exist yet, never clobber if it
+// does" write: the content lands in a uniquely named temp file in the same
+// directory (fsync'd, mode applied), then `link()` - not `rename()` - installs
+// it at `path`. Unlike `rename()`, `link()` fails with EEXIST instead of
+// silently replacing an existing destination, so there is no check-then-write
+// gap between "does the backup exist" and "write the backup": either this
+// call's link wins and its bytes/mode land exactly, or it loses and the file
+// that's already there (written by an earlier or concurrent caller) is left
+// completely untouched. The temp file is always removed either way.
+async function writeFileExclusiveAtomic(path: string, content: Buffer, mode?: number): Promise<{ created: boolean }> {
   const tx = currentMutationTransaction();
-  if (tx) await tx.track(dst);
-  const content = await readFile(src);
-  return writeFileAtomicUntracked(dst, content);
+  if (tx) await tx.track(path);
+  const tmpPath = uniqueTempPath(dirname(path), basename(path));
+  try {
+    const handle = await open(tmpPath, 'wx', 0o666);
+    try {
+      await handle.writeFile(content);
+      maybeInjectAtomicFault(path, 'before-sync', { tmpPath });
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    if (mode !== undefined) await chmod(tmpPath, mode & 0o777);
+    maybeInjectAtomicFault(path, 'before-rename', { tmpPath });
+    try {
+      await link(tmpPath, path);
+    } catch (error) {
+      if (error.code === 'EEXIST') return { created: false };
+      throw error;
+    }
+    return { created: true };
+  } finally {
+    await rm(tmpPath, { force: true }).catch(() => {});
+  }
 }
 
 export async function writeFileAtomic(path: string, content: string | Buffer, options: { mode?: number } = {}) {
@@ -216,6 +245,13 @@ export function __clearAtomicWriteFaultForTests() {
   pendingAtomicFault = null;
 }
 
+// Test-only direct access to the exclusive no-clobber write primitive, so its
+// mutual-exclusion guarantee under real concurrency can be verified without
+// going through a full init/doctor command.
+export async function __writeFileExclusiveAtomicForTests(path: string, content: string) {
+  return writeFileExclusiveAtomic(resolve(path), Buffer.from(content, 'utf8'));
+}
+
 function maybeInjectAtomicFault(path: string, point: string, context: any) {
   if (!pendingAtomicFault || pendingAtomicFault.point !== point || pendingAtomicFault.path !== resolve(path)) return;
   const fault = pendingAtomicFault;
@@ -224,6 +260,467 @@ function maybeInjectAtomicFault(path: string, point: string, context: any) {
   const error: any = new Error(`Injected atomic-write test fault (${point}) for ${fault.path}`);
   error.code = 'EAGENTOSTESTFAULT';
   throw error;
+}
+
+// --- Conflict-safe adapter repair (root/child AGENTS.md, CLAUDE.md, .hermes.md) --
+//
+// AgentOS is the only writer of a single, explicitly bounded region in each
+// adapter file:
+//
+//   <!-- agentos:managed:start -->
+//   ...AgentOS-generated section...
+//   <!-- agentos:managed:end -->
+//
+// Everything outside a *valid* single marker pair (custom text before it,
+// after it, or an entire file that has none of this at all) is preserved
+// byte-for-byte; init/doctor --fix only ever rewrite the bytes strictly
+// between the markers. A file is converted into this format - with a single
+// `<file>.agentos.bak` backup of its pre-conversion bytes/mode, taken once -
+// only when ownership of its current content is unambiguous:
+//   - missing or empty: nothing to lose, no backup needed;
+//   - the whole trimmed file is exactly one legacy AgentOS-generated section
+//     (one heading, one recognized legacy marker phrase, nothing else); or
+//   - the file uses the older `custom\n\n---\n\nAgentOS section` convention
+//     and the custom prefix has no AgentOS-related content of its own; or
+//   - the file has no AgentOS-related content at all (a genuinely custom
+//     file); the managed block is appended after the existing bytes.
+// Anything else - corrupted/duplicate/reversed/nested markers, or a file that
+// merely *mentions* AgentOS without matching one of the shapes above - is
+// reported as a conflict and left completely untouched; see
+// planAdapterReconciliation/AdapterConflictError below.
+
+const MANAGED_BLOCK_START = '<!-- agentos:managed:start -->';
+const MANAGED_BLOCK_END = '<!-- agentos:managed:end -->';
+
+// Phrases that only ever appeared in AgentOS-generated adapter headings
+// across every historical (unmarked) format this tool has produced. Used to
+// recognize a legacy AgentOS section for safe one-time migration - never to
+// guess ownership of arbitrary "AgentOS"-mentioning prose.
+const KNOWN_LEGACY_ADAPTER_PHRASES = [
+  'AgentOS for Projects bootloader.',
+  'AgentOS for Projects.',
+  'AgentOS child repo:',
+  'This workspace uses **AgentOS for Projects**.',
+  'This project uses **AgentOS for Projects**.',
+  'This project uses AgentOS for Projects.',
+  'This repo is part of a parent **AgentOS for Projects** workspace.',
+  'This repo is part of a parent AgentOS workspace.',
+  'This repo is part of a parent AgentOS for Projects workspace.',
+];
+
+const LEGACY_ADAPTER_SEPARATORS = ['\n\n---\n\n', '\r\n\r\n---\r\n\r\n'];
+
+class AdapterConflictError extends Error {
+  conflicts: Array<{ path: string; reason: string }>;
+  constructor(conflicts: Array<{ path: string; reason: string }>) {
+    super(`AgentOS adapter ownership is ambiguous for ${conflicts.length} file(s); no adapter files were changed:\n${conflicts.map((c) => `- ${c.path}: ${c.reason}`).join('\n')}`);
+    this.conflicts = conflicts;
+  }
+}
+
+function allIndicesOf(haystack: string, needle: string) {
+  const idxs: number[] = [];
+  let from = 0;
+  while (true) {
+    const idx = haystack.indexOf(needle, from);
+    if (idx < 0) break;
+    idxs.push(idx);
+    from = idx + needle.length;
+  }
+  return idxs;
+}
+
+function detectAdapterNewline(content: string) {
+  return content.includes('\r\n') ? '\r\n' : '\n';
+}
+
+// Finds the single managed-block marker pair in `content`, or classifies why
+// the markers present (if any) are ambiguous: missing one side, reversed, or
+// duplicated/nested. Any shape besides exactly one start before exactly one
+// end is a conflict - AgentOS refuses to guess which pair is "the" block.
+// Walks `content` line by line (tolerating LF or CRLF), calling `fn` with
+// each line's text (its trailing \r, if any, stripped) and the byte offset
+// where that line starts.
+function forEachAdapterLine(content: string, fn: (line: string, startIdx: number) => void) {
+  let idx = 0;
+  while (idx <= content.length) {
+    const nlIdx = content.indexOf('\n', idx);
+    const lineEnd = nlIdx === -1 ? content.length : nlIdx;
+    let line = content.slice(idx, lineEnd);
+    if (line.endsWith('\r')) line = line.slice(0, -1);
+    fn(line, idx);
+    if (nlIdx === -1) break;
+    idx = nlIdx + 1;
+  }
+}
+
+// CommonMark fenced code blocks open with a run of 3+ backticks or tildes
+// and only close on a run of the SAME character with length >= the opener's.
+// A shorter run of the same character, or any run of the other character, is
+// just literal content inside the still-open fence - it neither closes it
+// nor opens a nested one (fenced code blocks don't nest in CommonMark).
+function parseFenceMarker(line: string): { char: string; length: number; rest: string } | null {
+  const m = /^\s*(`{3,}|~{3,})/.exec(line);
+  if (!m) return null;
+  return { char: m[1][0], length: m[1].length, rest: line.slice(m[0].length) };
+}
+
+// Only a line that, once its trailing \r is stripped, equals the marker
+// text exactly - and that isn't inside a fenced code block - counts as a
+// real marker. Marker text embedded in a longer line (prose, inline HTML) or
+// sitting inside a fence (a documentation example of the format, however it
+// is delimited) is never treated as forming or extending an owned block; its
+// presence always makes the file ambiguous rather than silently ignored or
+// trusted.
+function locateManagedBlock(content: string) {
+  const starts: number[] = [];
+  const ends: number[] = [];
+  let embedded = false;
+  let openFence: { char: string; length: number; rest: string } | null = null;
+  forEachAdapterLine(content, (line, startIdx) => {
+    const fenceMarker = parseFenceMarker(line);
+    const isStart = line === MANAGED_BLOCK_START;
+    const isEnd = line === MANAGED_BLOCK_END;
+    if (openFence) {
+      if (fenceMarker && fenceMarker.char === openFence.char && fenceMarker.length >= openFence.length && /^[ \t]*$/.test(fenceMarker.rest)) {
+        openFence = null;
+        return;
+      }
+      if (isStart || isEnd) embedded = true;
+      return;
+    }
+    if (fenceMarker) { openFence = fenceMarker; return; }
+    if (isStart) starts.push(startIdx);
+    else if (isEnd) ends.push(startIdx);
+    else if (line.includes(MANAGED_BLOCK_START) || line.includes(MANAGED_BLOCK_END)) embedded = true;
+  });
+  if (embedded) return { kind: 'conflict' as const, reason: 'managed block marker text appears embedded in a line (prose, inline HTML, or a fenced example) rather than as its own standalone marker line; ambiguous, resolve manually' };
+  if (!starts.length && !ends.length) return { kind: 'none' as const };
+  if (starts.length === 1 && ends.length === 1) {
+    if (starts[0] < ends[0]) return { kind: 'valid' as const, startIdx: starts[0], endIdx: ends[0] };
+    return { kind: 'conflict' as const, reason: 'managed block markers are reversed (end marker appears before start marker)' };
+  }
+  if (starts.length > 1 || ends.length > 1) return { kind: 'conflict' as const, reason: `duplicate or nested managed block markers found (${starts.length} start, ${ends.length} end)` };
+  if (!starts.length) return { kind: 'conflict' as const, reason: 'managed block end marker found without a matching start marker' };
+  return { kind: 'conflict' as const, reason: 'managed block start marker found without a matching end marker' };
+}
+
+function countKnownLegacyPhrases(text: string) {
+  let total = 0;
+  for (const phrase of KNOWN_LEGACY_ADAPTER_PHRASES) total += allIndicesOf(text, phrase).length;
+  return total;
+}
+
+// Compiles a fully anchored (^...$) exact-structure matcher from literal
+// lines with `{{name}}` placeholders for the only genuinely variable spans
+// (workspace kind, repo summary, repo name/path). Every other character -
+// including which lines are blank and how many there are - must match
+// exactly, so a real historical shape matches but that same shape plus one
+// appended paragraph, bullet, or heading does not.
+function compileLegacyAdapterTemplate(lines: string[]) {
+  const body = lines.map((line) => (
+    line.split(/(\{\{\w+\}\})/).map((part) => (/^\{\{\w+\}\}$/.test(part) ? '[^\\r\\n]+' : escapeRegExp(part))).join('')
+  )).join('\\n');
+  return new RegExp(`^${body}$`);
+}
+
+function compileFullLegacyAdapterTemplates(includeSkills: boolean) {
+  const skills = includeSkills ? ', `.agentos/skills.md`' : '';
+  const parentSkills = includeSkills ? ', `../.agentos/skills.md`' : '';
+  return [
+    compileLegacyAdapterTemplate([
+      '# AGENTS.md', '', 'AgentOS for Projects bootloader.', '',
+      'Workspace: {{workspaceKind}}', 'Repos: {{repos}}', '',
+      `Read first: \`.agentos/project.yaml\`, \`.agentos/memory.md\`, \`.agentos/handoff.md\`, \`.agentos/tasks.md\`, \`.agentos/knowledge.md\`${skills}, relevant \`.agentos/repos/*\`, \`.agentos/agents/*\`, \`.agentos/engines/*\`.`, '',
+      'Rules: declare role + repo scope before editing; edit only in scope; never touch secrets/.env/migrations/prod config without approval; do not commit/push unless explicitly asked; verify; update handoff/tasks before stopping.',
+    ]),
+    compileLegacyAdapterTemplate([
+      '# CLAUDE.md', '',
+      `AgentOS for Projects. Read \`AGENTS.md\`, \`.agentos/project.yaml\`, \`.agentos/memory.md\`, \`.agentos/handoff.md\`, \`.agentos/tasks.md\`, \`.agentos/knowledge.md\`${skills}, relevant \`.agentos/repos/*\`, \`.agentos/agents/*\`, and \`.agentos/engines/claude-code.md\` before acting.`, '',
+      'Rules: declare role + repo scope before editing; edit only in scope; backend only if in scope; no secrets/.env/migrations/prod config without approval; no commit/push unless explicitly asked; verify; update handoff/tasks before stopping.', '',
+      'If launched from a child repo, follow pointer files back to the parent AgentOS root.',
+    ]),
+    compileLegacyAdapterTemplate([
+      '# Hermes Agent Adapter', '',
+      `AgentOS for Projects. Read \`AGENTS.md\`, \`.agentos/project.yaml\`, \`.agentos/memory.md\`, \`.agentos/handoff.md\`, \`.agentos/tasks.md\`, \`.agentos/knowledge.md\`${skills}, relevant \`.agentos/repos/*\` and \`.agentos/agents/*\` before work.`,
+      'Hermes rules: load relevant skills; verify real file/git/terminal/browser state; do not trust subagent reports without checking; update handoff/tasks when state changes.',
+    ]),
+    compileLegacyAdapterTemplate([
+      '# AGENTS.md', '', 'AgentOS child repo: {{name}} ({{path}}).',
+      `Parent context: \`../AGENTS.md\`, \`../.agentos/project.yaml\`, \`../.agentos/memory.md\`, \`../.agentos/handoff.md\`, \`../.agentos/tasks.md\`, \`../.agentos/knowledge.md\`${parentSkills}, relevant \`../.agentos/agents/*\`, \`../.agentos/engines/*\`, and \`../.agentos/repos/{{name}}.md\`.`,
+      'Rules: do not treat this repo as the whole product; declare scope; edit only in scope; no commit/push unless asked; update parent handoff/tasks.',
+    ]),
+    compileLegacyAdapterTemplate([
+      '# CLAUDE.md', '', 'AgentOS child repo: {{name}} ({{path}}).',
+      `Before acting read \`../CLAUDE.md\`, \`../AGENTS.md\`, \`../.agentos/project.yaml\`, \`../.agentos/handoff.md\`, \`../.agentos/tasks.md\`, \`../.agentos/knowledge.md\`${parentSkills}, relevant \`../.agentos/agents/*\`, and \`../.agentos/repos/{{name}}.md\`.`,
+      'Declare scope; edit only in scope; no commit/push unless asked; update parent handoff/tasks.',
+    ]),
+  ];
+}
+
+function compileInitialLegacyAdapterTemplates() {
+  return [
+    compileLegacyAdapterTemplate(['# AGENTS.md', '', 'AgentOS for Projects bootloader.', '', 'Workspace: {{workspaceKind}}', 'Repos: {{repos}}', '', 'Read first: `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`, relevant `.agentos/repos/*`, `.agentos/agents/*`, `.agentos/engines/*`.', '', 'Rules: declare role + repo scope before editing; edit only in scope; never touch secrets/.env/migrations/prod config without approval; do not commit/push unless explicitly asked; verify; update handoff/tasks before stopping.']),
+    compileLegacyAdapterTemplate(['# CLAUDE.md', '', 'AgentOS for Projects. Read `AGENTS.md`, `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`, relevant `.agentos/repos/*`, `.agentos/agents/*`, and `.agentos/engines/claude-code.md` before acting.', '', 'Rules: declare role + repo scope before editing; edit only in scope; backend only if in scope; no secrets/.env/migrations/prod config without approval; no commit/push unless explicitly asked; verify; update handoff/tasks before stopping.', '', 'If launched from a child repo, follow pointer files back to the parent AgentOS root.']),
+    compileLegacyAdapterTemplate(['# Hermes Agent Adapter', '', 'AgentOS for Projects. Read `AGENTS.md`, `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`, relevant `.agentos/repos/*` and `.agentos/agents/*` before work.', 'Hermes rules: load relevant skills; verify real file/git/terminal/browser state; do not trust subagent reports without checking; update handoff/tasks when state changes.']),
+    compileLegacyAdapterTemplate(['# AGENTS.md', '', 'AgentOS child repo: {{name}} ({{path}}).', 'Parent context: `../AGENTS.md`, `../.agentos/project.yaml`, `../.agentos/memory.md`, `../.agentos/handoff.md`, `../.agentos/tasks.md`, relevant `../.agentos/agents/*`, `../.agentos/engines/*`, and `../.agentos/repos/{{name}}.md`.', 'Rules: do not treat this repo as the whole product; declare scope; edit only in scope; no commit/push unless asked; update parent handoff/tasks.']),
+    compileLegacyAdapterTemplate(['# CLAUDE.md', '', 'AgentOS child repo: {{name}} ({{path}}).', 'Before acting read `../CLAUDE.md`, `../AGENTS.md`, `../.agentos/project.yaml`, `../.agentos/handoff.md`, `../.agentos/tasks.md`, relevant `../.agentos/agents/*`, and `../.agentos/repos/{{name}}.md`.', 'Declare scope; edit only in scope; no commit/push unless asked; update parent handoff/tasks.']),
+  ];
+}
+
+function compileOnDemandChildLegacyAdapterTemplates() {
+  return [
+    compileLegacyAdapterTemplate(['# AGENTS.md', '', 'AgentOS child repo: {{name}} ({{path}}).', 'Parent context: `../AGENTS.md`, `../.agentos/project.yaml`, `../.agentos/memory.md`, `../.agentos/handoff.md`, `../.agentos/tasks.md`, `../.agentos/repos/{{name}}.md`; then load skills/agent/engine files only when relevant.', 'Rules: do not treat this repo as the whole product; declare scope; edit only in scope; no commit/push unless asked; update parent handoff/tasks.']),
+    compileLegacyAdapterTemplate(['# CLAUDE.md', '', 'AgentOS child repo: {{name}} ({{path}}).', 'Before acting read `../CLAUDE.md`, `../AGENTS.md`, `../.agentos/project.yaml`, `../.agentos/handoff.md`, `../.agentos/tasks.md`, `../.agentos/repos/{{name}}.md`; then load skills/agent files only when relevant.', 'Declare scope; edit only in scope; no commit/push unless asked; update parent handoff/tasks.']),
+  ];
+}
+
+// Every unmarked shape this tool has ever generated for these files, before
+// Task 4 added explicit markers. Deliberately closed and small: recognizing
+// a shape here is what makes a whole-file (or "---"-bounded) legacy section
+// eligible for automatic one-time migration, so nothing goes in this list
+// unless it is byte-for-byte a real historical generator output.
+const LEGACY_ADAPTER_TEMPLATES = [
+  ...compileInitialLegacyAdapterTemplates(),
+  ...compileFullLegacyAdapterTemplates(true),
+  ...compileFullLegacyAdapterTemplates(false),
+  ...compileOnDemandChildLegacyAdapterTemplates(),
+  compileLegacyAdapterTemplate([
+    '# AGENTS.md', '', 'AgentOS for Projects bootloader.', '',
+    'Workspace: {{workspaceKind}}', 'Repos: {{repos}}', '',
+    'Read first: `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`.',
+  ]),
+  compileLegacyAdapterTemplate([
+    '# CLAUDE.md', '',
+    'AgentOS for Projects. Read `AGENTS.md`, `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`, `.agentos/knowledge.md`, `.agentos/skills.md`, relevant `.agentos/repos/*`, `.agentos/agents/*`, and `.agentos/engines/claude-code.md` before acting.',
+  ]),
+  compileLegacyAdapterTemplate([
+    '# Hermes Agent Adapter', '',
+    'AgentOS for Projects. Read `AGENTS.md`, `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`, `.agentos/knowledge.md`, `.agentos/skills.md`, relevant `.agentos/repos/*` and `.agentos/agents/*` before work.',
+    'Hermes rules: load relevant skills; verify real state.',
+  ]),
+  compileLegacyAdapterTemplate([
+    '# AGENTS.md', '', 'AgentOS child repo: {{name}} ({{path}}).',
+    'Parent context: `../AGENTS.md`, `../.agentos/project.yaml`, `../.agentos/memory.md`, `../.agentos/handoff.md`, `../.agentos/tasks.md`, `../.agentos/knowledge.md`, `../.agentos/skills.md`, relevant `../.agentos/agents/*`, `../.agentos/engines/*`, and `../.agentos/repos/{{name}}.md`.',
+  ]),
+  compileLegacyAdapterTemplate([
+    '# AGENTS.md', '', 'AgentOS child repo: {{name}} ({{path}}).',
+    'Parent context: `../AGENTS.md`, `../.agentos/project.yaml`, `../.agentos/repos/{{name}}.md`.',
+  ]),
+  compileLegacyAdapterTemplate([
+    '# CLAUDE.md', '', 'AgentOS child repo: {{name}} ({{path}}).',
+    'Before acting read `../CLAUDE.md`, `../AGENTS.md`, `../.agentos/project.yaml`, `../.agentos/handoff.md`, `../.agentos/tasks.md`, `../.agentos/knowledge.md`, `../.agentos/skills.md`, relevant `../.agentos/agents/*`, and `../.agentos/repos/{{name}}.md`.',
+  ]),
+  compileLegacyAdapterTemplate([
+    '# CLAUDE.md', '', 'AgentOS child repo: {{name}} ({{path}}).',
+    'Before acting read `../CLAUDE.md`, `../.agentos/handoff.md`, `../.agentos/tasks.md`, `../.agentos/repos/{{name}}.md`.',
+  ]),
+];
+
+// True only when the trimmed text is EXACTLY the current canonical section
+// this reconciliation would write (an older-but-format-unchanged file), or
+// EXACTLY one of the enumerated historical shapes above - never a loose
+// "looks AgentOS-ish" heuristic. A recognized shape plus any appended custom
+// prose (another paragraph, note, or heading) fails both checks and is
+// therefore never treated as a single owned section.
+function isSingleLegacyAdapterSection(trimmed: string, section: string) {
+  const normalized = trimmed.replace(/\r\n/g, '\n');
+  const canonical = section.trim().replace(/\r\n/g, '\n');
+  if (normalized === canonical) return true;
+  return LEGACY_ADAPTER_TEMPLATES.some((template) => template.test(normalized));
+}
+
+// Classifies a file with no managed-block markers that is not empty. Only
+// returns a migratable kind when ownership of the AgentOS-looking content is
+// unambiguous; anything else - including a file that merely mentions
+// "AgentOS", or a recognized legacy shape with extra content appended to it -
+// fails closed as a conflict.
+function classifyUnmarkedAdapterContent(content: string, trimmed: string, section: string) {
+  if (isSingleLegacyAdapterSection(trimmed, section)) return { kind: 'legacy-whole' as const };
+  for (const sep of LEGACY_ADAPTER_SEPARATORS) {
+    const idx = content.lastIndexOf(sep);
+    if (idx < 0) continue;
+    const prefix = content.slice(0, idx);
+    const suffix = content.slice(idx + sep.length).trim();
+    if (isSingleLegacyAdapterSection(suffix, section) && countKnownLegacyPhrases(prefix) === 0 && !/\bAgentOS\b/.test(prefix)) {
+      return { kind: 'legacy-bounded' as const, prefixEnd: idx };
+    }
+  }
+  if (countKnownLegacyPhrases(content) > 0 || /\bAgentOS\b/.test(content)) {
+    return { kind: 'conflict' as const, reason: 'file contains AgentOS-related content that does not match a recognized managed-block or legacy layout; resolve manually, then re-run doctor --fix' };
+  }
+  return { kind: 'plain-custom' as const };
+}
+
+function buildManagedBlockText(section: string, nl: string) {
+  const body = section.trim().split('\n').join(nl);
+  return `${MANAGED_BLOCK_START}${nl}${body}${nl}${MANAGED_BLOCK_END}`;
+}
+
+function buildFreshManagedFile(section: string, nl: string) {
+  return `${buildManagedBlockText(section, nl)}${nl}`;
+}
+
+function joinPrefixWithManagedBlock(prefix: string, section: string, nl: string) {
+  const block = buildManagedBlockText(section, nl);
+  let sep = `${nl}${nl}`;
+  if (prefix.endsWith('\n\n') || prefix.endsWith('\r\n\r\n')) sep = '';
+  else if (prefix.endsWith('\n') || prefix.endsWith('\r\n')) sep = nl;
+  return `${prefix}${sep}${block}${nl}`;
+}
+
+// Pure decision function: given the current bytes at `path` (if any) and the
+// canonical section AgentOS wants there, decides what - if anything - should
+// happen. Never touches the filesystem for writing; callers apply the plan.
+// Whenever the file already existed, the plan carries a `sourceSnapshot`
+// (its exact raw bytes and mode at plan time) so a later backup is written
+// from that snapshot - not a second, independently racy read of the file -
+// and so applyAdapterPlan can detect and refuse a plan whose source has
+// drifted since it was computed (see applyAdapterPlan below).
+async function planAdapterReconciliation(path: string, section: string) {
+  if (!await exists(path)) return { action: 'create' as const, content: buildFreshManagedFile(section, '\n') };
+  const raw = await readFile(path);
+  const mode = await existingFileMode(path);
+  const sourceSnapshot = { content: raw, mode };
+  let content: string;
+  try {
+    content = new TextDecoder('utf-8', { fatal: true }).decode(raw);
+  } catch {
+    return { action: 'conflict' as const, reason: 'file is not valid UTF-8; refusing to decode and rewrite arbitrary bytes' };
+  }
+  const located = locateManagedBlock(content);
+  if (located.kind === 'conflict') return { action: 'conflict' as const, reason: located.reason };
+  const nl = detectAdapterNewline(content);
+  if (located.kind === 'valid') {
+    const inner = content.slice(located.startIdx + MANAGED_BLOCK_START.length, located.endIdx).trim().replace(/\r\n/g, '\n');
+    if (inner === section.trim()) return { action: 'noop' as const };
+    const before = content.slice(0, located.startIdx);
+    const after = content.slice(located.endIdx + MANAGED_BLOCK_END.length);
+    return { action: 'update' as const, content: `${before}${buildManagedBlockText(section, nl)}${after}`, sourceSnapshot };
+  }
+  const trimmed = content.trim();
+  if (!trimmed) return { action: 'create' as const, content: buildFreshManagedFile(section, nl), sourceSnapshot };
+  const classification = classifyUnmarkedAdapterContent(content, trimmed, section);
+  if (classification.kind === 'conflict') return { action: 'conflict' as const, reason: classification.reason };
+  if (classification.kind === 'legacy-whole') return { action: 'migrate' as const, content: buildFreshManagedFile(section, nl), needsBackup: true, sourceSnapshot };
+  if (classification.kind === 'legacy-bounded') return { action: 'migrate' as const, content: joinPrefixWithManagedBlock(content.slice(0, classification.prefixEnd), section, nl), needsBackup: true, sourceSnapshot };
+  return { action: 'append' as const, content: joinPrefixWithManagedBlock(content, section, nl), needsBackup: true, sourceSnapshot };
+}
+
+async function backupAdapterFileOnce(path: string, sourceSnapshot: { content: Buffer; mode?: number }) {
+  const backupPath = `${path}.agentos.bak`;
+  await writeFileExclusiveAtomic(backupPath, sourceSnapshot.content, sourceSnapshot.mode);
+}
+
+type AdapterTarget = { path: string; label: string; section: string };
+type AdapterPlanEntry = { target: AdapterTarget; plan: any };
+
+// Two repo entries in .agentos/project.yaml can name the same directory with
+// different spellings (`frontend` vs `./frontend`) or under different repo
+// keys entirely; join() already normalizes those to the same absolute path.
+// Two targets resolving to the same file is inherently ambiguous - AgentOS
+// has no way to know which repo's canonical section should own that path -
+// so it is reported as a conflict for every such path rather than letting
+// whichever target happens to be processed last silently win.
+function detectDuplicateAdapterTargets(targets: AdapterTarget[]) {
+  const byResolvedPath = new Map<string, AdapterTarget[]>();
+  for (const target of targets) {
+    const key = resolve(target.path);
+    const group = byResolvedPath.get(key) ?? [];
+    group.push(target);
+    byResolvedPath.set(key, group);
+  }
+  const conflicts: Array<{ path: string; reason: string; resolvedPath: string }> = [];
+  for (const [resolvedPath, group] of byResolvedPath) {
+    if (group.length < 2) continue;
+    const labels = group.map((g) => g.label).join(', ');
+    conflicts.push({
+      path: labels,
+      reason: `multiple repo entries in .agentos/project.yaml resolve to the same adapter file (${labels}); this is ambiguous - fix the duplicate/equivalent repo path in .agentos/project.yaml before doctor --fix can run`,
+      resolvedPath,
+    });
+  }
+  return conflicts;
+}
+
+// Evaluates every target's plan up front - a pure, read-only pass - and
+// throws with the full list of conflicts if any target is ambiguous, before
+// anything is applied. Callers that pass, keep the returned plans and apply
+// them verbatim later (see applyAdapterPlans) instead of recomputing a plan
+// per target at write time: the decision "what should this file become" is
+// made exactly once per command, closing the gap where an apply-time reread
+// could reclassify a target against bytes that moved since preflight.
+async function planAdapterFiles(targets: AdapterTarget[]): Promise<AdapterPlanEntry[]> {
+  const duplicates = detectDuplicateAdapterTargets(targets);
+  const duplicatePaths = new Set(duplicates.map((d) => d.resolvedPath));
+  const conflicts: Array<{ path: string; reason: string }> = duplicates.map(({ path, reason }) => ({ path, reason }));
+  const plans: AdapterPlanEntry[] = [];
+  for (const target of targets) {
+    if (duplicatePaths.has(resolve(target.path))) continue;
+    const plan = await planAdapterReconciliation(target.path, target.section);
+    plans.push({ target, plan });
+    if (plan.action === 'conflict') conflicts.push({ path: target.label, reason: plan.reason });
+  }
+  if (conflicts.length) throw new AdapterConflictError(conflicts);
+  return plans;
+}
+
+// Applies a plan exactly as planAdapterFiles computed it - no reread/
+// reclassify (see planAdapterFiles) - except for one narrow, cheap safety
+// check: when the plan carries a source snapshot (i.e. it read an existing
+// file to decide what to do), the current bytes at `path` are compared
+// against that snapshot before writing anything. Under the documented
+// non-hostile-concurrency assumption this always matches - nothing else
+// touches adapter files between planning and applying in the same command -
+// so this is defense in depth, not a normal-path check: if it ever doesn't
+// match, the plan is stale and applying it would silently discard whatever
+// is actually on disk now, so this fails closed instead.
+async function applyAdapterPlan(path: string, plan: any) {
+  if (plan.action === 'noop') return;
+  if (plan.sourceSnapshot) {
+    let current: Buffer | null;
+    try {
+      current = await readFile(path);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      current = null;
+    }
+    if (current === null || !current.equals(plan.sourceSnapshot.content)) {
+      throw new AdapterConflictError([{ path, reason: 'the file changed on disk after it was planned and before the plan was applied; re-run doctor/init to recompute a fresh plan' }]);
+    }
+  }
+  if (plan.needsBackup) await backupAdapterFileOnce(path, plan.sourceSnapshot);
+  await writeFileAtomic(path, plan.content);
+}
+
+async function applyAdapterPlans(plans: AdapterPlanEntry[]) {
+  for (const { target, plan } of plans) await applyAdapterPlan(target.path, plan);
+}
+
+// Test-only: exercises the plan/apply split directly so a test can prove the
+// apply phase honors a precomputed plan even if the file changes underneath
+// it afterward, instead of rereading/reclassifying at write time.
+export async function __planAdapterFilesForTests(targets: AdapterTarget[]) {
+  return planAdapterFiles(targets);
+}
+
+export async function __applyAdapterPlansForTests(plans: AdapterPlanEntry[]) {
+  return applyAdapterPlans(plans);
+}
+
+function rootAdapterTargets(cwd: string, workspaceKind: string, repos: any[]) {
+  return [
+    { path: join(cwd, 'AGENTS.md'), label: 'AGENTS.md', section: agentsBootloader({ workspaceKind, repos }) },
+    { path: join(cwd, 'CLAUDE.md'), label: 'CLAUDE.md', section: claudeAdapter() },
+    { path: join(cwd, '.hermes.md'), label: '.hermes.md', section: hermesAdapter() },
+  ];
+}
+
+function childAdapterTargets(cwd: string, repos: any[]) {
+  return repos.flatMap((repo) => [
+    { path: join(cwd, repo.path, 'AGENTS.md'), label: `${repo.path}/AGENTS.md`, section: subrepoAgentsPointer(repo) },
+    { path: join(cwd, repo.path, 'CLAUDE.md'), label: `${repo.path}/CLAUDE.md`, section: subrepoClaudePointer(repo) },
+  ]);
 }
 
 export async function initAgentOS(options: any = {}) {
@@ -247,48 +744,61 @@ export async function initAgentOS(options: any = {}) {
     };
   }
 
-  await mkdir(join(cwd, AGENTOS_DIR), { recursive: true });
-  await mkdir(join(cwd, AGENTOS_DIR, 'agents'), { recursive: true });
-  await mkdir(join(cwd, AGENTOS_DIR, 'engines'), { recursive: true });
-  await mkdir(join(cwd, AGENTOS_DIR, 'runs'), { recursive: true });
-  await mkdir(join(cwd, AGENTOS_DIR, 'repos'), { recursive: true });
+  // The root itself can also be a package (a hybrid workspace root with its
+  // own package.json alongside child package directories); detectRepos
+  // reports that as a repo with path '.'. It must stay the root bootloader,
+  // never a child pointer, so it is excluded from childAdapterTargets here -
+  // otherwise the root AGENTS.md/CLAUDE.md would get two conflicting targets
+  // (bootloader and child-pointer) in the same command.
+  const childRepos = workspaceKind === 'multi-repo' ? repos.filter((repo) => repo.path !== '.') : [];
+  const adapterTargets = [...rootAdapterTargets(cwd, workspaceKind, repos), ...childAdapterTargets(cwd, childRepos)];
+  // Preflight every root/child adapter before the first filesystem mutation
+  // below (not just before the adapter writes themselves): an ambiguous
+  // adapter anywhere must leave the whole init command - .agentos scaffolding
+  // included - a strict no-op.
+  const adapterPlans = await planAdapterFiles(adapterTargets);
 
-  await writeIfMissing(join(cwd, AGENTOS_DIR, 'project.yaml'), projectYaml({ projectName, mode, workspaceKind, repos, agentSelection }));
-  await writeIfMissing(join(cwd, AGENTOS_DIR, 'memory.md'), memoryMd({ mode, workspaceKind }));
-  await writeIfMissing(join(cwd, AGENTOS_DIR, 'handoff.md'), handoffMd({ mode, workspaceKind, repos }));
-  await writeIfMissing(join(cwd, AGENTOS_DIR, 'decisions.md'), decisionsMd());
-  await writeIfMissing(join(cwd, AGENTOS_DIR, 'tasks.md'), tasksMd({ mode }));
-  await writeIfMissing(join(cwd, AGENTOS_DIR, 'status.md'), statusMd({ mode, workspaceKind }));
-  await writeIfMissing(join(cwd, AGENTOS_DIR, 'knowledge.md'), knowledgeMd());
-  await writeIfMissing(join(cwd, AGENTOS_DIR, 'skills.md'), skillsMd(agentSelection));
-  await writeIfMissing(join(cwd, AGENTOS_DIR, 'runs', 'README.md'), runsReadmeMd());
+  // Every filesystem mutation init makes - the .agentos scaffold directories
+  // and files, per-agent/engine/repo files, root/child adapters, their
+  // one-time backups, and child .gitignore blocks - runs inside a single
+  // transaction, so a fault anywhere in that sequence (an injected fault, a
+  // permission error, disk-full) rolls the whole command back to its exact
+  // pre-init state rather than leaving a partially initialized workspace.
+  await withMutationTransaction(async () => {
+    await mkdirTracked(join(cwd, AGENTOS_DIR));
+    await mkdirTracked(join(cwd, AGENTOS_DIR, 'agents'));
+    await mkdirTracked(join(cwd, AGENTOS_DIR, 'engines'));
+    await mkdirTracked(join(cwd, AGENTOS_DIR, 'runs'));
+    await mkdirTracked(join(cwd, AGENTOS_DIR, 'repos'));
 
-  if (mode === 'new') {
-    await writeIfMissing(join(cwd, AGENTOS_DIR, 'product.md'), productMd({ projectName }));
-    await writeIfMissing(join(cwd, AGENTOS_DIR, 'architecture.md'), architectureMd());
-  }
+    await writeIfMissing(join(cwd, AGENTOS_DIR, 'project.yaml'), projectYaml({ projectName, mode, workspaceKind, repos, agentSelection }));
+    await writeIfMissing(join(cwd, AGENTOS_DIR, 'memory.md'), memoryMd({ mode, workspaceKind }));
+    await writeIfMissing(join(cwd, AGENTOS_DIR, 'handoff.md'), handoffMd({ mode, workspaceKind, repos }));
+    await writeIfMissing(join(cwd, AGENTOS_DIR, 'decisions.md'), decisionsMd());
+    await writeIfMissing(join(cwd, AGENTOS_DIR, 'tasks.md'), tasksMd({ mode }));
+    await writeIfMissing(join(cwd, AGENTOS_DIR, 'status.md'), statusMd({ mode, workspaceKind }));
+    await writeIfMissing(join(cwd, AGENTOS_DIR, 'knowledge.md'), knowledgeMd());
+    await writeIfMissing(join(cwd, AGENTOS_DIR, 'skills.md'), skillsMd(agentSelection));
+    await writeIfMissing(join(cwd, AGENTOS_DIR, 'runs', 'README.md'), runsReadmeMd());
 
-  for (const agent of agentSelection.agents) {
-    await writeIfMissing(join(cwd, AGENTOS_DIR, 'agents', `${agent.id}.md`), agentMd(agent));
-  }
-  for (const engine of defaultEngines()) {
-    await writeIfMissing(join(cwd, AGENTOS_DIR, 'engines', `${engine.id}.md`), engineMd(engine));
-  }
-  for (const repo of repos) {
-    await writeIfMissing(join(cwd, AGENTOS_DIR, 'repos', `${repo.name}.md`), repoMd(repo));
-  }
-
-  await createOrPatchRootFile(join(cwd, 'AGENTS.md'), agentsBootloader({ workspaceKind, repos }));
-  await createOrPatchRootFile(join(cwd, 'CLAUDE.md'), claudeAdapter());
-  await createOrPatchRootFile(join(cwd, '.hermes.md'), hermesAdapter());
-
-  if (workspaceKind === 'multi-repo') {
-    for (const repo of repos) {
-      await createOrPatchRootFile(join(cwd, repo.path, 'AGENTS.md'), subrepoAgentsPointer(repo));
-      await createOrPatchRootFile(join(cwd, repo.path, 'CLAUDE.md'), subrepoClaudePointer(repo));
-      await ensureChildRepoGitignore(join(cwd, repo.path));
+    if (mode === 'new') {
+      await writeIfMissing(join(cwd, AGENTOS_DIR, 'product.md'), productMd({ projectName }));
+      await writeIfMissing(join(cwd, AGENTOS_DIR, 'architecture.md'), architectureMd());
     }
-  }
+
+    for (const agent of agentSelection.agents) {
+      await writeIfMissing(join(cwd, AGENTOS_DIR, 'agents', `${agent.id}.md`), agentMd(agent));
+    }
+    for (const engine of defaultEngines()) {
+      await writeIfMissing(join(cwd, AGENTOS_DIR, 'engines', `${engine.id}.md`), engineMd(engine));
+    }
+    for (const repo of repos) {
+      await writeIfMissing(join(cwd, AGENTOS_DIR, 'repos', `${repo.name}.md`), repoMd(repo));
+    }
+
+    await applyAdapterPlans(adapterPlans);
+    for (const repo of childRepos) await ensureChildRepoGitignore(join(cwd, repo.path));
+  });
 
   return { mode, workspaceKind, repos, agents: agentSelection, text: `AgentOS initialized (${mode}, ${workspaceKind}, agents: ${agentSelection.profile}) at ${cwd}` };
 }
@@ -1813,8 +2323,13 @@ export async function doctorAgentOS(options: any = {}) {
     try {
       await withMutationTransaction(() => fixAgentOSAdapters(root));
     } catch (error) {
-      if (!(error instanceof ProjectConfigError)) throw error;
-      projectConfigError = error;
+      if (error instanceof ProjectConfigError) projectConfigError = error;
+      else if (!(error instanceof AdapterConflictError)) throw error;
+      // AdapterConflictError is swallowed here: the unconditional adapter
+      // conflict scan below re-detects and reports the same paths as
+      // `problems`, so doctor --fix still returns a normal FAIL result
+      // instead of throwing, with zero adapter files changed (fixAgentOSAdapters
+      // preflights every target before its first mutation).
     }
   }
   if (!projectConfigError) {
@@ -1871,6 +2386,36 @@ export async function doctorAgentOS(options: any = {}) {
     if (!subClaude.includes('../CLAUDE.md') || !subClaude.includes('../.agentos/handoff.md')) problems.push(`${repo.path}/CLAUDE.md does not point to parent Claude/AgentOS context`);
     if (!subClaude.includes('../.agentos/skills.md')) problems.push(`${repo.path}/CLAUDE.md does not point to parent AgentOS skills.md`);
     if (!subClaude.includes('../.agentos/engines/claude-code.md')) problems.push(`${repo.path}/CLAUDE.md does not point to Claude engine adapter`);
+  }
+
+  // Every diagnostic below derives the canonical adapter sections (and which
+  // repos even have child pointers) from parsed .agentos/project.yaml. Once
+  // that config has already failed assertProjectYamlWellFormed, parsing it
+  // falls back to {} - workspace_kind becomes 'unknown', repos becomes empty
+  // - and comparing real on-disk adapters against a canonical section derived
+  // from that fallback would produce misleading "stale, run doctor --fix"
+  // noise that has nothing to do with the adapters themselves. Skip this
+  // whole scan in that case; projectConfigError is already reported above,
+  // and doctor --fix already refuses to touch adapters until the config
+  // itself is fixed.
+  if (!projectConfigError) {
+    const allRepos = parseReposFromProjectYaml(project, { includeRoot: true });
+    const workspaceKind = firstYamlValue(project, 'workspace_kind') ?? 'unknown';
+    const adapterTargets = [...rootAdapterTargets(root, workspaceKind, allRepos), ...childAdapterTargets(root, repos)];
+    const duplicateAdapterTargets = detectDuplicateAdapterTargets(adapterTargets);
+    const duplicateAdapterPaths = new Set(duplicateAdapterTargets.map((d) => d.resolvedPath));
+    for (const duplicate of duplicateAdapterTargets) problems.push(`${duplicate.path}: ${duplicate.reason}`);
+    for (const target of adapterTargets) {
+      if (duplicateAdapterPaths.has(resolve(target.path))) continue;
+      const plan = await planAdapterReconciliation(target.path, target.section);
+      if (plan.action === 'conflict') problems.push(`${target.label} adapter ownership is ambiguous: ${plan.reason}`);
+      // A valid managed block whose content no longer matches the canonical
+      // section is reported directly here, even when custom text elsewhere in
+      // the file happens to satisfy the substring checks above - those checks
+      // read the whole file and can't tell a stale *managed* section apart
+      // from surrounding prose that coincidentally mentions the same phrases.
+      else if (plan.action === 'update') problems.push(`${target.label} managed block is stale and does not match the current canonical section; run \`agentos doctor --fix\``);
+    }
   }
 
   const diagnostics = [];
@@ -2142,6 +2687,16 @@ async function fixAgentOSAdapters(root) {
   const childRepos = parseReposFromProjectYaml(project);
   const allRepos = parseReposFromProjectYaml(project, { includeRoot: true });
   await assertRepoBoundaries(root, allRepos);
+
+  const workspaceKind = firstYamlValue(project, 'workspace_kind') ?? 'unknown';
+  const adapterTargets = [...rootAdapterTargets(root, workspaceKind, allRepos), ...childAdapterTargets(root, childRepos)];
+  // Preflight every root/child adapter before any mutation (including the
+  // project.yaml/skills.md/agents/engines writes below) so an ambiguous file
+  // anywhere makes this command a strict no-op rather than a partial repair.
+  // The returned plans are applied verbatim below, without rereading/
+  // reclassifying each target a second time at write time.
+  const adapterPlans = await planAdapterFiles(adapterTargets);
+
   await ensureProjectYamlEngine(projectPath, 'opencode');
   await writeIfMissing(join(root, '.agentos/knowledge.md'), knowledgeMd());
   const agentSelection = await agentSelectionFromProject(project, childRepos, root);
@@ -2153,14 +2708,8 @@ async function fixAgentOSAdapters(root) {
   for (const engine of defaultEngines()) {
     await writeIfMissing(join(root, '.agentos/engines', `${engine.id}.md`), engineMd(engine));
   }
-  await ensureAgentOSSection(join(root, 'AGENTS.md'), agentsBootloader({ workspaceKind: firstYamlValue(project, 'workspace_kind') ?? 'unknown', repos: allRepos }));
-  await ensureAgentOSSection(join(root, 'CLAUDE.md'), claudeAdapter());
-  await ensureAgentOSSection(join(root, '.hermes.md'), hermesAdapter());
-  for (const repo of childRepos) {
-    await ensureAgentOSSection(join(root, repo.path, 'AGENTS.md'), subrepoAgentsPointer(repo));
-    await ensureAgentOSSection(join(root, repo.path, 'CLAUDE.md'), subrepoClaudePointer(repo));
-    await ensureChildRepoGitignore(join(root, repo.path));
-  }
+  await applyAdapterPlans(adapterPlans);
+  for (const repo of childRepos) await ensureChildRepoGitignore(join(root, repo.path));
 }
 
 const CHILD_REPO_GITIGNORE_BLOCK = `# AgentOS parent-workspace pointer files
@@ -2198,71 +2747,6 @@ function ensureManagedBlock(content, title, block) {
 
 function escapeRegExp(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-async function ensureAgentOSSection(path, section) {
-  if (!await exists(path)) return writeFileAtomic(path, section);
-  const content = await readFile(path, 'utf8');
-  if (adapterLooksCurrent(content, section)) return;
-  if (!hasAgentOSMarker(content) && !content.includes('AgentOS for Projects')) {
-    await copyFileTracked(path, `${path}.agentos.bak`);
-    return writeFileAtomic(path, `${content.trim()}\n\n---\n\n${section}`);
-  }
-  await writeFileAtomic(path, replaceAgentOSSection(content, section));
-}
-
-function hasAgentOSMarker(content) {
-  return ['AgentOS for Projects bootloader.', 'AgentOS child repo:', 'This workspace uses **AgentOS for Projects**.', 'This project uses **AgentOS for Projects**.', 'This repo is part of a parent'].some((m) => content.includes(m));
-}
-
-function adapterLooksCurrent(content, section) {
-  const required = ['AgentOS for Projects', '.agentos/project.yaml', '.agentos/handoff.md'];
-  const stale = [
-    '## Core rules',
-    '## First action for every task',
-    '## Required behavior',
-    'Before acting on project work, read:',
-    'This repo is part of a parent **AgentOS for Projects** workspace.',
-    'This repo is part of a parent AgentOS workspace.',
-    'This repo is part of a parent AgentOS for Projects workspace.',
-    'AgentOS child repo:',
-    'This project uses AgentOS for Projects.',
-    'Repos: none',
-    '.agentos/repos/*',
-    '.agentos/agents/*',
-    '.agentos/engines/*',
-    '../.agentos/agents/*',
-    '../.agentos/engines/*',
-  ];
-  if (content.includes('undefined/undefined/undefined')) return false;
-  if (content.includes('AgentOS child repo:') && section.startsWith('# CLAUDE.md')) return content.includes('../.agentos/handoff.md') && content.includes('../.agentos/skills.md') && content.includes('../.agentos/engines/claude-code.md') && content.includes('parent AgentOS root') && !content.includes('---') && !content.includes('../.agentos/agents/*');
-  if (content.includes('AgentOS child repo:') && section.startsWith('# AGENTS.md')) return content.includes('../.agentos/repos/') && content.includes('../.agentos/skills.md') && content.includes('../.agentos/engines/opencode.md') && content.includes('../.agentos/engines/codex.md') && content.includes('parent AgentOS root') && !content.includes('---') && !content.includes('../.agentos/agents/*') && !content.includes('../.agentos/engines/*');
-  if (stale.some((token) => content.includes(token))) return false;
-  if (section.startsWith('# AGENTS.md') && content.includes('Repos: current repo (single-repo workspace)') && !section.includes('Repos: current repo (single-repo workspace)')) return false;
-  if (section.startsWith('# CLAUDE.md') && !content.includes('.agentos/engines/claude-code.md')) return false;
-  if (section.startsWith('# AGENTS.md') && !content.includes('.agentos/tasks.md')) return false;
-  if (section.startsWith('# Hermes Agent Adapter') && !content.includes('Hermes rules:')) return false;
-  return required.every((token) => content.includes(token));
-}
-
-function replaceAgentOSSection(content, section) {
-  const markers = [
-    'AgentOS for Projects bootloader.',
-    'AgentOS for Projects.',
-    'AgentOS child repo:',
-    'This workspace uses **AgentOS for Projects**.',
-    'This project uses **AgentOS for Projects**.',
-    'This project uses AgentOS for Projects.',
-    'This repo is part of a parent **AgentOS for Projects** workspace.',
-    'This repo is part of a parent AgentOS workspace.',
-    'This repo is part of a parent AgentOS for Projects workspace.',
-  ];
-  const idxs = markers.map((m) => content.indexOf(m)).filter((i) => i >= 0);
-  const idx = idxs.length ? Math.min(...idxs) : -1;
-  if (idx < 0) return `${content.trim()}\n\n---\n\n${section}`;
-  const headingStart = content.lastIndexOf('#', idx);
-  const prefix = headingStart > 0 ? content.slice(0, headingStart).trimEnd() + '\n\n---\n\n' : '';
-  return `${prefix}${section}`;
 }
 
 function parseReposFromProjectYaml(project, options: { includeRoot?: boolean } = {}) {
@@ -2670,13 +3154,6 @@ async function ensureProjectYamlAgents(path, agentSelection) {
   await writeFileAtomic(path, dumpProjectYaml(data));
 }
 
-async function createOrPatchRootFile(path, section) {
-  if (!await exists(path)) return writeFileAtomic(path, section);
-  const content = await readFile(path, 'utf8');
-  if (content.includes('AgentOS for Projects')) return;
-  await copyFileTracked(path, `${path}.agentos.bak`);
-  await writeFileAtomic(path, `${content.trim()}\n\n---\n\n${section}`);
-}
 async function writeIfMissing(path, content) { if (!await exists(path)) await writeFileAtomic(path, content); }
 async function exists(path) { try { await access(path); return true; } catch { return false; } }
 async function safeRead(path) { try { return await readFile(path, 'utf8'); } catch { return ''; } }
