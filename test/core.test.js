@@ -1245,3 +1245,260 @@ test('templates import warns on dangerous commands and secret-like content witho
   assert.match(result.text, /WARN: secret-like/);
   assert.match(result.text, /WARN: dangerous command/);
 });
+
+const MALFORMED_PROJECT_YAML = 'name: agentos\nrepos: [1, 2\n  bad: true\n';
+
+test('doctor --fix fails closed and makes zero adapter/config mutations when project.yaml is malformed', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
+  const projectPath = join(root, '.agentos/project.yaml');
+  await writeFile(projectPath, MALFORMED_PROJECT_YAML);
+
+  const snapshotPaths = [
+    '.agentos/project.yaml',
+    'AGENTS.md',
+    'CLAUDE.md',
+    '.hermes.md',
+    '.agentos/skills.md',
+    '.agentos/knowledge.md',
+    '.agentos/agents/implementation.md',
+  ];
+  const before = {};
+  for (const rel of snapshotPaths) before[rel] = await readFile(join(root, rel), 'utf8');
+  const openCodeEngineExistedBefore = await exists(join(root, '.agentos/engines/opencode.md'));
+
+  const fixed = await doctorAgentOS({ cwd: root, fix: true });
+
+  assert.equal(fixed.ok, false);
+  assert.match(fixed.text, /project\.yaml.*(malformed|not valid YAML)/i);
+
+  for (const rel of snapshotPaths) {
+    const after = await readFile(join(root, rel), 'utf8');
+    assert.equal(after, before[rel], `${rel} must be byte-identical after a failed doctor --fix`);
+  }
+  assert.equal(await exists(join(root, '.agentos/engines/opencode.md')), openCodeEngineExistedBefore, 'doctor --fix must not create new adapter files when config is malformed');
+});
+
+test('doctor (no --fix) reports malformed project.yaml as a clear problem instead of crashing or treating it as empty', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
+  const projectPath = join(root, '.agentos/project.yaml');
+  await writeFile(projectPath, MALFORMED_PROJECT_YAML);
+
+  const doctor = await doctorAgentOS({ cwd: root });
+
+  assert.equal(doctor.ok, false);
+  assert.match(doctor.text, /project\.yaml.*(malformed|not valid YAML)/i);
+  assert.doesNotMatch(doctor.text, /agents\.enabled is empty or missing/);
+  const stillMalformed = await readFile(projectPath, 'utf8');
+  assert.equal(stillMalformed, MALFORMED_PROJECT_YAML);
+});
+
+test('doctor --fix distinguishes a missing project.yaml from a malformed one and still repairs other adapters', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
+  const projectPath = join(root, '.agentos/project.yaml');
+  const { rm } = await import('node:fs/promises');
+  await rm(projectPath, { force: true });
+
+  const fixed = await doctorAgentOS({ cwd: root, fix: true });
+
+  assert.doesNotMatch(fixed.text, /malformed/i);
+  assert.match(fixed.text, /Missing \.agentos\/project\.yaml/);
+  assert.equal(await exists(join(root, '.agentos/engines/opencode.md')), true, 'doctor --fix should still create missing adapter files when project.yaml is absent rather than malformed');
+});
+
+test('agents add fails closed without corrupting a malformed project.yaml', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
+  const projectPath = join(root, '.agentos/project.yaml');
+  await writeFile(projectPath, MALFORMED_PROJECT_YAML);
+
+  await assert.rejects(
+    () => agentsAgentOS({ cwd: root, add: 'project-manager' }),
+    /project\.yaml.*(malformed|not valid YAML)/i,
+  );
+
+  const stillMalformed = await readFile(projectPath, 'utf8');
+  assert.equal(stillMalformed, MALFORMED_PROJECT_YAML);
+  assert.equal(await exists(join(root, '.agentos/agents/project-manager.md')), false);
+});
+
+test('link-obsidian fails closed without corrupting a malformed project.yaml', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
+  const projectPath = join(root, '.agentos/project.yaml');
+  await writeFile(projectPath, MALFORMED_PROJECT_YAML);
+  const vault = join(root, 'vault');
+  await mkdirp(vault);
+
+  await assert.rejects(
+    () => linkObsidianAgentOS({ cwd: root, vault, dest: 'Projects/AgentOS', link: 'Index.md', create: true }),
+    /project\.yaml.*(malformed|not valid YAML)/i,
+  );
+
+  const stillMalformed = await readFile(projectPath, 'utf8');
+  assert.equal(stillMalformed, MALFORMED_PROJECT_YAML);
+  assert.equal(await exists(join(root, '.agentos/knowledge.md')) && (await readFile(join(root, '.agentos/knowledge.md'), 'utf8')).includes('Destination: `Projects/AgentOS`'), false);
+});
+
+const EMPTY_PROJECT_YAML = '';
+const WHITESPACE_ONLY_PROJECT_YAML = '   \n\t\n  \n';
+
+test('doctor --fix fails closed and makes zero adapter/config mutations when project.yaml exists but is empty', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
+  const projectPath = join(root, '.agentos/project.yaml');
+  await writeFile(projectPath, EMPTY_PROJECT_YAML);
+
+  const snapshotPaths = [
+    '.agentos/project.yaml',
+    'AGENTS.md',
+    'CLAUDE.md',
+    '.hermes.md',
+    '.agentos/skills.md',
+    '.agentos/knowledge.md',
+    '.agentos/agents/implementation.md',
+  ];
+  const before = {};
+  for (const rel of snapshotPaths) before[rel] = await readFile(join(root, rel), 'utf8');
+  const openCodeEngineExistedBefore = await exists(join(root, '.agentos/engines/opencode.md'));
+
+  const fixed = await doctorAgentOS({ cwd: root, fix: true });
+
+  assert.equal(fixed.ok, false);
+  assert.match(fixed.text, /\.agentos\/project\.yaml (is malformed|exists but is empty)/i);
+
+  for (const rel of snapshotPaths) {
+    const after = await readFile(join(root, rel), 'utf8');
+    assert.equal(after, before[rel], `${rel} must be byte-identical after a failed doctor --fix`);
+  }
+  assert.equal(await exists(join(root, '.agentos/engines/opencode.md')), openCodeEngineExistedBefore, 'doctor --fix must not create new adapter files when config is empty/malformed');
+});
+
+test('doctor (no --fix) treats an existing empty or whitespace-only project.yaml as malformed, not missing or valid', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
+  const projectPath = join(root, '.agentos/project.yaml');
+
+  await writeFile(projectPath, EMPTY_PROJECT_YAML);
+  const emptyDoctor = await doctorAgentOS({ cwd: root });
+  assert.equal(emptyDoctor.ok, false);
+  assert.doesNotMatch(emptyDoctor.text, /Missing \.agentos\/project\.yaml/);
+  assert.match(emptyDoctor.text, /\.agentos\/project\.yaml (is malformed|exists but is empty)/i);
+
+  await writeFile(projectPath, WHITESPACE_ONLY_PROJECT_YAML);
+  const whitespaceDoctor = await doctorAgentOS({ cwd: root });
+  assert.equal(whitespaceDoctor.ok, false);
+  assert.doesNotMatch(whitespaceDoctor.text, /Missing \.agentos\/project\.yaml/);
+  assert.match(whitespaceDoctor.text, /\.agentos\/project\.yaml (is malformed|exists but is empty)/i);
+});
+
+test('agents add fails closed without corrupting an existing empty project.yaml', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
+  const projectPath = join(root, '.agentos/project.yaml');
+  await writeFile(projectPath, EMPTY_PROJECT_YAML);
+
+  await assert.rejects(
+    () => agentsAgentOS({ cwd: root, add: 'project-manager' }),
+    /\.agentos\/project\.yaml (is malformed|exists but is empty)/i,
+  );
+
+  const stillEmpty = await readFile(projectPath, 'utf8');
+  assert.equal(stillEmpty, EMPTY_PROJECT_YAML);
+  assert.equal(await exists(join(root, '.agentos/agents/project-manager.md')), false);
+});
+
+test('templates copy of an agent fails closed before writing the target agent file when project.yaml is malformed', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
+  const projectPath = join(root, '.agentos/project.yaml');
+  await writeFile(projectPath, MALFORMED_PROJECT_YAML);
+  const targetAgentPath = join(root, '.agentos/agents/security-reviewer.md');
+
+  await assert.rejects(
+    () => templatesAgentOS({ cwd: root, command: 'copy', id: 'agent:security-reviewer' }),
+    /project\.yaml.*(malformed|not valid YAML)/i,
+  );
+
+  const stillMalformed = await readFile(projectPath, 'utf8');
+  assert.equal(stillMalformed, MALFORMED_PROJECT_YAML);
+  assert.equal(await exists(targetAgentPath), false, 'agent template file must not be written before project.yaml is validated');
+});
+
+test('templates copy of a skill is unaffected by a malformed project.yaml', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
+  const projectPath = join(root, '.agentos/project.yaml');
+  await writeFile(projectPath, MALFORMED_PROJECT_YAML);
+
+  const skill = await templatesAgentOS({ cwd: root, command: 'copy', id: 'skill:frontend/ai-slop-design-review' });
+
+  assert.equal(skill.ok, true);
+  assert.equal(await exists(join(root, '.agentos/skills/frontend/ai-slop-design-review/SKILL.md')), true);
+  const stillMalformed = await readFile(projectPath, 'utf8');
+  assert.equal(stillMalformed, MALFORMED_PROJECT_YAML);
+});
+
+test('doctor --fix fails closed and makes zero adapter/config mutations when project.yaml is YAML null', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
+  const projectPath = join(root, '.agentos/project.yaml');
+
+  const snapshotPaths = [
+    '.agentos/project.yaml',
+    'AGENTS.md',
+    'CLAUDE.md',
+    '.hermes.md',
+    '.agentos/skills.md',
+    '.agentos/knowledge.md',
+    '.agentos/agents/implementation.md',
+  ];
+
+  for (const nullYaml of ['null\n', '~\n']) {
+    await writeFile(projectPath, nullYaml);
+    const before = {};
+    for (const rel of snapshotPaths) before[rel] = await readFile(join(root, rel), 'utf8');
+    const openCodeEngineExistedBefore = await exists(join(root, '.agentos/engines/opencode.md'));
+
+    const fixed = await doctorAgentOS({ cwd: root, fix: true });
+
+    assert.equal(fixed.ok, false, `doctor --fix should fail closed for project.yaml content ${JSON.stringify(nullYaml)}`);
+    assert.match(fixed.text, /\.agentos\/project\.yaml is malformed/i);
+
+    for (const rel of snapshotPaths) {
+      const after = await readFile(join(root, rel), 'utf8');
+      assert.equal(after, before[rel], `${rel} must be byte-identical after a failed doctor --fix (content ${JSON.stringify(nullYaml)})`);
+    }
+    assert.equal(await exists(join(root, '.agentos/engines/opencode.md')), openCodeEngineExistedBefore, 'doctor --fix must not create new adapter files when config is YAML null');
+  }
+});
+
+test('obsidian link-workspace fails closed without corrupting a malformed project.yaml', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
+  const projectPath = join(root, '.agentos/project.yaml');
+  await writeFile(projectPath, MALFORMED_PROJECT_YAML);
+  const vault = join(root, 'vault');
+  await mkdirp(vault);
+
+  await assert.rejects(
+    () => obsidianAgentOS({ cwd: root, command: 'link-workspace', vault, dest: 'Projects/AgentOS', create: true }),
+    /\.agentos\/project\.yaml (is malformed|exists but is empty)/i,
+  );
+
+  const stillMalformed = await readFile(projectPath, 'utf8');
+  assert.equal(stillMalformed, MALFORMED_PROJECT_YAML);
+  assert.equal(await exists(join(vault, 'Projects/AgentOS')), false, 'vault destination folder must not be created before project.yaml is validated');
+  const knowledgeAfter = await safeReadForTest(join(root, '.agentos/knowledge.md'));
+  assert.doesNotMatch(knowledgeAfter, /Mode: `workspace-folder`/);
+});
+
+async function safeReadForTest(path) {
+  try {
+    return await readFile(path, 'utf8');
+  } catch {
+    return '';
+  }
+}

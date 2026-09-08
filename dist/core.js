@@ -157,6 +157,7 @@ export async function linkObsidianAgentOS(options = {}) {
     const root = await findAgentOSRoot(options.cwd ?? process.cwd());
     if (!root)
         return { ok: false, text: 'AgentOS link-obsidian: FAIL\nNo .agentos directory found.' };
+    await assertProjectYamlWellFormed(join(root, '.agentos/project.yaml'));
     const project = await safeRead(join(root, '.agentos/project.yaml'));
     const projectName = firstYamlValue(project, 'name') ?? basename(root);
     const rawVault = String(options.vault || '').trim();
@@ -244,6 +245,7 @@ async function linkObsidianWorkspaceAgentOS(options = {}) {
     const root = await findAgentOSRoot(options.cwd ?? process.cwd());
     if (!root)
         return { ok: false, text: 'AgentOS obsidian link-workspace: FAIL\nNo .agentos directory found.' };
+    await assertProjectYamlWellFormed(join(root, '.agentos/project.yaml'));
     const project = await safeRead(join(root, '.agentos/project.yaml'));
     const rawVault = String(options.vault || '').trim();
     if (!rawVault)
@@ -523,6 +525,7 @@ export async function agentsAgentOS(options = {}) {
     validateAgentTemplate(content, id);
     const relPath = `.agentos/agents/${id}.md`;
     const projectPath = join(root, '.agentos/project.yaml');
+    await assertProjectYamlWellFormed(projectPath);
     const project = parseProjectYaml(await safeRead(projectPath));
     const agents = project.agents && typeof project.agents === 'object' ? project.agents : {};
     const enabled = new Set(Array.isArray(agents.enabled) ? agents.enabled.map((v) => normalizeAgentAlias(String(v))) : []);
@@ -652,6 +655,8 @@ async function templatesCopyAgentOS(root, options = {}) {
     const action = dryRun ? (replace ? 'Would replace' : 'Would copy') : (replace ? 'Replaced' : 'Copied');
     const lines = [`AgentOS templates copy${dryRun ? ' dry run' : ''}`, `Root: ${root}`, `Template: ${entry.id}`, '', `${action}: ${entry.relPath} -> ${relPath}`];
     if (!dryRun) {
+        if (entry.type === 'agent')
+            await assertProjectYamlWellFormed(join(root, '.agentos/project.yaml'));
         await mkdir(dirname(targetPath), { recursive: true });
         await writeFile(targetPath, content, 'utf8');
         if (entry.type === 'agent')
@@ -775,6 +780,7 @@ function validateTemplateContent(type, content) {
 }
 async function registerProjectAgent(root, id) {
     const projectPath = join(root, '.agentos/project.yaml');
+    await assertProjectYamlWellFormed(projectPath);
     const project = parseProjectYaml(await safeRead(projectPath));
     const agents = project.agents && typeof project.agents === 'object' ? project.agents : {};
     const enabled = new Set(Array.isArray(agents.enabled) ? agents.enabled.map((v) => normalizeAgentAlias(String(v))) : []);
@@ -1559,8 +1565,28 @@ export async function doctorAgentOS(options = {}) {
         const result = doctorResult({ root: null, fix: Boolean(options.fix), problems: ['No .agentos directory found.'], warnings: [], diagnostics: [] });
         return options.json ? withJsonText(result) : { ...result, text: 'AgentOS doctor: FAIL\nNo .agentos directory found.' };
     }
-    if (options.fix)
-        await fixAgentOSAdapters(root);
+    const projectPath = join(root, '.agentos/project.yaml');
+    let projectConfigError = null;
+    if (options.fix) {
+        try {
+            await fixAgentOSAdapters(root);
+        }
+        catch (error) {
+            if (!(error instanceof ProjectConfigError))
+                throw error;
+            projectConfigError = error;
+        }
+    }
+    if (!projectConfigError) {
+        try {
+            await assertProjectYamlWellFormed(projectPath);
+        }
+        catch (error) {
+            if (!(error instanceof ProjectConfigError))
+                throw error;
+            projectConfigError = error;
+        }
+    }
     const problems = [];
     const warnings = [];
     for (const file of REQUIRED_FILES) {
@@ -1571,7 +1597,7 @@ export async function doctorAgentOS(options = {}) {
     const claude = await safeRead(join(root, 'CLAUDE.md'));
     const hermes = await safeRead(join(root, '.hermes.md'));
     const knowledge = await safeRead(join(root, '.agentos/knowledge.md'));
-    const project = await safeRead(join(root, '.agentos/project.yaml'));
+    const project = await safeRead(projectPath);
     const repos = parseReposFromProjectYaml(project);
     if (!agents.includes('AgentOS for Projects'))
         problems.push('AGENTS.md is missing AgentOS bootloader text');
@@ -1587,19 +1613,24 @@ export async function doctorAgentOS(options = {}) {
         problems.push('CLAUDE.md does not point to .agentos/project.yaml');
     if (!claude.includes('.agentos/handoff.md'))
         problems.push('CLAUDE.md does not point to .agentos/handoff.md');
-    if (!/^name:/m.test(project))
-        problems.push('.agentos/project.yaml missing name');
-    if (!/^workspace_kind:/m.test(project))
-        warnings.push('.agentos/project.yaml missing workspace_kind');
     if (!hermes.includes('AgentOS for Projects'))
         warnings.push('Optional .hermes.md adapter is missing or does not mention AgentOS');
     if (!knowledge.includes('Do not bulk-load'))
         warnings.push('.agentos/knowledge.md missing link-only safety rule');
-    if (!project.includes('- opencode'))
-        warnings.push('.agentos/project.yaml engines.allowed does not list opencode');
     if (!await exists(join(root, '.agentos/engines/opencode.md')))
         warnings.push('.agentos/engines/opencode.md is missing; run `agentos doctor --fix` to create it');
-    await checkAgentAndSkillConfig(root, project, warnings);
+    if (projectConfigError) {
+        problems.push(projectConfigError.message);
+    }
+    else {
+        if (!/^name:/m.test(project))
+            problems.push('.agentos/project.yaml missing name');
+        if (!/^workspace_kind:/m.test(project))
+            warnings.push('.agentos/project.yaml missing workspace_kind');
+        if (!project.includes('- opencode'))
+            warnings.push('.agentos/project.yaml engines.allowed does not list opencode');
+        await checkAgentAndSkillConfig(root, project, warnings);
+    }
     for (const repo of repos) {
         const agentsPath = join(root, repo.path, 'AGENTS.md');
         const claudePath = join(root, repo.path, 'CLAUDE.md');
@@ -1834,6 +1865,7 @@ async function runCommand(command, args, cwd) {
 }
 async function fixAgentOSAdapters(root) {
     const projectPath = join(root, '.agentos/project.yaml');
+    await assertProjectYamlWellFormed(projectPath);
     const project = await safeRead(projectPath);
     const childRepos = parseReposFromProjectYaml(project);
     const allRepos = parseReposFromProjectYaml(project, { includeRoot: true });
@@ -2700,6 +2732,38 @@ function parseProjectYaml(text) {
     }
     catch {
         return {};
+    }
+}
+class ProjectConfigError extends Error {
+}
+// Guards config-mutating paths: throws before any write when .agentos/project.yaml exists but is
+// unreadable, empty/whitespace-only, or not well-formed YAML, so a broken file is never silently
+// treated as `{}` and serialized back as a partial/empty config. A missing file is not an error
+// here — callers that create project.yaml from scratch (or skip patching an absent file) still
+// get to do that; only an *existing* file held to empty/invalid content is treated as malformed.
+async function assertProjectYamlWellFormed(path) {
+    let text;
+    try {
+        text = await readFile(path, 'utf8');
+    }
+    catch (error) {
+        if (error && error.code === 'ENOENT')
+            return;
+        throw new ProjectConfigError(`.agentos/project.yaml could not be read: ${error.message}`);
+    }
+    if (!text.trim()) {
+        throw new ProjectConfigError('.agentos/project.yaml exists but is empty or contains only whitespace; treat it as malformed and fix it manually (or delete the file to let AgentOS recreate it).');
+    }
+    let parsed;
+    try {
+        parsed = parseYaml(text);
+    }
+    catch (error) {
+        throw new ProjectConfigError(`.agentos/project.yaml is malformed and could not be parsed as YAML: ${error.message}`);
+    }
+    const isMapping = parsed !== null && parsed !== undefined && typeof parsed === 'object' && !Array.isArray(parsed);
+    if (!isMapping) {
+        throw new ProjectConfigError('.agentos/project.yaml is malformed: expected a YAML mapping (key: value pairs) at the top level, not null, a list, or a plain scalar value.');
     }
 }
 function dumpProjectYaml(data) {
