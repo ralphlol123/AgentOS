@@ -17,6 +17,11 @@
 - [x] Recorded and pushed roadmap item for subrepo-launched engine access to AgentOS skills.
 - [x] Built `feat/subrepo-engine-skill-access`: child repo pointers now direct OpenCode/Codex/Hermes/Claude to parent `.agentos/skills.md` and engine adapters; `doctor` reports stale child pointers and `doctor --fix` repairs them; version bumped to `0.3.0`.
 
+## Reliability improvement slices
+
+- [x] Task 1: fail closed on invalid project config; merged as PR #13.
+- [x] Task 2: filesystem boundary containment implemented directly by Hermes on `fix/filesystem-boundary-containment`; 91 tests pass; final native independent review PASS. Delivered as one scoped local commit; push/merge remain pending. No Claude Code/OpenCode used.
+
 ## Now
 
 - [ ] Commit and push `feat/subrepo-engine-skill-access`, then prepare PR details.

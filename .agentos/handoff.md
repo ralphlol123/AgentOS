@@ -2,7 +2,12 @@
 
 ## Current objective
 
-Subrepo-launched engine access is implemented on `feat/subrepo-engine-skill-access`: when OpenCode/Codex/Hermes/Claude starts inside a child repo such as `kargax-fe` or `kargax-be`, the generated child pointers now send the engine back to the parent AgentOS root and parent skill index.
+Task 2: filesystem boundary containment on `fix/filesystem-boundary-containment`.
+Implemented directly by Hermes, without Claude Code/OpenCode. Task 1 merged as PR #13 (`0109318`).
+
+Verification: `npm run check`, `npm test` (91 passed), and `git diff --check` passed. Tests exercise real temporary workspaces and byte/existence snapshots for rejected paths, dangling roots, symlink targets, imports/removal, and valid Obsidian links. Native independent review identified three issues; all have RED-to-GREEN regression coverage. Final native independent review: PASS. Delivery: one scoped local Task 2 commit; push/merge remain pending, no push requested.
+
+Below is historical rollout context, not the active implementation task.
 
 ## Scope
 

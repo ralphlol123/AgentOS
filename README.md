@@ -1,5 +1,14 @@
 # AgentOS for Projects
 
+## Filesystem boundary safety
+
+Mutating commands preflight AgentOS-managed paths before writing. Repository paths must be workspace-relative; traversal (`..`), absolute paths, Windows drive paths, and backslash paths are rejected rather than silently rewritten. Obsidian destinations and note paths follow the same rule relative to the selected vault. Workspace-folder note links must stay beneath the declared destination; legacy explicit note allowlists remain vault-relative.
+
+AgentOS conservatively rejects symlinks (including dangling links) in `.agentos/`, adapter targets/backups, repository adapter paths, and Obsidian target components. Migration checks only its `.claude` sources and targets, leaving unrelated native skill links alone. This includes links pointing inside the workspace: use real managed files/directories instead. The explicitly selected workspace/vault root may itself be reached through an alias.
+
+These checks protect against existing unsafe paths, not concurrent filesystem replacement by another process. They are not an OS sandbox or a transactional filesystem. Do not run concurrent writers in the same checkout. General read-only commands and user-selected import sources are not restricted to the output boundary.
+
+
 Project-owned context layer for model-agnostic coding agents.
 
 AgentOS installs a portable `.agentos/` project brain into a single repo or product workspace so Claude Code, Codex, OpenCode, Hermes, ChatGPT, and other agents can share the same scoped project context without bulk-loading every file.
