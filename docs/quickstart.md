@@ -200,7 +200,7 @@ agentos compact --dry-run
 agentos compact
 ```
 
-`compact` archives verbose live handoff/task state under `.agentos/runs/` and rewrites short deterministic live files.
+`compact --dry-run` shows the exact proposed live files without writes. `compact` makes a deterministic archive checkpoint under `.agentos/runs/` and adds explicit archive links, retaining all original live text (including safety constraints and unfinished work). Unchanged repeats do not write. It intentionally does not promise size reduction or summarize arbitrary Markdown; reduce historical prose only through a separate reviewed edit. See [compaction safety](../README.md#compaction-safety) for collision, CRLF, and rollback behavior.
 
 ## Health checks
 

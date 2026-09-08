@@ -620,7 +620,7 @@ test('doctor --fix adds OpenCode engine adapter to older workspaces', async () =
 });
 
 
-test('compact archives verbose handoff/tasks and rewrites compact live state', async () => {
+test('compact archives verbose handoff/tasks without dropping duplicate unfinished work', async () => {
   const root = await tempProject();
   await initAgentOS({ cwd: root, mode: 'new', yes: true });
   await writeFile(join(root, '.agentos/handoff.md'), `# Handoff
@@ -697,9 +697,10 @@ Implement deterministic compaction.
   const result = await compactAgentOS({ cwd: root });
   assert.equal(result.ok, true);
   assert.match(result.text, /Archived: \.agentos\/runs\/compact-archive-/);
-  assert.match(result.text, /AgentOS doctor: OK/);
+  assert.match(result.text, /AgentOS doctor: FAIL/);
+  assert.match(result.text, /duplicate ## Now sections/); // Diagnose; never drop unfinished work to repair it.
   assert.equal(await exists(result.archivePath), true);
-  assert.ok(result.after < result.before);
+  assert.ok(result.after >= result.before, 'conservative compaction must not discard context to meet a size target');
 
   const handoff = await readFile(join(root, '.agentos/handoff.md'), 'utf8');
   const tasks = await readFile(join(root, '.agentos/tasks.md'), 'utf8');
@@ -707,7 +708,8 @@ Implement deterministic compaction.
   assert.match(handoff, /Build agentos compact/);
   assert.match(handoff, /Implement deterministic compaction/);
   assert.match(tasks, /## Now/);
-  assert.equal((tasks.match(/^## Now$/gm) || []).length, 1);
+  assert.equal((tasks.match(/^## Now$/gm) || []).length, 2, 'duplicate sections may contain unfinished work');
+  assert.match(tasks, /Duplicate stale now item/);
   assert.match(archive, /Previous handoff.md/);
   assert.match(archive, /Duplicate stale now item/);
 });

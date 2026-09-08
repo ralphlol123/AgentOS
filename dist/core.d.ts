@@ -59,15 +59,22 @@ export declare function compactAgentOS(options?: any): Promise<{
     ok: boolean;
     text: string;
     dryRun?: undefined;
+    changed?: undefined;
     archivePath?: undefined;
     before?: undefined;
     after?: undefined;
+    proposed?: undefined;
 } | {
     ok: boolean;
     dryRun: boolean;
+    changed: boolean;
     archivePath: string;
     before: number;
     after: number;
+    proposed: {
+        handoff: string;
+        tasks: string;
+    };
     text: string;
 }>;
 export declare function linkObsidianAgentOS(options?: any): Promise<{

@@ -185,6 +185,25 @@ agentos migrate claude --preserve [--dry-run]
 agentos prompt [claude|codex|opencode|hermes]
 ```
 
+## Compaction safety
+
+```bash
+agentos compact --dry-run
+agentos compact
+```
+
+`--dry-run` prints the exact proposed `handoff.md` and `tasks.md` text, the archive path, and before/after character counts, without creating files or directories. The core API also returns `proposed: { handoff, tasks }` and `changed`.
+
+Compaction is deliberately conservative: **all original live text stays live, byte-for-byte for valid UTF-8**. It does not guess which prose is obsolete, truncate long sections, drop duplicate headings, cap unchecked tasks, or invent completed work. This preserves unfinished work (including nested details and custom sections), protected paths, warnings, decisions, and existing archive references. LF/CRLF content is preserved; new reference lines use the file's newline convention. Invalid UTF-8 and source read errors fail before writes; missing live files are treated as empty.
+
+A new checkpoint archives the exact before/after text under `.agentos/runs/compact-archive-<sha256>.md` and appends a relative link in each live file to its explicit `previous-handoff` or `previous-tasks` archive anchor. Archive Markdown is fenced as literal source so embedded headings/fences cannot hide those targets. Names derive from both original files, not the clock; existing names are skipped using deterministic `-1`, `-2`, … suffixes and archive creation is exclusive. Preview and apply agree while the input tree is unchanged.
+
+An unchanged repeat is a write-free no-op, verified against the complete referenced archive, not merely a marker. After edits, the next checkpoint retains prior links. Missing or modified archives do not cause live content to be discarded. `memory.md`, `decisions.md`, project config, and adapters are not rewritten. Doctor diagnostics are included after a changed apply; duplicate sections remain diagnosable rather than being silently deleted.
+
+**Trade-off:** this safety-first command is an archival checkpoint, not an automatic size reducer. New links increase live size; reducing historical prose requires a separate reviewed edit. It does not repair malformed Markdown (for example, an unclosed source fence can render an appended link as literal text). Command output always states this rendering limitation and prints direct archive paths with both anchors, outside the proposed source text. Review the full preview before applying.
+
+Archive creation, live replacements, and creation of a missing `runs/` directory share the existing rollback transaction. An in-process archive/state write failure restores original bytes, permission bits, and existence, with no temporary artifacts when rollback succeeds. This is best-effort rollback, not crash-safe multi-file atomicity or protection against concurrent writers; do not run writers concurrently in one checkout.
+
 ## Run handoff notes
 
 Use `agentos run handoff` when an engine is near quota, hit a provider/rate-limit error, was manually paused, or left partial work that another human/engine may need to continue.

@@ -850,14 +850,24 @@ export async function compactAgentOS(options: any = {}) {
   const handoffPath = join(root, '.agentos/handoff.md');
   const tasksPath = join(root, '.agentos/tasks.md');
   const runsDir = join(root, '.agentos/runs');
-  const oldHandoff = await safeRead(handoffPath);
-  const oldTasks = await safeRead(tasksPath);
+  const oldHandoff = await readCompactText(handoffPath);
+  const oldTasks = await readCompactText(tasksPath);
   const before = oldHandoff.length + oldTasks.length;
-  const compactHandoff = renderCompactHandoff(oldHandoff, oldTasks);
-  const compactTasks = renderCompactTasks(oldTasks, oldHandoff);
-  const after = compactHandoff.length + compactTasks.length;
-  const archiveName = `compact-archive-${timestampForFilename(new Date())}.md`;
+  // Markdown cannot reliably distinguish historical prose from active safety
+  // instructions. Retain it verbatim instead of truncating or inventing state.
+  const previousArchive = await unchangedCompactArchive(runsDir, oldHandoff, oldTasks);
+  const changed = previousArchive === null;
+  const archiveStem = `compact-archive-${compactStateHash(oldHandoff, oldTasks)}`;
+  let archiveName = previousArchive ?? `${archiveStem}.md`;
+  if (changed) {
+    for (let suffix = 1; await exists(join(runsDir, archiveName)); suffix++) {
+      archiveName = `${archiveStem}-${suffix}.md`;
+    }
+  }
   const archivePath = join(runsDir, archiveName);
+  const compactHandoff = changed ? appendCompactReference(oldHandoff, archiveName, 'handoff') : oldHandoff;
+  const compactTasks = changed ? appendCompactReference(oldTasks, archiveName, 'tasks') : oldTasks;
+  const after = compactHandoff.length + compactTasks.length;
 
   const lines = [
     `AgentOS compact${options.dryRun ? ' dry run' : ''}`,
@@ -866,17 +876,22 @@ export async function compactAgentOS(options: any = {}) {
     'Live context:',
     `- handoff.md: ${oldHandoff.length} chars -> ${compactHandoff.length} chars`,
     `- tasks.md: ${oldTasks.length} chars -> ${compactTasks.length} chars`,
-    `- total: ${before} chars -> ${after} chars (${before > 0 ? Math.round(((before - after) / before) * 1000) / 10 : 0}% smaller)`,
+    `- total: ${before} chars -> ${after} chars (${after - before} chars added)`,
+    'Conservative archival checkpoint: original live text retained; no automatic size reduction.',
     '',
-    `${options.dryRun ? 'Would archive' : 'Archived'}: .agentos/runs/${archiveName}`,
-    `${options.dryRun ? 'Would rewrite' : 'Rewrote'}: .agentos/handoff.md`,
-    `${options.dryRun ? 'Would rewrite' : 'Rewrote'}: .agentos/tasks.md`,
+    `${!changed ? 'Existing archive' : options.dryRun ? 'Would archive' : 'Archived'}: .agentos/runs/${archiveName}`,
+    changed ? `${options.dryRun ? 'Would rewrite' : 'Rewrote'}: .agentos/handoff.md, .agentos/tasks.md` : 'No changes: live state already archived.',
+    'Rendering limitation: an unclosed Markdown fence can render appended archive links as literal text; source Markdown is not repaired. Open the archive directly using these targets:',
+    `- .agentos/runs/${archiveName}#previous-handoff`,
+    `- .agentos/runs/${archiveName}#previous-tasks`,
   ];
 
-  if (!options.dryRun) {
+  if (!options.dryRun && changed) {
     await withMutationTransaction(async () => {
-      await mkdir(runsDir, { recursive: true });
-      await writeFileAtomic(archivePath, renderCompactArchive({ oldHandoff, oldTasks, compactHandoff, compactTasks }));
+      await mkdirTracked(runsDir);
+      const archive = Buffer.from(renderCompactArchive({ oldHandoff, oldTasks, compactHandoff, compactTasks }), 'utf8');
+      const created = await writeFileExclusiveAtomic(archivePath, archive);
+      if (!created.created) throw new Error(`Compaction archive appeared after planning: ${archivePath}; retry without concurrent writers.`);
       await writeFileAtomic(handoffPath, compactHandoff);
       await writeFileAtomic(tasksPath, compactTasks);
     });
@@ -884,7 +899,12 @@ export async function compactAgentOS(options: any = {}) {
     lines.push('', doctor.text);
   }
 
-  return { ok: true, dryRun: Boolean(options.dryRun), archivePath, before, after, text: lines.join('\n') };
+  if (options.dryRun) {
+    lines.push('', '--- Proposed .agentos/handoff.md ---', compactHandoff,
+      '--- Proposed .agentos/tasks.md ---', compactTasks, '--- End proposed live files ---');
+  }
+  return { ok: true, dryRun: Boolean(options.dryRun), changed, archivePath, before, after,
+    proposed: { handoff: compactHandoff, tasks: compactTasks }, text: lines.join('\n') };
 }
 
 export async function linkObsidianAgentOS(options: any = {}) {
@@ -3239,134 +3259,74 @@ function engineSpecificRules(engine) {
 }
 
 
-function renderCompactHandoff(handoff, tasks) {
-  const currentObjective = extractSection(handoff, 'Current objective') || firstUncheckedTask(tasks) || 'No active objective recorded.';
-  const scope = extractSection(handoff, 'Scope') || 'Use `.agentos/project.yaml` for workspace/repo scope. Declare task repo scope before editing.';
-  const currentState = extractSection(handoff, 'Current state') || 'See `.agentos/tasks.md` for current task state.';
-  const lastCompleted = extractSection(handoff, 'Last completed step') || latestCheckedTask(tasks) || 'No completed step recorded.';
-  const filesChanged = extractSection(handoff, 'Files changed') || 'No file-change summary recorded.';
-  const testsRun = extractSection(handoff, 'Tests run') || 'No verification recorded.';
-  const known = extractSection(handoff, 'Known failures') || extractSection(handoff, 'Known warnings') || 'None recorded.';
-  const nextAction = extractSection(handoff, 'Next exact action') || firstUncheckedTask(tasks) || 'Choose the next AgentOS-managed task.';
-  const openDecisions = extractSection(handoff, 'Open decisions') || '- None recorded.';
-  return `# Handoff
-
-## Current objective
-
-${trimSection(currentObjective)}
-
-## Scope
-
-${trimSection(scope)}
-
-## Current state
-
-${trimSection(currentState)}
-
-## Last completed step
-
-${trimSection(lastCompleted)}
-
-## Files changed
-
-${trimSection(filesChanged)}
-
-## Tests run
-
-${trimSection(testsRun)}
-
-## Known warnings / failures
-
-${trimSection(known)}
-
-## Next exact action
-
-${trimSection(nextAction)}
-
-## Open decisions
-
-${trimSection(openDecisions)}
-`;
+async function readCompactText(path: string): Promise<string> {
+  let bytes: Buffer;
+  try { bytes = await readFile(path); }
+  catch (error) {
+    if (error.code === 'ENOENT') return '';
+    throw error;
+  }
+  const text = bytes.toString('utf8');
+  if (!Buffer.from(text, 'utf8').equals(bytes)) throw new Error(`${path}: compaction requires valid UTF-8; original state left unchanged.`);
+  return text;
 }
 
-function renderCompactTasks(tasks, handoff) {
-  const done = uniqueTaskLines(extractSection(tasks, 'Done')).filter(isCheckedTask).slice(-12);
-  const nowCandidates = uniqueTaskLines(extractSection(tasks, 'Now')).filter(isUncheckedTask);
-  const nextCandidates = uniqueTaskLines(extractSection(tasks, 'Next')).filter(isUncheckedTask);
-  const laterCandidates = uniqueTaskLines(extractSection(tasks, 'Later')).filter(isUncheckedTask);
-  const fallbackNow = firstUncheckedTask(tasks) || extractSection(handoff, 'Next exact action') || 'Choose the next AgentOS-managed task.';
-  const now = nowCandidates[0] || checkboxLine(fallbackNow);
-  const next = nextCandidates.filter((line) => line !== now).slice(0, 8);
-  const later = laterCandidates.filter((line) => line !== now && !next.includes(line)).slice(0, 8);
-  return `# Tasks
+async function unchangedCompactArchive(runsDir: string, handoff: string, tasks: string): Promise<string | null> {
+  // A suffix alone is not ownership: verify the entire archived before/after
+  // record before deciding this state has already been processed.
+  const suffix = /\r?\n\r?\n\[Compaction archive: previous (handoff|tasks)\.md\]\(runs\/(compact-archive-[a-f0-9]{64}(?:-\d+)?\.md)#previous-\1\)\r?\n$/;
+  const h = handoff.match(suffix);
+  const t = tasks.match(suffix);
+  if (!h || !t || h[1] !== 'handoff' || t[1] !== 'tasks' || h[2] !== t[2]) return null;
+  const expected = renderCompactArchive({ oldHandoff: handoff.slice(0, h.index), oldTasks: tasks.slice(0, t.index), compactHandoff: handoff, compactTasks: tasks });
+  return await safeRead(join(runsDir, h[2])) === expected ? h[2] : null;
+}
 
-## Done
+function compactStateHash(handoff: string, tasks: string) {
+  return createHash('sha256').update(JSON.stringify([handoff, tasks])).digest('hex');
+}
 
-${done.length ? done.join('\n') : '- [x] AgentOS context initialized.'}
+function appendCompactReference(content: string, archiveName: string, kind: string) {
+  const newline = content.includes('\r\n') ? '\r\n' : '\n';
+  return `${content}${newline}${newline}[Compaction archive: previous ${kind}.md](runs/${archiveName}#previous-${kind})${newline}`;
+}
 
-## Now
-
-${now}
-
-## Next
-
-${next.length ? next.join('\n') : '- [ ] Run `agentos doctor` before the next handoff.'}
-
-## Later
-
-${later.length ? later.join('\n') : '- [ ] Add more AgentOS improvements as needed.'}
-`;
+function compactArchiveLiteral(content: string) {
+  let longest = 2;
+  for (const match of content.matchAll(/`+/g)) longest = Math.max(longest, match[0].length);
+  const fence = '`'.repeat(longest + 1);
+  return `${fence}markdown\n${content}\n${fence}`;
 }
 
 function renderCompactArchive({ oldHandoff, oldTasks, compactHandoff, compactTasks }) {
   return `# AgentOS Compact Archive
 
-Created: ${new Date().toISOString()}
+Live state SHA256: ${compactStateHash(compactHandoff, compactTasks)}
 
-This archive preserves pre-compaction live state. The live files were rewritten deterministically; no LLM summarization was used.
+This archive preserves pre-compaction live state verbatim. No semantic summarization or truncation was used.
+
+<a id="previous-handoff"></a>
 
 ## Previous handoff.md
 
-${oldHandoff.trim() || '(empty)'}
+${compactArchiveLiteral(oldHandoff)}
+
+<a id="previous-tasks"></a>
 
 ## Previous tasks.md
 
-${oldTasks.trim() || '(empty)'}
+${compactArchiveLiteral(oldTasks)}
 
 ## Compact handoff.md written
 
-${compactHandoff.trim()}
+${compactArchiveLiteral(compactHandoff)}
 
 ## Compact tasks.md written
 
-${compactTasks.trim()}
+${compactArchiveLiteral(compactTasks)}
 `;
 }
 
-function uniqueTaskLines(section) {
-  const seen = new Set();
-  const lines = String(section || '').split(/\r?\n/).map((line) => line.trim()).filter((line) => /^- \[[ xX]\]/.test(line));
-  const result = [];
-  for (const line of lines) {
-    const key = line.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push(line);
-  }
-  return result;
-}
-function isCheckedTask(line) { return /^- \[[xX]\]/.test(line); }
-function isUncheckedTask(line) { return /^- \[ \]/.test(line); }
-function firstUncheckedTask(text) { return uniqueTaskLines(text).find(isUncheckedTask); }
-function latestCheckedTask(text) { return uniqueTaskLines(text).filter(isCheckedTask).pop(); }
-function checkboxLine(text) {
-  const line = oneLine(String(text).replace(/^- \[[ xX]\]\s*/, ''), 180) || 'Choose the next AgentOS-managed task.';
-  return `- [ ] ${line}`;
-}
-function trimSection(text, max = 1600) {
-  const value = String(text || '').trim() || '- Not recorded.';
-  return value.length > max ? `${value.slice(0, max - 1).trimEnd()}…` : value;
-}
 function timestampForFilename(date) {
   return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
 }
