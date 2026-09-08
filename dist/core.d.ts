@@ -3,6 +3,20 @@ export declare function writeFileAtomic(path: string, content: string | Buffer, 
 }): Promise<void>;
 export declare function __setAtomicWriteFaultForTests(path: string, point: 'before-sync' | 'before-rename', onTrigger?: (context: any) => void): void;
 export declare function __clearAtomicWriteFaultForTests(): void;
+export declare function __writeFileExclusiveAtomicForTests(path: string, content: string): Promise<{
+    created: boolean;
+}>;
+type AdapterTarget = {
+    path: string;
+    label: string;
+    section: string;
+};
+type AdapterPlanEntry = {
+    target: AdapterTarget;
+    plan: any;
+};
+export declare function __planAdapterFilesForTests(targets: AdapterTarget[]): Promise<AdapterPlanEntry[]>;
+export declare function __applyAdapterPlansForTests(plans: AdapterPlanEntry[]): Promise<void>;
 export declare function initAgentOS(options?: any): Promise<{
     mode: any;
     workspaceKind: string;
@@ -203,12 +217,12 @@ export declare function templatesAgentOS(options?: any): Promise<{
     };
 }>;
 export declare function runHandoffAgentOS(options?: any): Promise<{
+    reason?: undefined;
     engine?: undefined;
     dryRun?: undefined;
     root?: undefined;
     ok: boolean;
     text: string;
-    reason?: undefined;
     handoffPath?: undefined;
     handoffRel?: undefined;
     git?: undefined;
@@ -234,3 +248,4 @@ export declare function handoffAgentOS(options?: any): Promise<{
     text: string;
 }>;
 export declare function doctorAgentOS(options?: any): Promise<any>;
+export {};
