@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -5,7 +6,7 @@ import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 
-const root = resolve(new URL('..', import.meta.url).pathname);
+const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -13,6 +14,7 @@ function run(command, args, options = {}) {
     encoding: 'utf8',
     stdio: options.stdio ?? 'pipe',
   });
+  if (result.error) throw result.error;
   if (result.status !== 0) {
     throw new Error([
       `${command} ${args.join(' ')} failed`,

@@ -1,6 +1,8 @@
-node_modules/
+node_modules
 *.tgz
 .env
 .env.*
 .DS_Store
 npm-debug.log*
+
+.agentos-write.lock

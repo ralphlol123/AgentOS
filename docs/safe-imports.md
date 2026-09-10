@@ -156,3 +156,5 @@ agentos doctor
 The MVP scanner uses conservative pattern checks. It is not a full malware scanner, license scanner, or legal review.
 
 Do not import sensitive, proprietary, or license-unclear content into shared repositories without owner approval.
+
+See [reliability contracts](reliability-acceptance.md) for installed inventory semantics, structural validation, read-only previews, explicit replacement, and `--expected-sha256` acceptance.

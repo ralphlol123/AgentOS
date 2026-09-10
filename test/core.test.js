@@ -334,7 +334,7 @@ test('child repo pointers expose parent AgentOS skills and engine adapters for s
   assert.match(agents, /\.\.\/\.agentos\/skills\.md/);
   assert.match(agents, /\.\.\/\.agentos\/engines\/opencode\.md/);
   assert.match(agents, /conventional-commit|kargax-commit/);
-  assert.match(agents, /do not require Ralph to repeat/i);
+  assert.match(agents, /do not require the user to repeat/i);
 
   assert.match(claude, /\.\.\/\.agentos\/skills\.md/);
   assert.match(claude, /\.\.\/\.agentos\/engines\/claude-code\.md/);

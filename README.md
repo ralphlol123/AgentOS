@@ -78,7 +78,7 @@ AgentOS v0.1 is a TypeScript CLI/package that supports:
 
 - new project initialization;
 - existing single-repo and multi-repo workspace import;
-- root adapters: `AGENTS.md`, `CLAUDE.md`, `.hermes.md`, and `.opencode/AGENTS.md`;
+- root adapters: `AGENTS.md`, `CLAUDE.md`, and `.hermes.md` (OpenCode uses the portable `AGENTS.md` pointer);
 - child repo pointer files for parent-managed multi-repo workspaces;
 - generated `.agentos/project.yaml`, `memory.md`, `handoff.md`, `tasks.md`, `decisions.md`, `status.md`, `skills.md`, `agents/`, `engines/`, `repos/`, and `runs/`;
 - agent selection profiles: `minimal`, `detected`, and custom comma lists;
@@ -308,7 +308,7 @@ cd ../kargax-be
 claude
 ```
 
-The child pointer tells OpenCode/Codex/Hermes/Claude to treat `..` as the parent AgentOS root, read `../.agentos/skills.md`, and then load only the specific `../.agentos/skills/**/SKILL.md` cards relevant to the task. Commit-message requests should resolve AgentOS skills such as `conventional-commit` or a project-local `kargax-commit` from the skills index without the user repeating the full path.
+The child pointer tells OpenCode/Codex/Hermes/Claude to resolve the relative AgentOS root (`..` for immediate children, deeper paths for nested repositories), read the root `.agentos/skills.md`, and then load only the specific `../.agentos/skills/**/SKILL.md` cards relevant to the task. Commit-message requests should resolve AgentOS skills such as `conventional-commit` or a project-local `kargax-commit` from the skills index without the user repeating the full path.
 
 Run this after upgrading an older workspace so stale child pointers are repaired:
 
@@ -484,3 +484,7 @@ GitHub Actions uses Bun as the primary dogfood package manager. The package-mana
 ```text
 .github/workflows/ci.yml
 ```
+
+## Reliability and recovery
+
+See [reliability contracts and acceptance](https://github.com/ralphlol123/AgentOS/blob/main/docs/reliability-acceptance.md) for preview/replacement behavior, additive `init --refresh`, installed inventories, writer-lock recovery, protected handoff evidence, reviewed import hashes, and verification limits.

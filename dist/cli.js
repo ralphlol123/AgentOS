@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
+import { parseFlagsAndPositionals, validateCommandFlags } from './cli-options.js';
 import { createRequire } from 'node:module';
 import { agentsAgentOS, compactAgentOS, doctorAgentOS, handoffAgentOS, initAgentOS, linkObsidianAgentOS, migrateClaudeAgentOS, obsidianAgentOS, promptAgentOS, runHandoffAgentOS, skillsAgentOS, statusAgentOS, templatesAgentOS } from './core.js';
 const require = createRequire(import.meta.url);
 const VERSION = require('../package.json').version;
 async function main() {
     const [, , command = 'help', ...args] = process.argv;
-    const flags = parseFlags(args);
     try {
+        const { flags } = parseFlagsAndPositionals(args);
+        validateCommandFlags(command, flags);
         if (command === 'help' || command === '--help' || command === '-h') {
             printHelp();
             return;
@@ -19,7 +21,7 @@ async function main() {
         }
         if (command === 'init') {
             const mode = flags.new ? 'new' : flags.existing ? 'existing' : undefined;
-            const result = await initAgentOS({ cwd: process.cwd(), mode, dryRun: flags['dry-run'], yes: flags.yes || flags.y, agents: flags.agents });
+            const result = await initAgentOS({ cwd: process.cwd(), mode, dryRun: flags['dry-run'], yes: flags.yes || flags.y, agents: flags.agents, refresh: flags.refresh });
             console.log(result.text);
             return;
         }
@@ -96,7 +98,7 @@ async function main() {
         if (command === 'skills') {
             const [sub, ...rest] = args;
             if (sub === 'list') {
-                const result = await skillsAgentOS({ cwd: process.cwd(), list: true });
+                const result = await skillsAgentOS({ cwd: process.cwd(), list: true, installed: flags.installed });
                 console.log(result.text);
                 process.exitCode = result.ok ? 0 : 1;
                 return;
@@ -113,6 +115,7 @@ async function main() {
                 add: sub === 'add' && positionals.length ? positionals.join(',') : undefined,
                 remove: sub === 'remove' && positionals.length ? positionals.join(',') : undefined,
                 mode: subFlags.mode,
+                replace: subFlags.replace,
                 dryRun: subFlags['dry-run'],
             });
             console.log(result.text);
@@ -122,7 +125,7 @@ async function main() {
         if (command === 'agents') {
             const [sub, ...rest] = args;
             if (sub === 'list') {
-                const result = await agentsAgentOS({ cwd: process.cwd(), list: true });
+                const result = await agentsAgentOS({ cwd: process.cwd(), list: true, installed: flags.installed });
                 console.log(result.text);
                 process.exitCode = result.ok ? 0 : 1;
                 return;
@@ -133,7 +136,7 @@ async function main() {
                 return;
             }
             const { flags: subFlags, positionals } = parseFlagsAndPositionals(rest);
-            const result = await agentsAgentOS({ cwd: process.cwd(), add: positionals[0], name: subFlags.name, dryRun: subFlags['dry-run'] });
+            const result = await agentsAgentOS({ cwd: process.cwd(), add: positionals[0], name: subFlags.name, replace: subFlags.replace, dryRun: subFlags['dry-run'] });
             console.log(result.text);
             process.exitCode = result.ok ? 0 : 1;
             return;
@@ -172,7 +175,7 @@ async function main() {
                 return;
             }
             const { flags: subFlags, positionals } = parseFlagsAndPositionals(rest);
-            const result = await templatesAgentOS({ cwd: process.cwd(), command: 'import', source: positionals[0], type: subFlags.type, name: subFlags.name, mode: subFlags.mode, dryRun: subFlags['dry-run'], yes: subFlags.yes, replace: subFlags.replace });
+            const result = await templatesAgentOS({ cwd: process.cwd(), command: 'import', source: positionals[0], type: subFlags.type, name: subFlags.name, mode: subFlags.mode, dryRun: subFlags['dry-run'], yes: subFlags.yes, replace: subFlags.replace, expectedSha256: subFlags['expected-sha256'] });
             console.log(result.text);
             process.exitCode = result.ok ? 0 : 1;
             return;
@@ -196,45 +199,22 @@ async function main() {
             process.exitCode = result.ok ? 0 : 1;
             return;
         }
+        console.error(`Unknown command: ${command}`);
         printHelp();
+        process.exitCode = 1;
     }
     catch (error) {
         console.error(`agentos ${command} failed: ${error.message}`);
         process.exitCode = 1;
     }
 }
-function parseFlags(args) {
-    return parseFlagsAndPositionals(args).flags;
-}
-function parseFlagsAndPositionals(args) {
-    const flags = {};
-    const positionals = [];
-    for (let i = 0; i < args.length; i += 1) {
-        const arg = args[i];
-        if (arg.startsWith('--')) {
-            const raw = arg.slice(2);
-            if (raw.includes('=')) {
-                const [key, ...rest] = raw.split('=');
-                flags[key] = rest.join('=');
-            }
-            else if (args[i + 1] && !args[i + 1].startsWith('-')) {
-                flags[raw] = args[i + 1];
-                i += 1;
-            }
-            else {
-                flags[raw] = true;
-            }
-        }
-        else if (arg.startsWith('-')) {
-            flags[arg.slice(1)] = true;
-        }
-        else {
-            positionals.push(arg);
-        }
-    }
-    return { flags, positionals };
-}
 async function resolveObsidianOptions(flags) {
+    if (!process.stdin.isTTY) {
+        const vault = flags.vault || process.env.OBSIDIAN_VAULT_PATH;
+        if (!vault)
+            throw new Error('Non-interactive Obsidian setup requires --vault <path> or OBSIDIAN_VAULT_PATH.');
+        return { vault, dest: flags.dest, link: flags.link, create: flags.create ?? false, dryRun: flags['dry-run'] };
+    }
     const provided = Boolean(flags.vault && flags.dest) || flags['dry-run'];
     if (provided && (flags.vault || !process.stdin.isTTY)) {
         return { vault: flags.vault, dest: flags.dest, link: flags.link, create: flags.create ?? true, dryRun: flags['dry-run'] };
@@ -243,7 +223,7 @@ async function resolveObsidianOptions(flags) {
     try {
         console.log('AgentOS Obsidian Link Setup');
         console.log('Mode: link-only. AgentOS will not bulk-load your vault.');
-        const vaultDefault = String(flags.vault || process.env.OBSIDIAN_VAULT_PATH || '/mnt/c/_/Obsidian/Ralph');
+        const vaultDefault = String(flags.vault || process.env.OBSIDIAN_VAULT_PATH || '');
         const vault = await askDefault(rl, 'Path to your Obsidian vault', vaultDefault);
         const destDefault = String(flags.dest || 'Projects/AgentOS');
         const dest = await askDefault(rl, 'Where should AgentOS project knowledge live inside the vault?', destDefault);
@@ -261,7 +241,7 @@ async function askDefault(rl, question, defaultValue) {
     return answer.trim() || defaultValue;
 }
 function printHelp() {
-    console.log(`AgentOS for Projects v${VERSION}\n\nUsage:\n  agentos init [--new|--existing] [--agents minimal|detected|frontend,qa,release] [--dry-run]\n  agentos status\n  agentos handoff\n  agentos run handoff [--engine name] [--role role] [--repo repo] [--worktree path] [--phase slug] [--reason reason] [--dry-run]\n  agentos doctor [--fix] [--json]\n  agentos compact [--dry-run]\n  agentos link-obsidian [--vault <path> --dest <folder> --link <note> --create]\n  agentos obsidian link-workspace --vault <path> --dest <folder> [--create] [--dry-run]\n  agentos obsidian status\n  agentos skills list\n  agentos skills add [--detected] [skill-id|category-pack,...] [--mode summary|full] [--dry-run]\n  agentos agents list\n  agentos agents add <agent-id|template-file> [--name id] [--dry-run]\n  agentos templates list\n  agentos templates show <id>\n  agentos templates copy <id> [--dry-run] [--replace]\n  agentos templates validate <file> --type agent|skill\n  agentos templates import <url-or-file> --type agent|skill --name <id> [--mode summary|full] [--dry-run] [--yes] [--replace]\n  agentos migrate claude --preserve [--dry-run]\n  agentos prompt [claude|codex|opencode|hermes]\n\nCore rule:\n  One AgentOS per product/workspace.\n  Many repos inside it.\n  Each task declares which repo(s) are in scope.`);
+    console.log(`AgentOS for Projects v${VERSION}\n\nUsage:\n  agentos init [--new|--existing] [--agents minimal|detected|frontend,qa,release] [--refresh] [--dry-run]\n  agentos status\n  agentos handoff\n  agentos run handoff [--engine name] [--role role] [--repo repo] [--worktree path] [--phase slug] [--reason reason] [--dry-run]\n  agentos doctor [--fix] [--json]\n  agentos compact [--dry-run]\n  agentos link-obsidian [--vault <path> --dest <folder> --link <note> --create]\n  agentos obsidian link-workspace --vault <path> --dest <folder> [--create] [--dry-run]\n  agentos obsidian status\n  agentos skills list [--installed]\n  agentos skills remove <skill-id> [--dry-run]\n  agentos skills add [--detected] [skill-id|category-pack,...] [--mode summary|full] [--dry-run] [--replace]\n  agentos agents list [--installed]\n  agentos agents add <agent-id|template-file> [--name id] [--dry-run] [--replace]\n  agentos templates list\n  agentos templates show <id>\n  agentos templates copy <id> [--dry-run] [--replace]\n  agentos templates validate <file> --type agent|skill\n  agentos templates import <url-or-file> --type agent|skill --name <id> [--mode summary|full] [--dry-run] [--yes] [--replace] [--expected-sha256 hash]\n  agentos migrate claude --preserve [--dry-run]\n  agentos prompt [claude|codex|opencode|hermes]\n\nCore rule:\n  One AgentOS per product/workspace.\n  Many repos inside it.\n  Each task declares which repo(s) are in scope.`);
 }
 main();
 //# sourceMappingURL=cli.js.map

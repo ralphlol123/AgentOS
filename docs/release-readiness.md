@@ -6,7 +6,7 @@ This checklist prepares AgentOS for an npm release without publishing accidental
 
 ```text
 name: agentos-for-projects
-version: 0.1.0
+version: 0.3.0
 bin: agentos -> dist/cli.js
 license: MIT
 node: >=20
@@ -89,7 +89,7 @@ The repository test `bun run test:package-managers` also packs the tarball and v
 Confirm with the owner:
 
 - package name is final: `agentos-for-projects`;
-- version is correct: `0.1.0` or a bumped version;
+- version is correct: the version in `package.json` or an explicitly approved bump;
 - npm account is logged in and has permission to publish;
 - public access is intended;
 - README reflects current CLI behavior;
@@ -122,3 +122,5 @@ agentos skills list
 
 - `npm publish --dry-run --access public` may warn if not logged in. That is acceptable for dry-run release readiness as long as the tarball contents are correct and the dry-run completes.
 - `gh` may be unavailable in WSL. PRs can still be opened manually from GitHub compare URLs.
+
+See [reliability acceptance](reliability-acceptance.md) for runtime/platform coverage and the separate real-engine acceptance gate. Packed manager verification now executes init, skill installation, registry role installation, handoff, compact, and doctor.

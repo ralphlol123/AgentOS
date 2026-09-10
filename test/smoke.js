@@ -1,9 +1,10 @@
+import { fileURLToPath } from 'node:url';
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const cli = new URL('../dist/cli.js', import.meta.url).pathname;
+const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
 const root = await mkdtemp(join(tmpdir(), 'agentos-smoke-'));
 await mkdir(join(root, 'photobooth-fe'), { recursive: true });
 await mkdir(join(root, 'photobooth-be'), { recursive: true });

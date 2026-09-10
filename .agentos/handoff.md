@@ -117,3 +117,13 @@ agentos doctor
 - Whether to add proactive quota/risk detection later.
 - Whether to add `--summary-file` for engine-written final summaries later.
 - Whether phase-level summary generation belongs in a later slice.
+
+## Reliability implementation — 2026-09-10
+
+Role/scope: implementation, QA and release preparation; `agentos-for-projects` only. Branch: `fix/discovery-reliability` in an isolated worktree. Original checkout edits and discovery report are preserved separately.
+
+Implemented discovery reliability recommendations: lossless handoff records; unique run files; corrected repository IDs/topology and additive refresh; validated CLI flags and read-only previews; explicit replacement; root diagnostics/repair and imported role registration; policy enforcement; bounded and filtered Git/HTTP evidence; reviewed import hashes; transactional Claude migration; installed inventories and structural validation; cooperating writer locks; typed helper extraction; reduced history snapshot work; packaged mutation smoke and runtime/platform CI. See `docs/reliability-acceptance.md` for contracts and limits.
+
+Verification so far: 194 regression tests passed on Node 26; full release check passed (typecheck, suite, smoke, npm/pnpm/Bun packed workflows, npm publish dry-run); package metadata tests 2/2; Bun pack dry-run and doctor passed. Advisory history fixture: 500 files/57 MB, re-init 209 ms on this host; not a benchmark guarantee. Node 20 acquisition did not complete successfully locally; CI matrix remains required. External-engine root/child acceptance is manual and has not been performed. No release publication, merge, client-repo edits, wizard or runner implementation.
+
+Next: complete runtime/PR checks, open the review PR, and retain any unverified external-engine acceptance explicitly. Human reviews and merges.
