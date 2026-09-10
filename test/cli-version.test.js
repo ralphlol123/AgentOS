@@ -1,9 +1,10 @@
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 
-const cli = new URL('../dist/cli.js', import.meta.url).pathname;
+const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
 const pkgUrl = new URL('../package.json', import.meta.url);
 
 test('CLI --version matches package.json version', async () => {

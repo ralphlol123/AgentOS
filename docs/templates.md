@@ -196,3 +196,5 @@ Repository templates are reusable source material.
 Project-local files under `.agentos/agents/` and `.agentos/skills/` are runtime context for a specific workspace.
 
 Do not edit repository templates just to customize one project; copy/add them into that project's `.agentos/` directory instead.
+
+See [reliability contracts](reliability-acceptance.md) for installed inventory semantics, structural validation, read-only previews, explicit replacement, and `--expected-sha256` acceptance.

@@ -17,31 +17,6 @@ type AdapterPlanEntry = {
 };
 export declare function __planAdapterFilesForTests(targets: AdapterTarget[]): Promise<AdapterPlanEntry[]>;
 export declare function __applyAdapterPlansForTests(plans: AdapterPlanEntry[]): Promise<void>;
-export declare function initAgentOS(options?: any): Promise<{
-    mode: any;
-    workspaceKind: string;
-    repos: any[];
-    planned: string[];
-    agents: {
-        profile: any;
-        enabled: any;
-        capabilities: Record<string, string>;
-        agents: any;
-    };
-    text: string;
-} | {
-    planned?: undefined;
-    mode: any;
-    workspaceKind: string;
-    repos: any[];
-    agents: {
-        profile: any;
-        enabled: any;
-        capabilities: Record<string, string>;
-        agents: any;
-    };
-    text: string;
-}>;
 export declare function statusAgentOS(options?: any): Promise<{
     ok: boolean;
     text: string;
@@ -53,6 +28,37 @@ export declare function promptAgentOS(options?: any): Promise<{
 } | {
     ok: boolean;
     engine: string;
+    text: string;
+}>;
+export declare function handoffAgentOS(options?: any): Promise<{
+    ok: boolean;
+    text: string;
+}>;
+export declare function initAgentOS(options?: any): Promise<{
+    mode: any;
+    workspaceKind: any;
+    repos: any[];
+    planned: any[];
+    plan: any[];
+    agents: {
+        profile: any;
+        enabled: any;
+        capabilities: Record<string, string>;
+        agents: any;
+    };
+    text: string;
+} | {
+    planned?: undefined;
+    plan?: undefined;
+    mode: any;
+    workspaceKind: any;
+    repos: any[];
+    agents: {
+        profile: any;
+        enabled: any;
+        capabilities: Record<string, string>;
+        agents: any;
+    };
     text: string;
 }>;
 export declare function compactAgentOS(options?: any): Promise<{
@@ -138,6 +144,10 @@ export declare function skillsAgentOS(options?: any): Promise<{
     text: string;
 } | {
     ok: boolean;
+    entries: any[];
+    text: string;
+} | {
+    ok: boolean;
     root: any;
     skills: string[];
     text: string;
@@ -149,6 +159,10 @@ export declare function skillsAgentOS(options?: any): Promise<{
     text: string;
 }>;
 export declare function agentsAgentOS(options?: any): Promise<{
+    ok: boolean;
+    entries: any[];
+    text: string;
+} | {
     dryRun?: undefined;
     root?: undefined;
     ok: boolean;
@@ -242,16 +256,16 @@ export declare function runHandoffAgentOS(options?: any): Promise<{
     handoffPath: string;
     handoffRel: string;
     git: {
-        status: any;
+        status: string;
         diffStat: string;
-        changedFiles: any[];
-        snippets: any[];
+        changedFiles: string[];
+        snippets: {
+            file: string;
+            diff: string;
+        }[];
         errors: string[];
+        omittedFiles: string[];
     };
-    text: string;
-}>;
-export declare function handoffAgentOS(options?: any): Promise<{
-    ok: boolean;
     text: string;
 }>;
 export declare function doctorAgentOS(options?: any): Promise<any>;

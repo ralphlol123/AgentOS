@@ -8,14 +8,16 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/cli.js',0o755)\"",
-    "test": "tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/cli.js',0o755)\" && node --test",
+    "test": "tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/cli.js',0o755)\" && node --test test/*.test.js",
     "smoke": "tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/cli.js',0o755)\" && node ./test/smoke.js",
     "test:package-managers": "tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/cli.js',0o755)\" && node ./test/package-managers.js",
     "prepack": "tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/cli.js',0o755)\"",
     "check": "tsc -p tsconfig.json --noEmit",
     "pack:dry-run": "npm pack --dry-run",
     "publish:dry-run": "npm publish --dry-run --access public",
-    "release:check": "bun run check && bun run test && bun run smoke && bun run test:package-managers && npm publish --dry-run --access public"
+    "release:check": "bun run check && bun run test && bun run smoke && bun run test:package-managers && npm publish --dry-run --access public",
+    "test:metadata": "node test/package-metadata.js",
+    "benchmark:history": "node test/history-benchmark.js"
   },
   "keywords": [
     "agents",

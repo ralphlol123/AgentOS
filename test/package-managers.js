@@ -1,9 +1,10 @@
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { mkdtemp, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const root = resolve(new URL('..', import.meta.url).pathname);
+const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const packDir = await mkdtemp(join(tmpdir(), 'agentos-pack-'));
 
 function run(command, args, options = {}) {
@@ -17,6 +18,7 @@ function run(command, args, options = {}) {
     stdio: options.stdio ?? 'pipe',
     env,
   });
+  if (result.error) throw result.error;
   if (result.status !== 0) {
     throw new Error([
       `${command} ${args.join(' ')} failed`,
@@ -58,13 +60,22 @@ console.log(`TARBALL=${tarball}`);
 
 for (const manager of managers) {
   if (!has(manager.command)) {
-    console.log(`SKIP ${manager.name}: command not found`);
-    continue;
+    throw new Error(`Required package manager missing: ${manager.name}. Install npm, pnpm, and Bun before compatibility verification.`);
   }
   const cwd = await mkdtemp(join(tmpdir(), `agentos-${manager.name}-`));
   await writeFile(join(cwd, 'package.json'), JSON.stringify({ private: true, type: 'module' }, null, 2));
   run(manager.command, manager.install, { cwd });
   const output = run(manager.command, manager.exec, { cwd });
   if (!/AgentOS dry run/.test(output)) throw new Error(`${manager.name} did not execute agentos dry-run`);
-  console.log(`PASS ${manager.name}: installed tarball and executed agentos bin`);
+  const installedCli = join(cwd, 'node_modules/agentos-for-projects/dist/cli.js');
+  const invoke = args => run(process.execPath, [installedCli, ...args], { cwd });
+  invoke(['init', '--new']);
+  invoke(['skills', 'add', 'systematic-debugging']);
+  invoke(['templates', 'copy', 'agent:data-engineer']);
+  invoke(['run', 'handoff', '--reason', 'packaged-smoke']);
+  invoke(['compact']);
+  invoke(['doctor']);
+  const handoff = await readFile(join(cwd, '.agentos/handoff.md'), 'utf8');
+  if (!handoff.includes('packaged-smoke')) throw new Error('Packaged handoff did not retain its pause record.');
+  console.log(`PASS ${manager.name}: installed bin, init, skill, registry role, handoff, checkpoint, doctor`);
 }

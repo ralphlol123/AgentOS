@@ -38,3 +38,14 @@
 - [ ] Resume `agentos run` Phase 2 after release.
 - [ ] Add richer local skill authoring/import UX.
 - [ ] Add more specialized reusable agent templates when real projects justify them.
+
+## Discovery reliability follow-up — 2026-09-10
+
+- [x] Implement repository reliability scope R1–R10 with preservation/security regression coverage.
+- [x] Pass 194 Node 26 tests, typecheck, CLI smoke, npm/pnpm/Bun packaged mutations, metadata checks and publication dry-run.
+- [ ] Verify PR runtime/platform CI and provide the review link.
+- [ ] Owner-observed external-engine root/nested-child acceptance before broader compatibility claims.
+- [ ] Human review and merge; publishing and held runner/wizard work remain separate.
+
+- [x] Verify 194/194 Node 22 regression tests and push reliability branch.
+- [ ] Restore connected GitHub app access to ralphlol123/AgentOS (API 404); create PR and verify hosted checks. Branch is ready; PR is not created yet.
