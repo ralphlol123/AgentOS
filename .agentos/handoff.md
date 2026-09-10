@@ -127,3 +127,7 @@ Implemented discovery reliability recommendations: lossless handoff records; uni
 Verification so far: 194 regression tests passed on Node 26; full release check passed (typecheck, suite, smoke, npm/pnpm/Bun packed workflows, npm publish dry-run); package metadata tests 2/2; Bun pack dry-run and doctor passed. Advisory history fixture: 500 files/57 MB, re-init 209 ms on this host; not a benchmark guarantee. Node 20 acquisition did not complete successfully locally; CI matrix remains required. External-engine root/child acceptance is manual and has not been performed. No release publication, merge, client-repo edits, wizard or runner implementation.
 
 Next: complete runtime/PR checks, open the review PR, and retain any unverified external-engine acceptance explicitly. Human reviews and merges.
+
+### Delivery status
+
+Implementation commit `341de5352816254c206204c14d87a6b28517a778` is pushed to `origin/fix/discovery-reliability`. All 194 tests also passed on Node 22.23.1. Rebuild matched committed dist; working tree was clean. PR creation is blocked: the connected GitHub account is ralphlol123, but repository metadata, create-PR and workflow calls for ralphlol123/AgentOS return 404. SSH Git push works; no separate local GitHub API authentication was available. Enable repository access for the connected GitHub app, then create main <- fix/discovery-reliability and verify CI. Do not claim a PR URL or hosted checks exist yet.

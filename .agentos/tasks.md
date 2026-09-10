@@ -46,3 +46,6 @@
 - [ ] Verify PR runtime/platform CI and provide the review link.
 - [ ] Owner-observed external-engine root/nested-child acceptance before broader compatibility claims.
 - [ ] Human review and merge; publishing and held runner/wizard work remain separate.
+
+- [x] Verify 194/194 Node 22 regression tests and push reliability branch.
+- [ ] Restore connected GitHub app access to ralphlol123/AgentOS (API 404); create PR and verify hosted checks. Branch is ready; PR is not created yet.
