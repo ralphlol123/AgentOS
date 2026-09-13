@@ -2499,13 +2499,14 @@ async function checkPorts(repos, warnings, diagnostics) {
     diagnostics.push('ports: none defined in project.yaml');
     return;
   }
-  const ss = await runCommand('ss', ['-ltnp']);
-  if (!ss.ok) {
-    warnings.push(`could not check ports with ss: ${ss.error}`);
+  let listenerTable = await runCommand('ss', ['-ltnp']);
+  if (!listenerTable.ok) listenerTable = await runCommand('netstat', ['-an']);
+  if (!listenerTable.ok) {
+    warnings.push(`could not check listening ports with ss or netstat: ${listenerTable.error}`);
     return;
   }
   for (const item of ports) {
-    const inUse = new RegExp(`:${item.port}\\b`).test(ss.stdout);
+    const inUse = new RegExp(`[.:]${item.port}(?:\\b|$)`).test(listenerTable.stdout);
     diagnostics.push(`${item.repo} ${item.name} ${item.port}: ${inUse ? 'IN USE' : 'free'}`);
     if (inUse) warnings.push(`port ${item.port} (${item.repo}.${item.name}) is already in use`);
   }
