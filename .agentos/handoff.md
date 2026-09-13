@@ -2,10 +2,17 @@
 
 ## Current objective
 
-Task 3: atomic state writes and best-effort command rollback on `fix/atomic-state-writes`.
-Implemented with Claude Code from merged Task 2 (`a21c718`). Critical state replacements now use same-directory temporary files, fsync/close, mode preservation, atomic rename, and cleanup. Multi-output mutation commands roll back original bytes/existence when a later in-process write fails.
+Catalog cleanup slice 1: canonical definitions and installation parity. Implemented directly by Hermes in `/home/hermes/agentos-catalog-cleanup`, branch `feat/catalog-cleanup`, based on `293d97562f9228a49848e85d90baa7e2cccb43f3`. Independent review is pending; no commit, push, merge, publication, or client rollout.
 
-Verification: `npm run check`, 18 focused atomic/rollback tests, full `npm test` (109 passed), and `git diff --check` passed independently after implementation. Final independent review: PASS. Package version is unchanged. Branch delivery is via PR; merge pending.
+`src/catalog.ts` now derives skills, agents, and the registry from package-owned Markdown. All 20 skill IDs/categories and 9 existing agent-template IDs are retained; data/security are explicitly addable, not detected by default. Summary/full skill modes preserve the complete body and differ only in mode metadata. The strict planning-only project-manager contract and portable safety gates are retained. Existing customized/local/native cards and capability mappings remain protected by the existing replacement, boundary, locking, and rollback paths.
+
+Verification: test-first RED exposed missing source coverage, differing add/copy workflows, lost late steps/safety notes, and the permissive PM source. Focused parity, custom-card preservation, metadata rejection, and CRLF tests are GREEN. `bun run build`, `bun run check`, full `bun run test` (260 passed), `bun run smoke`, and existing `bun run test:package-managers` (npm/pnpm/Bun packed mutation checks) passed on Node 26.5.0 / Bun 1.3.14. Smoke warnings were expected non-git disposable fixture repos. Worktree `node dist/cli.js status` and `node dist/cli.js doctor --json` both returned OK; doctor reported only the expected tracked-working-tree-changes warning. Package version remains 0.3.0.
+
+Files: `src/catalog.ts`, `src/core.ts`, `test/catalog-parity.test.js`, `test/core.test.js`, all 20 `templates/skills/` cards (9 newly materialized), `templates/agents/project-manager.md`, `docs/templates.md`, generated `dist/catalog.*` / `dist/core.*`, and these worktree handoff/task notes.
+
+Limits: package templates must be present at runtime; catalogs are loaded once per process. No aliases, renames/consolidation, migration, self-install rollout, or external-engine acceptance. Older source cards may be reported as custom-or-imported and are not automatically replaced. Existing import excerpt limits and capability/default-role policy remain unchanged. Passing the existing packed regression command is not completion of slice 5.
+
+Scope: this isolated worktree and disposable fixtures only. The original dirty `/home/hermes/agentos-for-projects`, KargaX, Labahub, local customized cards, secrets, migrations, and production configuration are protected. Next: independently review slice 1; do not begin slice 2 until that review gate passes.
 
 Below is historical rollout context, not the active implementation task.
 
@@ -103,13 +110,7 @@ Dogfood temp workspace verified:
 
 ## Next exact action
 
-Merge the Task 3 PR after GitHub checks and human review. After merge/install in KargaX, run:
-
-```bash
-cd /home/app/www/kargax/new
-agentos doctor --fix
-agentos doctor
-```
+Independently review catalog cleanup slice 1 in `/home/hermes/agentos-catalog-cleanup`. No commits or client-workspace commands are authorized in this slice. After review passes, the parent may begin the approved slice 2; slices 2–5 are not implemented here.
 
 ## Open decisions
 

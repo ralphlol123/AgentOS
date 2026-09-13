@@ -1,13 +1,13 @@
 ---
-name: github-actions-verification
-category: github
+name: agent-output-verification
+category: core
 mode: full
-summary: "use when adding/changing GitHub Actions workflows."
+summary: "use before trusting another agent's \"done\" report."
 ---
 
-# GitHub Actions Verification
+# Agent Output Verification
 
-Trigger: Use when adding or changing GitHub Actions workflows.
+Trigger: Use when another agent, subagent, or automated report claims work is done.
 
 ## Scope and safety
 
@@ -17,16 +17,16 @@ Trigger: Use when adding or changing GitHub Actions workflows.
 
 ## Procedure
 
-1. Confirm the workflow triggers (on:) match the intended events; overly broad triggers waste CI minutes and can create races.
-2. Pin third-party actions to a commit SHA or trusted version tag, not a mutable branch ref.
-3. Verify secrets used in the workflow are scoped to what the job actually needs.
+1. Do not trust a "done"/"tests pass" claim at face value; re-run the actual command yourself.
+2. Check the real file/git/terminal state (diff, file contents, test output) rather than the summary text.
+3. Confirm the change addresses the original request, not just that something changed.
 
 ## Verification
 
 - Real command/check output is captured before declaring success; report failures, skipped checks, and blockers honestly.
 - No out-of-scope files, secrets, production config, or migrations were touched without explicit approval.
-- Workflow run succeeds on the intended trigger and does not expose secrets in logs.
+- Independently reproduce the reported test/build result and confirm the diff matches the claimed change.
 
 ## Notes
 
-- Never disable a security-relevant CI check (e.g. a required status check) to unblock a merge without explicit approval.
+- Subagent summaries describe intent, not guaranteed outcome — verify before reporting up the chain.

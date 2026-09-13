@@ -1,13 +1,13 @@
 ---
-name: github-actions-verification
-category: github
+name: interface-feel-polish
+category: frontend
 mode: full
-summary: "use when adding/changing GitHub Actions workflows."
+summary: "use for interaction/motion/feedback polish."
 ---
 
-# GitHub Actions Verification
+# Interface Feel Polish
 
-Trigger: Use when adding or changing GitHub Actions workflows.
+Trigger: Use when refining interaction/motion/feedback quality on an already-functional UI.
 
 ## Scope and safety
 
@@ -17,16 +17,16 @@ Trigger: Use when adding or changing GitHub Actions workflows.
 
 ## Procedure
 
-1. Confirm the workflow triggers (on:) match the intended events; overly broad triggers waste CI minutes and can create races.
-2. Pin third-party actions to a commit SHA or trusted version tag, not a mutable branch ref.
-3. Verify secrets used in the workflow are scoped to what the job actually needs.
+1. Check perceived responsiveness: interactive elements should give immediate visual feedback on click/tap.
+2. Verify loading and empty states are handled, not just the happy path with data.
+3. Confirm animations/transitions are subtle and consistent with the rest of the app, not one-off.
 
 ## Verification
 
 - Real command/check output is captured before declaring success; report failures, skipped checks, and blockers honestly.
 - No out-of-scope files, secrets, production config, or migrations were touched without explicit approval.
-- Workflow run succeeds on the intended trigger and does not expose secrets in logs.
+- Interact with the feature end-to-end in a browser and confirm feedback/timing feels consistent with the rest of the app.
 
 ## Notes
 
-- Never disable a security-relevant CI check (e.g. a required status check) to unblock a merge without explicit approval.
+- Prefer removing an animation that feels off over leaving an inconsistent one in.

@@ -12,7 +12,9 @@ templates/
   examples/
 ```
 
-These files are portable source material. Project-local runtime copies live under `.agentos/` and may be customized per workspace.
+These files are the canonical source for both catalogs and installation paths. `skills add` and `templates copy` install the same complete skill workflow; `agents add`, initialization, and `templates copy` use the same role contracts. All existing IDs are retained: 20 skills and 9 agents. Data and security roles are available explicitly but are not added to the detected/minimal team by this cleanup.
+
+Project-local runtime copies live under `.agentos/` and may be customized per workspace. Re-init and `doctor --fix` preserve existing cards. Add refuses differing cards without `--replace`; template copy refuses any existing target without `--replace`. Review before replacing: older built-in copies may now appear as `custom-or-imported` because their bytes differ from the canonical source. This slice does not migrate or delete them.
 
 ## Template registry commands
 
@@ -149,13 +151,13 @@ agentos skills add systematic-debugging
 agentos skills add conventional-commit
 ```
 
-Use compact summary mode, the default:
+The default `summary` mode remains accepted for compatibility:
 
 ```bash
 agentos skills add frontend-build-verification --mode summary
 ```
 
-Use full mode when the project needs more procedural detail:
+Both modes retain every procedure, verification, safety gate, and note. Only the `mode` frontmatter value differs; no first-three-steps truncation remains. `templates copy` preserves the canonical `full` metadata:
 
 ```bash
 agentos skills add frontend-build-verification --mode full
@@ -188,6 +190,14 @@ Import examples:
 templates/examples/imported-agent.example.md
 templates/examples/imported-skill.example.md
 ```
+
+## Canonical source maintenance
+
+Edit `templates/skills/<category>/<id>.md` or `templates/agents/<id>.md`, not an inline catalog. `src/catalog.ts` loads the package-owned templates once per process and derives catalog entries and installation content. The packaged `templates/` directory is therefore required at runtime.
+
+Skill frontmatter declares `name`, `category`, `mode: full`, and a non-empty `summary`. Name/category must match the existing filename/path; duplicate skill IDs are rejected. Keep the complete workflow in the body. Agent filenames define IDs; their `Mandate:` paragraph supplies listing metadata, and the strict project-manager card declares its planning-only contract. Role defaults and capability routing remain separate policy in the CLI; this slice does not rename or consolidate them.
+
+Run `node --test test/catalog-parity.test.js` after building to check add/copy/init parity, workflow gates, metadata validation, and custom-card preservation. Imported external-source excerpt limits are unchanged; compatibility modes described above apply to built-in skills, not import summarization.
 
 ## Design rule
 

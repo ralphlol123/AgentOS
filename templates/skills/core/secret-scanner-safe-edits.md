@@ -1,13 +1,13 @@
 ---
-name: test-driven-development
+name: secret-scanner-safe-edits
 category: core
 mode: full
-summary: "use when adding or changing behavior."
+summary: "use before touching config/env/credential files."
 ---
 
-# Test-Driven Development
+# Secret-Scanner-Safe Edits
 
-Trigger: Use when adding or changing behavior that can be exercised by an automated test.
+Trigger: Use when a change touches config, env, or credential-adjacent files, or before staging a broad `git add`.
 
 ## Scope and safety
 
@@ -17,18 +17,17 @@ Trigger: Use when adding or changing behavior that can be exercised by an automa
 
 ## Procedure
 
-1. Write a failing test that encodes the new/changed behavior before writing implementation code.
-2. Run the test and confirm it fails for the expected reason (RED).
-3. Write the minimum implementation needed to make the test pass (GREEN).
-4. Refactor with the test suite green, without changing behavior.
+1. Never read, edit, or commit `.env` files or credential files without explicit approval.
+2. Before staging with a broad `git add`, inspect `git status` for unexpected files (keys, tokens, dumps).
+3. If a secret-looking value must be referenced, use a placeholder/env-var name in code, never the literal value.
+4. If a secret is discovered already committed, flag it to the user instead of silently rewriting history.
 
 ## Verification
 
 - Real command/check output is captured before declaring success; report failures, skipped checks, and blockers honestly.
 - No out-of-scope files, secrets, production config, or migrations were touched without explicit approval.
-- Run the test suite and confirm the new test passes along with all existing tests.
+- `git diff --staged` contains no literal credentials, tokens, or private keys.
 
 ## Notes
 
-- A RED test that fails for the wrong reason (e.g. a typo) is not a valid RED step — fix the test itself first.
-- Keep each RED/GREEN cycle small; commit-sized increments make review easier.
+- Rotating a leaked secret is a security decision for the user/owner to make, not something to do unilaterally.

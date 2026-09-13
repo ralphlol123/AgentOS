@@ -1,13 +1,13 @@
 ---
-name: github-actions-verification
-category: github
+name: grounded-codebase-docs
+category: core
 mode: full
-summary: "use when adding/changing GitHub Actions workflows."
+summary: "use when writing/updating docs about code behavior."
 ---
 
-# GitHub Actions Verification
+# Grounded Codebase Docs
 
-Trigger: Use when adding or changing GitHub Actions workflows.
+Trigger: Use when writing or updating documentation (README, CLAUDE.md, comments) about how the code behaves.
 
 ## Scope and safety
 
@@ -17,16 +17,16 @@ Trigger: Use when adding or changing GitHub Actions workflows.
 
 ## Procedure
 
-1. Confirm the workflow triggers (on:) match the intended events; overly broad triggers waste CI minutes and can create races.
-2. Pin third-party actions to a commit SHA or trusted version tag, not a mutable branch ref.
-3. Verify secrets used in the workflow are scoped to what the job actually needs.
+1. Read the actual current implementation before describing behavior; do not describe intended/legacy behavior from memory.
+2. Prefer linking to file:line over duplicating logic in prose that can drift out of sync.
+3. Verify commands/examples in the doc by actually running them.
 
 ## Verification
 
 - Real command/check output is captured before declaring success; report failures, skipped checks, and blockers honestly.
 - No out-of-scope files, secrets, production config, or migrations were touched without explicit approval.
-- Workflow run succeeds on the intended trigger and does not expose secrets in logs.
+- Every command and code reference in the doc has been executed/checked against the current codebase.
 
 ## Notes
 
-- Never disable a security-relevant CI check (e.g. a required status check) to unblock a merge without explicit approval.
+- Docs that describe aspirational behavior instead of real behavior are worse than no docs — they actively mislead.

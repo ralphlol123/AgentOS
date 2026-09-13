@@ -1,13 +1,13 @@
 ---
-name: github-actions-verification
+name: github-code-review
 category: github
 mode: full
-summary: "use when adding/changing GitHub Actions workflows."
+summary: "use when reviewing a GitHub pull request."
 ---
 
-# GitHub Actions Verification
+# GitHub Code Review
 
-Trigger: Use when adding or changing GitHub Actions workflows.
+Trigger: Use when reviewing a GitHub pull request.
 
 ## Scope and safety
 
@@ -17,16 +17,16 @@ Trigger: Use when adding or changing GitHub Actions workflows.
 
 ## Procedure
 
-1. Confirm the workflow triggers (on:) match the intended events; overly broad triggers waste CI minutes and can create races.
-2. Pin third-party actions to a commit SHA or trusted version tag, not a mutable branch ref.
-3. Verify secrets used in the workflow are scoped to what the job actually needs.
+1. Read the PR description and linked issue for intent before reading the diff.
+2. Review every changed file, not just the ones with the largest diff.
+3. Distinguish must-fix comments from optional suggestions explicitly.
 
 ## Verification
 
 - Real command/check output is captured before declaring success; report failures, skipped checks, and blockers honestly.
 - No out-of-scope files, secrets, production config, or migrations were touched without explicit approval.
-- Workflow run succeeds on the intended trigger and does not expose secrets in logs.
+- Every must-fix comment is either resolved or explicitly acknowledged before approval.
 
 ## Notes
 
-- Never disable a security-relevant CI check (e.g. a required status check) to unblock a merge without explicit approval.
+- A review that only checks style misses correctness/security issues — prioritize correctness and security first.

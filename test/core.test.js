@@ -873,17 +873,17 @@ test('migrate claude --preserve dry-run is non-mutating and requires --preserve'
 });
 
 
-test('skill templates default to compact summary mode and support opt-in full mode', async () => {
+test('skill mode compatibility preserves complete workflows in both modes', async () => {
   const root = await tempProject();
   await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
 
   await skillsAgentOS({ cwd: root, add: 'systematic-debugging' });
   const summary = await readFile(join(root, '.agentos/skills/core/systematic-debugging/SKILL.md'), 'utf8');
-  assert.match(summary, /^---\nname: systematic-debugging\ncategory: core\nmode: summary\n---/);
+  assert.match(summary, /^---\nname: systematic-debugging\ncategory: core\nmode: summary\n/);
   assert.match(summary, /Trigger:/);
   assert.match(summary, /## Procedure/);
   assert.match(summary, /## Verification/);
-  assert.doesNotMatch(summary, /## Notes/);
+  assert.match(summary, /## Notes/);
 
   const fullRoot = await tempProject();
   await initAgentOS({ cwd: fullRoot, mode: 'new', yes: true, agents: 'minimal' });
@@ -891,7 +891,7 @@ test('skill templates default to compact summary mode and support opt-in full mo
   const full = await readFile(join(fullRoot, '.agentos/skills/core/systematic-debugging/SKILL.md'), 'utf8');
   assert.match(full, /mode: full/);
   assert.match(full, /## Notes/);
-  assert.ok(full.length > summary.length);
+  assert.equal(full, summary.replace('mode: summary', 'mode: full'));
 });
 
 test('skills add with a specific skill id writes only that skill and updates the skills index', async () => {
@@ -1083,7 +1083,7 @@ test('skills list and agents list expose built-in reusable templates', async () 
   const agents = await agentsAgentOS({ cwd: root, list: true });
   assert.equal(agents.ok, true);
   assert.match(agents.text, /project-manager/);
-  assert.match(agents.text, /Repo templates: templates\/agents/);
+  assert.match(agents.text, /Canonical source templates: templates\/agents/);
 });
 
 test('agents add copies an agent template and registers it in project.yaml', async () => {

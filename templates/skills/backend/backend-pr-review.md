@@ -1,13 +1,13 @@
 ---
-name: github-actions-verification
-category: github
+name: backend-pr-review
+category: backend
 mode: full
-summary: "use when adding/changing GitHub Actions workflows."
+summary: "use for reviewing backend pull requests."
 ---
 
-# GitHub Actions Verification
+# Backend PR Review
 
-Trigger: Use when adding or changing GitHub Actions workflows.
+Trigger: Use when reviewing backend pull requests.
 
 ## Scope and safety
 
@@ -17,16 +17,17 @@ Trigger: Use when adding or changing GitHub Actions workflows.
 
 ## Procedure
 
-1. Confirm the workflow triggers (on:) match the intended events; overly broad triggers waste CI minutes and can create races.
-2. Pin third-party actions to a commit SHA or trusted version tag, not a mutable branch ref.
-3. Verify secrets used in the workflow are scoped to what the job actually needs.
+1. Check for missing input validation and unhandled error paths.
+2. Check for N+1 queries or unbounded loops over external calls/DB rows.
+3. Confirm migrations (if any) are backward compatible with the currently deployed code.
+4. Confirm secrets/config are read from environment/config service, not hardcoded.
 
 ## Verification
 
 - Real command/check output is captured before declaring success; report failures, skipped checks, and blockers honestly.
 - No out-of-scope files, secrets, production config, or migrations were touched without explicit approval.
-- Workflow run succeeds on the intended trigger and does not expose secrets in logs.
+- Review comments cover validation, error handling, performance, and migration safety, or explicitly note none apply.
 
 ## Notes
 
-- Never disable a security-relevant CI check (e.g. a required status check) to unblock a merge without explicit approval.
+- A backward-incompatible migration deployed before the code that needs it is a common source of production incidents.

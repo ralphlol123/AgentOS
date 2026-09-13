@@ -1,3 +1,4 @@
+import { SKILL_CATALOG, SKILL_BY_ID, SKILL_CATEGORIES, TEMPLATE_ENTRIES, AGENT_DEFINITIONS, renderSkillTemplate, type SkillCategory, type SkillDefinition } from './catalog.js';
 import { withWorkspaceWriter } from './workspace-lock.js';
 import { readImportSource } from './import-source.js';
 import { appendContextRecord, literalMarkdown, markdownHeadings, markdownSection } from './markdown.js';
@@ -7,7 +8,6 @@ import { execFile } from 'node:child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomBytes } from 'node:crypto';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
@@ -1232,8 +1232,10 @@ async function installedCards(root: string, type: 'agent' | 'skill') {
     .filter(name => name.endsWith('.md')).map(name => ({ id: basename(name, '.md'), abs: join(root, '.agentos/agents', name), relPath: `.agentos/agents/${name}` }));
   const entries = [];
   for (const item of local) {
-    const content = await safeRead(item.abs), builtin = type === 'skill' ? SKILL_BY_ID[item.id] : AGENT_DEFINITIONS[item.id];
-    const candidates = builtin ? (type === 'skill' ? [renderSkillTemplate(builtin, 'summary'), renderSkillTemplate(builtin, 'full')] : [agentMd(builtin)]) : [];
+    const content = await safeRead(item.abs);
+    const skill = type === 'skill' ? SKILL_BY_ID[item.id] : undefined;
+    const agent = type === 'agent' ? AGENT_DEFINITIONS[item.id] : undefined;
+    const candidates = skill ? [renderSkillTemplate(skill, 'summary'), renderSkillTemplate(skill, 'full')] : agent ? [agentMd(agent)] : [];
     for (const template of registry.filter(entry => entry.type === type && entry.name === item.id)) candidates.push(await safeRead(template.absPath));
     entries.push({ id: item.id, path: item.relPath, state: candidates.includes(content) ? 'source-match' : 'custom-or-imported', ...(type === 'agent' ? { enabled: enabled.has(item.id) } : {}) });
   }
@@ -1243,7 +1245,7 @@ async function installedCards(root: string, type: 'agent' | 'skill') {
 function listSkillTemplates(root) {
   const lines = ['AgentOS skill templates', `Root: ${root}`, '', 'Built-in packs:', ...SKILL_CATEGORIES.map((category) => `- ${category}-pack`), '', 'Built-in skills:'];
   for (const skill of SKILL_CATALOG) lines.push(`- ${skill.id} (${skill.category}) — ${skill.summary}`);
-  lines.push('', 'Separate file registry: agentos templates list (portable source cards; not the generated catalog).', 'Installed cards: agentos skills list --installed', 'Use: agentos skills add <skill-id|category-pack> [--mode summary|full]', 'Remove: agentos skills remove <skill-id> [--dry-run]');
+  lines.push('', 'Canonical source templates: agentos templates list (same complete workflows).', 'Installed cards: agentos skills list --installed', 'Use: agentos skills add <skill-id|category-pack> [--mode summary|full]', 'Remove: agentos skills remove <skill-id> [--dry-run]');
   return { ok: true, root, skills: SKILL_CATALOG.map((s) => s.id), text: lines.join('\n') };
 }
 
@@ -1349,7 +1351,7 @@ async function agentsAgentOSUnlocked(options: any = {}) {
 function listAgentTemplates(root) {
   const lines = ['AgentOS agent templates', `Root: ${root}`, '', 'Built-in agents:'];
   for (const agent of Object.values(AGENT_DEFINITIONS) as any[]) lines.push(`- ${agent.id}${agent.planningOnly ? ' (planning-only)' : ''} — ${agent.mandate}`);
-  lines.push('', 'Repo templates: templates/agents/ — separate file registry via agentos templates list (also includes data/security roles).', 'Installed cards: agentos agents list --installed', 'Use: agentos agents add <agent-id|template-file> [--name id] [--dry-run]');
+  lines.push('', 'Canonical source templates: templates/agents/ — same role contracts via agentos templates list.', 'Installed cards: agentos agents list --installed', 'Use: agentos agents add <agent-id|template-file> [--name id] [--dry-run]');
   return { ok: true, root, agents: Object.keys(AGENT_DEFINITIONS), text: lines.join('\n') };
 }
 
@@ -1482,41 +1484,8 @@ function isPathLike(value) {
   return /[\\/.]/.test(String(value));
 }
 
-function packageRootDir() {
-  return dirname(dirname(fileURLToPath(import.meta.url)));
-}
-
-function templatesRootDir() {
-  return join(packageRootDir(), 'templates');
-}
-
 async function templateRegistryEntries() {
-  const root = templatesRootDir();
-  const entries: any[] = [];
-  const agentsDir = join(root, 'agents');
-  if (await exists(agentsDir)) {
-    for (const entry of await readdir(agentsDir, { withFileTypes: true })) {
-      if (entry.isFile() && entry.name.endsWith('.md')) {
-        const name = basename(entry.name, '.md');
-        entries.push({ id: `agent:${name}`, type: 'agent', name, relPath: `templates/agents/${entry.name}`, absPath: join(agentsDir, entry.name) });
-      }
-    }
-  }
-  const skillsDir = join(root, 'skills');
-  if (await exists(skillsDir)) {
-    for (const categoryEntry of await readdir(skillsDir, { withFileTypes: true })) {
-      if (!categoryEntry.isDirectory()) continue;
-      const category = categoryEntry.name;
-      const categoryDir = join(skillsDir, category);
-      for (const skillEntry of await readdir(categoryDir, { withFileTypes: true })) {
-        if (skillEntry.isFile() && skillEntry.name.endsWith('.md')) {
-          const name = basename(skillEntry.name, '.md');
-          entries.push({ id: `skill:${category}/${name}`, type: 'skill', category, name, relPath: `templates/skills/${category}/${skillEntry.name}`, absPath: join(categoryDir, skillEntry.name) });
-        }
-      }
-    }
-  }
-  return entries.sort((a, b) => a.id.localeCompare(b.id));
+  return TEMPLATE_ENTRIES;
 }
 
 async function findTemplateRegistryEntry(id) {
@@ -1588,309 +1557,8 @@ async function registerProjectAgent(root, id) {
   await writeFileAtomic(projectPath, dumpProjectYaml(project));
 }
 
-type SkillCategory = 'core' | 'frontend' | 'backend' | 'fullstack' | 'github';
-
-interface SkillDefinition {
-  id: string;
-  category: SkillCategory;
-  title: string;
-  summary: string;
-  trigger: string;
-  procedure: string[];
-  verification: string[];
-  fullNotes: string[];
-}
-
-const SKILL_CATALOG: SkillDefinition[] = [
-  {
-    id: 'systematic-debugging', category: 'core', title: 'Systematic Debugging',
-    summary: 'use for unclear bugs or inconsistent reproduction.',
-    trigger: "a bug's root cause is unclear or reproduction is inconsistent.",
-    procedure: [
-      'Reproduce the failure with the smallest possible input before changing any code.',
-      'Form a specific hypothesis about the cause; do not guess-and-check broadly.',
-      'Add logging/assertions or use a debugger to confirm or reject the hypothesis with real evidence.',
-      'Fix the confirmed root cause, not just the symptom.',
-      'Remove temporary debugging instrumentation before finishing.',
-    ],
-    verification: ['Re-run the original failing case and confirm it now passes.', 'Run the existing test suite to check for regressions.'],
-    fullNotes: ['Prefer binary search (bisecting commits/inputs) over linear scanning when the failure is intermittent.', 'Write down the hypothesis and the evidence that confirmed/rejected it so the fix can be reviewed.'],
-  },
-  {
-    id: 'test-driven-development', category: 'core', title: 'Test-Driven Development',
-    summary: 'use when adding or changing behavior.',
-    trigger: 'adding or changing behavior that can be exercised by an automated test.',
-    procedure: [
-      'Write a failing test that encodes the new/changed behavior before writing implementation code.',
-      'Run the test and confirm it fails for the expected reason (RED).',
-      'Write the minimum implementation needed to make the test pass (GREEN).',
-      'Refactor with the test suite green, without changing behavior.',
-    ],
-    verification: ['Run the test suite and confirm the new test passes along with all existing tests.'],
-    fullNotes: ['A RED test that fails for the wrong reason (e.g. a typo) is not a valid RED step — fix the test itself first.', 'Keep each RED/GREEN cycle small; commit-sized increments make review easier.'],
-  },
-  {
-    id: 'shared-repo-git-safety', category: 'core', title: 'Shared-Repo Git Safety',
-    summary: 'use before commit/push/merge in shared repos.',
-    trigger: 'running any git command that rewrites history or touches files you did not author this session, especially in shared/team repos.',
-    procedure: [
-      'Run `git status` before any destructive operation (checkout/reset/clean/restore) to see what would be affected.',
-      'Never force-push to a shared branch without explicit approval.',
-      'Stash or commit unrelated in-progress work before switching branches or rebasing.',
-      'Review a broad `git add` with `git status`/`git diff --staged` before committing to avoid pulling in unrelated or secret files.',
-    ],
-    verification: ['`git status --short --branch` shows only the intended changes before commit/push.'],
-    fullNotes: ['Prefer `git revert` over `git reset --hard`/force-push once a commit is shared with others.', 'Treat `--no-verify` and `--no-gpg-sign` as last resorts; investigate hook failures instead of bypassing them.'],
-  },
-  {
-    id: 'agent-output-verification', category: 'core', title: 'Agent Output Verification',
-    summary: 'use before trusting another agent\'s "done" report.',
-    trigger: 'another agent, subagent, or automated report claims work is done.',
-    procedure: [
-      'Do not trust a "done"/"tests pass" claim at face value; re-run the actual command yourself.',
-      'Check the real file/git/terminal state (diff, file contents, test output) rather than the summary text.',
-      'Confirm the change addresses the original request, not just that something changed.',
-    ],
-    verification: ['Independently reproduce the reported test/build result and confirm the diff matches the claimed change.'],
-    fullNotes: ['Subagent summaries describe intent, not guaranteed outcome — verify before reporting up the chain.'],
-  },
-  {
-    id: 'requesting-code-review', category: 'core', title: 'Requesting Code Review',
-    summary: 'use for pre-commit/pre-merge review.',
-    trigger: 'asking a human or another agent to review a change.',
-    procedure: [
-      'Run the full local verification suite (build/lint/test) and fix failures before requesting review.',
-      'Write a summary of what changed and why, not just what the diff shows.',
-      'Call out any known trade-offs, skipped edge cases, or follow-up work explicitly.',
-      'Keep the diff scoped to the stated task; split out unrelated cleanup into a separate change.',
-    ],
-    verification: ['Review checklist: verification commands run and passing; summary written; scope matches the request.'],
-    fullNotes: ['A reviewer without your context should be able to understand the "why" from the summary alone.'],
-  },
-  {
-    id: 'secret-scanner-safe-edits', category: 'core', title: 'Secret-Scanner-Safe Edits',
-    summary: 'use before touching config/env/credential files.',
-    trigger: 'a change touches config, env, or credential-adjacent files, or before staging a broad `git add`.',
-    procedure: [
-      'Never read, edit, or commit `.env` files or credential files without explicit approval.',
-      'Before staging with a broad `git add`, inspect `git status` for unexpected files (keys, tokens, dumps).',
-      'If a secret-looking value must be referenced, use a placeholder/env-var name in code, never the literal value.',
-      'If a secret is discovered already committed, flag it to the user instead of silently rewriting history.',
-    ],
-    verification: ['`git diff --staged` contains no literal credentials, tokens, or private keys.'],
-    fullNotes: ['Rotating a leaked secret is a security decision for the user/owner to make, not something to do unilaterally.'],
-  },
-  {
-    id: 'grounded-codebase-docs', category: 'core', title: 'Grounded Codebase Docs',
-    summary: 'use when writing/updating docs about code behavior.',
-    trigger: 'writing or updating documentation (README, CLAUDE.md, comments) about how the code behaves.',
-    procedure: [
-      'Read the actual current implementation before describing behavior; do not describe intended/legacy behavior from memory.',
-      'Prefer linking to file:line over duplicating logic in prose that can drift out of sync.',
-      'Verify commands/examples in the doc by actually running them.',
-    ],
-    verification: ['Every command and code reference in the doc has been executed/checked against the current codebase.'],
-    fullNotes: ['Docs that describe aspirational behavior instead of real behavior are worse than no docs — they actively mislead.'],
-  },
-  {
-    id: 'frontend-build-verification', category: 'frontend', title: 'Frontend Build Verification',
-    summary: 'use before declaring frontend work done.',
-    trigger: 'declaring frontend work done.',
-    procedure: [
-      'Run the project build command and confirm it exits cleanly.',
-      'Run type-checking/linting if configured.',
-      'Load the affected route/component in a real browser and check the console for errors.',
-    ],
-    verification: ['Build command exits 0; no new console errors on the affected pages.'],
-    fullNotes: ['A green build does not guarantee a working UI — always do a real browser pass for user-facing changes.'],
-  },
-  {
-    id: 'nuxt-e2e-testing', category: 'frontend', title: 'Nuxt E2E Testing',
-    summary: 'use for Nuxt route/browser behavior.',
-    trigger: 'Nuxt route/browser behavior changes.',
-    procedure: [
-      'Start the Nuxt dev/preview server.',
-      'Exercise the changed route/component through real navigation and interaction, not just unit tests.',
-      'Check network requests and console for errors during the flow.',
-      'Run the project e2e test command if one is configured.',
-    ],
-    verification: ['Manual or automated e2e pass on the changed route with no console/network errors.'],
-    fullNotes: ['Prefer testing the golden path plus at least one edge case (empty state, error state) over the golden path alone.'],
-  },
-  {
-    id: 'ai-slop-design-review', category: 'frontend', title: 'AI-Slop Design Review',
-    summary: 'use for UI polish/design review.',
-    trigger: 'UI polish/design review, especially on AI-generated or AI-assisted UI changes.',
-    procedure: [
-      'Compare against the existing design system/spacing/typography scale instead of introducing new ad hoc values.',
-      'Check responsive behavior at common breakpoints, not just the default viewport.',
-      'Remove generic placeholder copy, redundant wrapper elements, and unused CSS introduced during generation.',
-      'Verify interactive states: hover, focus, disabled, loading, and error.',
-    ],
-    verification: ['UI matches existing design language; all interactive states are visibly implemented, not just the default state.'],
-    fullNotes: ['Watch for tells of ungrounded generation: inconsistent spacing units, unnecessary nested divs, and copy that does not match the product voice.'],
-  },
-  {
-    id: 'interface-feel-polish', category: 'frontend', title: 'Interface Feel Polish',
-    summary: 'use for interaction/motion/feedback polish.',
-    trigger: 'refining interaction/motion/feedback quality on an already-functional UI.',
-    procedure: [
-      'Check perceived responsiveness: interactive elements should give immediate visual feedback on click/tap.',
-      'Verify loading and empty states are handled, not just the happy path with data.',
-      'Confirm animations/transitions are subtle and consistent with the rest of the app, not one-off.',
-    ],
-    verification: ['Interact with the feature end-to-end in a browser and confirm feedback/timing feels consistent with the rest of the app.'],
-    fullNotes: ['Prefer removing an animation that feels off over leaving an inconsistent one in.'],
-  },
-  {
-    id: 'backend-service-verification', category: 'backend', title: 'Backend Service Verification',
-    summary: 'use for local backend service verification.',
-    trigger: 'declaring backend work done.',
-    procedure: [
-      'Start the service locally and confirm it boots without errors.',
-      'Exercise the changed endpoint(s) with a real request (curl/HTTP client), not just unit tests.',
-      'Check logs for unexpected errors/warnings during the request.',
-    ],
-    verification: ['Real request to the changed endpoint returns the expected response with no unexpected errors in logs.'],
-    fullNotes: ['Unit tests can pass while the service fails to boot due to config/DI issues — always do a real boot check.'],
-  },
-  {
-    id: 'nestjs-feature-implementation', category: 'backend', title: 'NestJS Feature Implementation',
-    summary: 'use when implementing a new NestJS feature.',
-    trigger: 'implementing a new NestJS feature (module/controller/service).',
-    procedure: [
-      'Follow the existing module boundary conventions (module/controller/service/DTO) instead of inventing a new structure.',
-      'Validate input DTOs explicitly; do not trust unvalidated request bodies.',
-      'Keep controllers thin; put business logic in services.',
-      'Wire the new provider into its module and confirm Nest resolves the dependency graph at boot.',
-    ],
-    verification: ['Application boots with the new module wired in; the new endpoint/service behaves as specified for valid and invalid input.'],
-    fullNotes: ['A missing provider/module import surfaces as a boot-time DI error, not a test failure — always boot-check after wiring changes.'],
-  },
-  {
-    id: 'nestjs-auth-guards', category: 'backend', title: 'NestJS Auth Guards',
-    summary: 'use for NestJS auth/permission/guard work.',
-    trigger: 'NestJS auth/permission/guard work.',
-    procedure: [
-      'Identify exactly which routes/resources the change affects and what identity/role model applies.',
-      'Implement authorization checks in guards/decorators, not scattered inline checks in controllers.',
-      'Fail closed: default to denying access when a check cannot be evaluated.',
-      'Add a test for both an authorized and an unauthorized request.',
-    ],
-    verification: ['An authorized request succeeds and an unauthorized request is rejected with the correct status code.'],
-    fullNotes: ['Treat auth/permission code as security-sensitive: prefer explicit allow-lists over implicit deny-by-omission.'],
-  },
-  {
-    id: 'backend-pr-review', category: 'backend', title: 'Backend PR Review',
-    summary: 'use for reviewing backend pull requests.',
-    trigger: 'reviewing backend pull requests.',
-    procedure: [
-      'Check for missing input validation and unhandled error paths.',
-      'Check for N+1 queries or unbounded loops over external calls/DB rows.',
-      'Confirm migrations (if any) are backward compatible with the currently deployed code.',
-      'Confirm secrets/config are read from environment/config service, not hardcoded.',
-    ],
-    verification: ['Review comments cover validation, error handling, performance, and migration safety, or explicitly note none apply.'],
-    fullNotes: ['A backward-incompatible migration deployed before the code that needs it is a common source of production incidents.'],
-  },
-  {
-    id: 'full-system-rehearsal', category: 'fullstack', title: 'Full System Rehearsal',
-    summary: 'use before declaring cross-repo work done.',
-    trigger: 'declaring a cross-repo/full-stack change done.',
-    procedure: [
-      'Start both frontend and backend locally against each other, not against a mocked API.',
-      'Exercise the full user-facing flow end-to-end through the real UI.',
-      'Check both frontend console/network and backend logs during the flow for errors.',
-    ],
-    verification: ['End-to-end flow completes successfully with both services running live, no unexpected errors in either log.'],
-    fullNotes: ['Passing frontend and backend test suites independently does not guarantee they integrate correctly — always rehearse the full flow together.'],
-  },
-  {
-    id: 'github-pr-workflow', category: 'github', title: 'GitHub PR Workflow',
-    summary: 'use for PR lifecycle work.',
-    trigger: 'creating, updating, or merging pull requests.',
-    procedure: [
-      'Confirm the branch is up to date with its base before opening/updating a PR.',
-      'Write a PR description explaining why the change was made, with a test plan.',
-      'Do not merge your own PR unless explicitly instructed; wait for required review/checks.',
-    ],
-    verification: ['PR description includes a test plan; required CI checks are green before merge.'],
-    fullNotes: ['Keep PRs scoped to one logical change — large mixed-purpose PRs are harder to review and revert.'],
-  },
-  {
-    id: 'github-code-review', category: 'github', title: 'GitHub Code Review',
-    summary: 'use when reviewing a GitHub pull request.',
-    trigger: 'reviewing a GitHub pull request.',
-    procedure: [
-      'Read the PR description and linked issue for intent before reading the diff.',
-      'Review every changed file, not just the ones with the largest diff.',
-      'Distinguish must-fix comments from optional suggestions explicitly.',
-    ],
-    verification: ['Every must-fix comment is either resolved or explicitly acknowledged before approval.'],
-    fullNotes: ['A review that only checks style misses correctness/security issues — prioritize correctness and security first.'],
-  },
-  {
-    id: 'conventional-commit', category: 'github', title: 'Conventional Commit',
-    summary: 'use when generating or reviewing commit messages from Git changes.',
-    trigger: 'generating, reviewing, or preparing a commit message from current Git changes.',
-    procedure: [
-      'Capture a fresh baseline with `git status --short --branch`; inspect staged changes first, then unstaged changes only if nothing is staged.',
-      'Never stage, commit, push, reset, checkout, or run destructive Git commands unless the user explicitly requested that action.',
-      'Run configured project quality checks when safe and available; if formatting/checks change files, re-inspect the diff before writing the message.',
-      'Stop and warn if the diff includes secrets, `.env` files, private keys, production config, migrations, or unrelated concerns that should be split.',
-      'Choose the Conventional Commit type and scope from the actual diff; prefer business/product scopes over technical scopes.',
-      'Write an imperative subject under 72 characters and body bullets in past tense, describing outcomes rather than filenames.',
-    ],
-    verification: ['Git diff/status were inspected immediately before the message; the message describes only actual diff content and calls out secrets/unrelated work instead of hiding it.'],
-    fullNotes: ['Prefer staged changes when any are staged. If only unstaged changes exist, say that nothing is staged.', 'Generated artifacts should not dominate the message; summarize the source change that caused them.', 'If the user asks for the exact commit command, prefer explicit paths over `git add .` when possible.'],
-  },
-  {
-    id: 'github-actions-verification', category: 'github', title: 'GitHub Actions Verification',
-    summary: 'use when adding/changing GitHub Actions workflows.',
-    trigger: 'adding or changing GitHub Actions workflows.',
-    procedure: [
-      'Confirm the workflow triggers (on:) match the intended events; overly broad triggers waste CI minutes and can create races.',
-      'Pin third-party actions to a commit SHA or trusted version tag, not a mutable branch ref.',
-      'Verify secrets used in the workflow are scoped to what the job actually needs.',
-    ],
-    verification: ['Workflow run succeeds on the intended trigger and does not expose secrets in logs.'],
-    fullNotes: ['Never disable a security-relevant CI check (e.g. a required status check) to unblock a merge without explicit approval.'],
-  },
-];
-
-const SKILL_BY_ID: Record<string, SkillDefinition> = Object.fromEntries(SKILL_CATALOG.map((s) => [s.id, s]));
-const SKILL_CATEGORIES: SkillCategory[] = ['core', 'frontend', 'backend', 'fullstack', 'github'];
-
 function skillRelPath(skill: SkillDefinition) {
   return `.agentos/skills/${skill.category}/${skill.id}/SKILL.md`;
-}
-
-function renderSkillTemplate(skill: SkillDefinition, mode: 'summary' | 'full') {
-  const procedure = mode === 'full' ? skill.procedure : skill.procedure.slice(0, 3);
-  const lines = [
-    '---',
-    `name: ${skill.id}`,
-    `category: ${skill.category}`,
-    `mode: ${mode}`,
-    '---',
-    '',
-    `# ${skill.title}`,
-    '',
-    `Trigger: Use when ${skill.trigger}`,
-    '',
-    '## Procedure',
-    '',
-    ...procedure.map((step, i) => `${i + 1}. ${step}`),
-    '',
-    '## Verification',
-    '',
-    ...skill.verification.map((v) => `- ${v}`),
-  ];
-  if (mode === 'full' && skill.fullNotes.length) {
-    lines.push('', '## Notes', '', ...skill.fullNotes.map((n) => `- ${n}`));
-  }
-  lines.push('');
-  return lines.join('\n');
 }
 
 function resolveRequestedSkillIds(options, repos, hasGit) {
@@ -2942,15 +2610,6 @@ function productMd({ projectName }) { return `# Product\n\nProject: ${projectNam
 function architectureMd() { return '# Architecture\n\nDefine stack, boundaries, data model, and deployment before scaffolding code.\n'; }
 function runsReadmeMd() { return '# Runs\n\nStore per-task briefs, results, verification logs, and diff summaries here.\n'; }
 
-const AGENT_DEFINITIONS = {
-  implementation: { id: 'implementation', mandate: 'Own implementation work inside the declared repo/file scope.' },
-  'frontend-engineer': { id: 'frontend-engineer', mandate: 'Own frontend implementation within declared frontend repo scope.' },
-  'backend-engineer': { id: 'backend-engineer', mandate: 'Own backend implementation within declared backend repo scope.' },
-  qa: { id: 'qa', mandate: 'Verify changed behavior with real commands and browser checks when UI is touched.' },
-  'code-reviewer': { id: 'code-reviewer', mandate: 'Review diffs for correctness, security, scope, and project consistency.' },
-  'release-manager': { id: 'release-manager', mandate: 'Coordinate commit, push, merge, and release mechanics after verification and approval.' },
-  'project-manager': { id: 'project-manager', mandate: 'Break down coding/product requests into scoped, dependency-aware implementation plans before specialist agents edit files.', planningOnly: true },
-};
 
 const MINIMAL_AGENT_IDS = ['implementation', 'qa', 'code-reviewer', 'release-manager'];
 
@@ -3050,13 +2709,10 @@ function agentConfigObject(agentSelection) {
 }
 
 function agentMd(agent) {
-  if (agent.id === 'project-manager') return projectManagerAgentMd();
+  if (agent.content) return agent.content;
   return `# ${title(agent.id)}\n\nMandate: ${agent.mandate}\n\n## Responsibilities in\n\n- Work only inside declared task scope.\n- Read AgentOS project, memory, handoff, and tasks first; then load only relevant skills, repo, role, and engine context.\n- Report files changed, verification run, failures, and next action before stopping.\n\n## Responsibilities out\n\n- Do not touch secrets, .env files, production config, migrations, or unrelated repos without explicit approval.\n- Do not commit or push unless explicitly assigned.\n\n## Skills\n\nUse .agentos/skills.md as an on-demand index. Load only skills relevant to this role and task.\n`;
 }
 
-function projectManagerAgentMd() {
-  return `# Project Manager\n\nMandate: Break down coding/product requests into scoped, dependency-aware implementation plans before specialist agents edit files.\n\nThis is a planning-only role. The project-manager agent does not implement, commit, or push.\n\n## Responsibilities in\n\n- Read AgentOS project, memory, handoff, and tasks first; then load only relevant skills, repo, and role context.\n- For each incoming request, produce a plan that declares:\n  - Repo scope: which repo(s) the work touches.\n  - Protected paths: files/areas that must not be touched (secrets, .env, migrations, prod config) without explicit approval.\n  - Dependencies: ordering between plan steps and any cross-repo dependencies.\n  - Role assignment: which agent role (implementation, frontend-engineer, backend-engineer, qa, code-reviewer, release-manager) owns each step.\n  - Acceptance: what "done" means for each step.\n  - Verification: the exact commands/checks that must pass before a step is considered complete.\n- Hand the plan to the assigned specialist agent(s) before any file is edited.\n\n## Responsibilities out\n\n- Do not implement, edit application/source files, commit, or push.\n- Do not touch secrets, .env files, production config, or migrations.\n\n## Skills\n\nUse .agentos/skills.md as an on-demand index. Load only skills relevant to planning and scoping.\n`;
-}
 function defaultEngines() { return ['claude-code', 'codex', 'opencode', 'hermes', 'chatgpt'].map((id) => ({ id })); }
 function engineMd(engine) { return `# ${title(engine.id)} Adapter\n\nRead AGENTS.md + .agentos context first. Before stopping: handoff current state, files changed, tests, failures, next action.\n`; }
 function repoMd(repo) { return `# ${title(repo.name)} Repo\n\nPath: \`${repo.path}\`; type: ${repo.type}; framework: ${repo.framework}; package manager: ${repo.packageManager}.\nCommands: dev=\`${repo.devCommand || repo.commands?.dev_command || 'unknown'}\`; build=\`${repo.buildCommand || repo.commands?.build_command || 'unknown'}\`; test=\`${repo.testCommand || repo.commands?.test_command || 'unknown'}\`${repo.testE2eCommand ? `; e2e=\`${repo.testE2eCommand}\`` : ''}${repo.generateCommand ? `; generate=\`${repo.generateCommand}\`` : ''}${repo.previewCommand ? `; preview=\`${repo.previewCommand}\`` : ''}.\nScope: edit only when task includes \`${repo.name}\`.\n`; }

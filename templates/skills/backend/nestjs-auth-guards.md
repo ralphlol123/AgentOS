@@ -1,13 +1,13 @@
 ---
-name: github-actions-verification
-category: github
+name: nestjs-auth-guards
+category: backend
 mode: full
-summary: "use when adding/changing GitHub Actions workflows."
+summary: "use for NestJS auth/permission/guard work."
 ---
 
-# GitHub Actions Verification
+# NestJS Auth Guards
 
-Trigger: Use when adding or changing GitHub Actions workflows.
+Trigger: Use when NestJS auth/permission/guard work.
 
 ## Scope and safety
 
@@ -17,16 +17,17 @@ Trigger: Use when adding or changing GitHub Actions workflows.
 
 ## Procedure
 
-1. Confirm the workflow triggers (on:) match the intended events; overly broad triggers waste CI minutes and can create races.
-2. Pin third-party actions to a commit SHA or trusted version tag, not a mutable branch ref.
-3. Verify secrets used in the workflow are scoped to what the job actually needs.
+1. Identify exactly which routes/resources the change affects and what identity/role model applies.
+2. Implement authorization checks in guards/decorators, not scattered inline checks in controllers.
+3. Fail closed: default to denying access when a check cannot be evaluated.
+4. Add a test for both an authorized and an unauthorized request.
 
 ## Verification
 
 - Real command/check output is captured before declaring success; report failures, skipped checks, and blockers honestly.
 - No out-of-scope files, secrets, production config, or migrations were touched without explicit approval.
-- Workflow run succeeds on the intended trigger and does not expose secrets in logs.
+- An authorized request succeeds and an unauthorized request is rejected with the correct status code.
 
 ## Notes
 
-- Never disable a security-relevant CI check (e.g. a required status check) to unblock a merge without explicit approval.
+- Treat auth/permission code as security-sensitive: prefer explicit allow-lists over implicit deny-by-omission.

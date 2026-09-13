@@ -1,13 +1,13 @@
 ---
-name: github-actions-verification
-category: github
+name: nuxt-e2e-testing
+category: frontend
 mode: full
-summary: "use when adding/changing GitHub Actions workflows."
+summary: "use for Nuxt route/browser behavior."
 ---
 
-# GitHub Actions Verification
+# Nuxt E2E Testing
 
-Trigger: Use when adding or changing GitHub Actions workflows.
+Trigger: Use when Nuxt route/browser behavior changes.
 
 ## Scope and safety
 
@@ -17,16 +17,17 @@ Trigger: Use when adding or changing GitHub Actions workflows.
 
 ## Procedure
 
-1. Confirm the workflow triggers (on:) match the intended events; overly broad triggers waste CI minutes and can create races.
-2. Pin third-party actions to a commit SHA or trusted version tag, not a mutable branch ref.
-3. Verify secrets used in the workflow are scoped to what the job actually needs.
+1. Start the Nuxt dev/preview server.
+2. Exercise the changed route/component through real navigation and interaction, not just unit tests.
+3. Check network requests and console for errors during the flow.
+4. Run the project e2e test command if one is configured.
 
 ## Verification
 
 - Real command/check output is captured before declaring success; report failures, skipped checks, and blockers honestly.
 - No out-of-scope files, secrets, production config, or migrations were touched without explicit approval.
-- Workflow run succeeds on the intended trigger and does not expose secrets in logs.
+- Manual or automated e2e pass on the changed route with no console/network errors.
 
 ## Notes
 
-- Never disable a security-relevant CI check (e.g. a required status check) to unblock a merge without explicit approval.
+- Prefer testing the golden path plus at least one edge case (empty state, error state) over the golden path alone.

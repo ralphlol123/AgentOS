@@ -1,13 +1,19 @@
 ---
 name: conventional-commit
 category: github
-mode: summary
-source: built-in-agentos-template
+mode: full
+summary: use when generating or reviewing commit messages from Git changes.
 ---
 
 # Conventional Commit
 
 Trigger: Use when generating, reviewing, or preparing a commit message from current Git changes.
+
+## Scope and safety
+
+- Read AgentOS project, memory, handoff, and tasks first. Confirm this skill is relevant to the assigned role and task; load only relevant repo/engine context.
+- Declare repo scope and protected paths. Use the project-specific verification commands from `.agentos/project.yaml` and the relevant repo notes; do not invent missing commands.
+- Do not touch secrets, `.env`, production config, migrations, deployments, or unrelated work without explicit approval. Do not stage, commit, push, or merge unless explicitly assigned.
 
 ## Procedure
 
@@ -25,6 +31,8 @@ Trigger: Use when generating, reviewing, or preparing a commit message from curr
 
 ## Verification
 
+- Real command/check output is captured before declaring success; report failures, skipped checks, and blockers honestly.
+- No out-of-scope files, secrets, production config, or migrations were touched without explicit approval.
 - Git diff/status were inspected immediately before producing the message.
 - The recommended message only describes changes present in the actual diff.
 - Sensitive files, secrets, generated artifacts, and unrelated changes were called out instead of silently folded into the message.
@@ -51,5 +59,7 @@ git commit -m "<type>(<scope>): <summary>" \
 ```
 
 ## Notes
+
+- Generated artifacts should not dominate the message; summarize the source change that caused them.
 
 This is a generalized version of Ralph's KargaX commit-message workflow. Project-local copies may add domain-specific scope priorities, package-manager commands, or repository-specific quality gates.

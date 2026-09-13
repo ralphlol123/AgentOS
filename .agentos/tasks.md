@@ -1,5 +1,7 @@
 # Tasks
 
+Active scope: catalog cleanup slice 1 in `/home/hermes/agentos-catalog-cleanup` on `feat/catalog-cleanup`. Earlier milestones and follow-ups below are historical, not authorization to edit client workspaces or resume other tasks.
+
 ## Done
 
 - [x] Engine Run Handoff Notes first implementation completed on `feat/engine-run-handoff-notes`: `agentos run handoff`, grounded handoff notes, state updates, docs, and tests.
@@ -25,7 +27,10 @@
 
 ## Now
 
-- [ ] Merge the Task 3 PR after GitHub checks and human review.
+- [x] Implement slice 1 only: canonical package-owned templates, complete summary/full workflows, matching add/copy/init role contracts, public ID/path preservation, custom-card safeguards, and test-first parity regressions.
+- [x] Verify build/check, 260 full tests, disposable CLI smoke, existing npm/pnpm/Bun packaged regression checks, and diff whitespace.
+- [ ] Independent review of slice 1. No commit/push/merge/publish; no client rollout.
+- [ ] After review passes, proceed sequentially with approved slices 2–5 (skill consolidation, agent consolidation, aliases/safe migration, self-install/packed acceptance). None of these later slices is implemented here.
 
 ## Next
 

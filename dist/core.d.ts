@@ -211,7 +211,7 @@ export declare function templatesAgentOS(options?: any): Promise<{
 } | {
     ok: boolean;
     root: any;
-    entries: any[];
+    entries: readonly import("./catalog.js").TemplateEntry[];
     text: string;
 } | {
     ok: boolean;
@@ -221,7 +221,7 @@ export declare function templatesAgentOS(options?: any): Promise<{
 } | {
     ok: boolean;
     root: any;
-    entry: any;
+    entry: import("./catalog.js").TemplateEntry;
     text: string;
 } | {
     ok: boolean;
