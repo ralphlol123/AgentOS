@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, readdir, writeFile, stat } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, writeFile, stat, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -592,7 +592,7 @@ test('doctor --json CLI prints parseable JSON only', async () => {
   const parsed = JSON.parse(result.stdout);
   assert.equal(parsed.ok, true);
   assert.equal(parsed.status, 'OK');
-  assert.equal(parsed.root, root);
+  assert.equal(parsed.root, await realpath(root));
   assert.ok(Array.isArray(parsed.problems));
   assert.ok(Array.isArray(parsed.warnings));
   assert.ok(Array.isArray(parsed.diagnostics));
