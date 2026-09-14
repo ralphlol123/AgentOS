@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile, readdir, lstat, symlink, rm, readlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { initAgentOS, doctorAgentOS, linkObsidianAgentOS, obsidianAgentOS, skillsAgentOS, templatesAgentOS, compactAgentOS, agentsAgentOS, migrateClaudeAgentOS } from '../dist/core.js';
+import { initAgentOS, doctorAgentOS, linkObsidianAgentOS, obsidianAgentOS, skillsAgentOS, templatesAgentOS, compactAgentOS, agentsAgentOS, migrateClaudeAgentOS, normalizeRepoIdsAgentOS } from '../dist/core.js';
 
 async function snapshot(dir) {
   const result = {};
@@ -41,6 +41,7 @@ test('boundary: symlinked managed targets fail before writes or deletions', asyn
     ['.agentos/agents', root => agentsAgentOS({ cwd: root, add: 'planner' })],
     ['.agentos/skills.md', root => templatesAgentOS({ cwd: root, command: 'copy', id: 'skill:core/debugging', replace: true })],
     ['.agentos/runs', root => compactAgentOS({ cwd: root })],
+    ['.agentos/repos', root => normalizeRepoIdsAgentOS({ cwd: root })],
     ['AGENTS.md', root => doctorAgentOS({ cwd: root, fix: true })],
   ];
   for (const [target, action] of cases) {

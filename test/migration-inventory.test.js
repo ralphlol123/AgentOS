@@ -19,6 +19,11 @@ import { initAgentOS, doctorAgentOS, adaptersAgentOS } from '../dist/core.js';
 
 const MANAGED_START = '<!-- agentos:managed:start -->';
 
+// A config that still fails strict validation: two repository IDs normalize to
+// the same canonical ID, which AgentOS cannot resolve on its own. Used wherever
+// a test needs "the config is genuinely invalid".
+const COLLIDING_PROJECT = 'repos:\n  frontend_client:\n    path: .\n  frontend-client:\n    path: .\n';
+
 // Historical generated card shape (phase-1 agent-profile body for `qa`),
 // copied verbatim from test/aliases-and-migration.test.js which took it from
 // git history. Byte-matched retired cards are the only ones cleanup may touch.
@@ -128,7 +133,7 @@ test('doctor --json flags a custom-content adapter that interleaves custom text 
   assert.ok(result.problems.some((problem) => /AGENTS\.md adapter ownership is ambiguous/.test(problem)));
 });
 
-test('doctor --json flags unsafe repository IDs even when project.yaml fails strict validation', async t => {
+test('doctor --json reports a normalizable repo ID as a fixable problem and keeps colliding IDs fatal', async t => {
   const root = await workspace(t);
   const projectPath = join(root, '.agentos/project.yaml');
   const project = await readFile(projectPath, 'utf8');
@@ -138,12 +143,19 @@ test('doctor --json flags unsafe repository IDs even when project.yaml fails str
 
   const result = await doctorAgentOS({ cwd: root, json: true });
 
-  assert.ok(result.problems.some((problem) => /Unsafe repository ID: frontend_client/.test(problem)), 'strict validation still fails closed');
+  assert.ok(result.problems.some((problem) => /Unsafe repository ID 'frontend_client'/.test(problem)), 'the ID is reported, not thrown');
+  assert.ok(result.migration.adapters.length >= 3, 'the config parses, so the rest of doctor still runs');
   const entry = result.migration.repoIds.find((repo) => repo.from === 'frontend_client');
   assert.ok(entry, 'unsafe repo id must be reported in the migration inventory');
   assert.equal(entry.to, 'frontend-client');
   assert.equal(entry.collides, false);
   assert.match(entry.next, /project\.yaml/);
+
+  // Two IDs that normalize to the same canonical ID stay unmigratable.
+  await writeFile(projectPath, 'repos:\n  frontend_client:\n    path: .\n  frontend-client:\n    path: .\n');
+  const collision = await doctorAgentOS({ cwd: root, json: true });
+  assert.ok(collision.problems.some((problem) => /collide after normalization/.test(problem)), 'collisions remain a hard config error');
+  assert.equal(collision.migration.adapters.length, 0, 'an invalid config still skips adapter diagnostics');
 });
 
 test('doctor --json classifies retired cards by eligibility and ignores live cards', async t => {
@@ -217,7 +229,7 @@ test('adapters explain reports structural detail for a workspace whose project.y
   const root = await workspace(t);
   await writeFile(join(root, 'AGENTS.md'), INTERLEAVED_ADAPTER);
   const projectPath = join(root, '.agentos/project.yaml');
-  await writeFile(projectPath, 'repos:\n  frontend_client:\n    path: .\n');
+  await writeFile(projectPath, COLLIDING_PROJECT);
 
   const explained = await adaptersAgentOS({ cwd: root, explain: 'AGENTS.md' });
   assert.equal(explained.ok, true, 'explain must still work when config cannot be parsed');
@@ -225,7 +237,7 @@ test('adapters explain reports structural detail for a workspace whose project.y
   assert.match(explained.text, /not an AgentOS adapter target|canonical section unavailable/i);
 
   const doctor = await doctorAgentOS({ cwd: root, json: true });
-  assert.ok(doctor.problems.some((problem) => /Unsafe repository ID/.test(problem)));
+  assert.ok(doctor.problems.some((problem) => /collide after normalization/.test(problem)));
   assert.ok(doctor.migration.repoIds.some((repo) => repo.from === 'frontend_client'));
 });
 
@@ -261,7 +273,7 @@ test('adapters explain classifies an empty adapter as create, not migrate', asyn
   await writeFile(join(root, 'AGENTS.md'), '');
   // An invalid config forces the structural fallback, where an empty file must
   // still agree with the planner's `create` action.
-  await writeFile(join(root, '.agentos/project.yaml'), 'repos:\n  frontend_client:\n    path: .\n');
+  await writeFile(join(root, '.agentos/project.yaml'), COLLIDING_PROJECT);
 
   const explained = await adaptersAgentOS({ cwd: root, explain: 'AGENTS.md' });
   assert.equal(explained.ok, true);
@@ -273,7 +285,7 @@ test('adapters explain rejects a directory argument instead of claiming it is mi
   const root = await workspace(t);
   // Invalid config skips adapter-target lookup, so the path reaches the
   // filesystem checks directly (the reviewer's original repro).
-  await writeFile(join(root, '.agentos/project.yaml'), 'repos:\n  frontend_client:\n    path: .\n');
+  await writeFile(join(root, '.agentos/project.yaml'), COLLIDING_PROJECT);
   const explained = await adaptersAgentOS({ cwd: root, explain: '.agentos' });
 
   assert.equal(explained.ok, false);

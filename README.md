@@ -74,7 +74,7 @@ agentos adapters explain AGENTS.md
 Three classes, matching the real upgrade pain seen when moving a workspace from an older AgentOS:
 
 - **adapters** — every root and child adapter file with its classification (`create`, `noop`, `update`, `migrate`, `append`, `conflict`), the same pure classification `doctor --fix` uses. A `conflict` (for example custom project knowledge interleaved with a stale bootloader) is reported with its reason and `safe: false`; the inventory never guesses ownership.
-- **repoIds** — repository IDs in `.agentos/project.yaml` that are not lowercase-hyphen safe (e.g. `frontend_client` → `frontend-client`). Because strict validation rejects these during parsing, the inventory reads the mapping leniently instead: the workspace stays blocked for writes until the ID is renamed, but the owner can still *see* the required rename, plus whether the normalized ID would collide with an existing key.
+- **repoIds** — repository IDs in `.agentos/project.yaml` that are not lowercase-hyphen safe (e.g. `frontend_client` → `frontend-client`), with `collides` telling you whether the normalized ID would clash with an existing key. A non-canonical ID is a reported problem, not a parse failure, so the rest of `doctor` still runs; fix it with `agentos doctor --fix --normalize-repo-ids`.
 - **retiredCards** — retired agent/skill cards with their canonical replacement and an eligibility class:
   - `prunable` — bytes match a recognized historical generated body; opt-in cleanup may remove it.
   - `already-canonical` — same, and the canonical card is already installed, so only the stale file remains.
@@ -87,6 +87,22 @@ Three classes, matching the real upgrade pain seen when moving a workspace from 
 When `.agentos/project.yaml` fails validation there is no canonical section for any path, so the classification falls back to marker structure and uses its own vocabulary: `managed-block` (a valid block exists, staleness unknown), `create` (missing or empty), `migrate` (a recognized historical body), `append` (unrelated custom content), and `conflict`. With a valid config, a path that is not an adapter target is refused outright (with the known-target list) rather than classified.
 
 Nothing in the inventory performs a migration. The `doctor --fix` behavior — fail-closed preflight, one-time `.agentos.bak` backups, byte-preserving managed-block updates — is unchanged.
+
+## Repository ID normalization
+
+An ID like `frontend_client` is **normalizable**: `agentos doctor --fix --normalize-repo-ids [--dry-run]` renames it to `frontend-client`, together with its `.agentos/repos/<id>.md` note, and writes an audit note under `.agentos/runs/`.
+
+```bash
+agentos doctor --fix --normalize-repo-ids --dry-run   # show the mapping, write nothing
+agentos doctor --fix --normalize-repo-ids             # apply
+agentos doctor --fix                                  # refresh adapters that named the old ID
+```
+
+- **Never implicit.** `--normalize-repo-ids` only runs together with `--fix`; a plain `doctor --fix` leaves an unsafe ID alone (it reports it instead). With the flag present, the command performs *only* the normalization — it does not also run the rest of `doctor --fix`, so run `agentos doctor --fix` afterwards to refresh adapters.
+- **IDs stay path-safe.** A repository ID becomes the filename `.agentos/repos/<id>.md` and is written into generated cards and child pointers, so an ID that is not a workspace-relative path fragment (`../x`, `a/b`, `a\b`) or that contains anything outside letters, digits, spaces, dots, underscores and hyphens stays a hard configuration error. Those IDs were already fatal before normalization existed; only *non-canonical but safe* IDs like `frontend_client` became migratable.
+- **Byte-preserving.** Only the renamed key's line changes. Comments, key order, quoting, indentation, and every other byte of `project.yaml` are untouched; the repo note is moved with its bytes intact. Renaming is refused (with zero writes) for a flow-style `repos: {…}` mapping or when the key cannot be located exactly once, because that cannot be edited safely line-by-line — the message says to edit by hand. (Duplicate YAML keys never reach that check: the YAML parser rejects the file as malformed first.)
+- **Ambiguity fails closed.** Two IDs that normalize to the same canonical ID (`frontend_client` + `frontend-client`), or a repo that has *both* the old and the canonical note file, is never resolved by guessing: the command refuses and leaves every byte unchanged. Genuinely unmigratable configs still fail strict validation exactly as before — the only change is that a *normalizable* ID no longer bricks config parsing.
+- **One transaction.** The config rewrite, note move, and audit note commit together or not at all.
 
 
 Project-owned context layer for model-agnostic coding agents.
@@ -196,6 +212,7 @@ agentos status
 agentos handoff
 agentos run handoff [--engine name] [--role role] [--repo repo] [--worktree path] [--phase slug] [--reason reason] [--dry-run]
 agentos doctor [--fix] [--json]
+agentos doctor --fix --normalize-repo-ids [--dry-run]
 agentos adapters explain <file>
 agentos compact [--dry-run]
 agentos link-obsidian [--vault <path> --dest <folder> --link <note> --create]

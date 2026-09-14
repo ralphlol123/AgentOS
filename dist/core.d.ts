@@ -65,6 +65,10 @@ export declare function adaptersAgentOS(options?: any): Promise<{
     ok: boolean;
     text: string;
 }>;
+export declare function normalizeRepoIdsAgentOS(options?: any): Promise<{
+    ok: boolean;
+    text: string;
+}>;
 export declare function compactAgentOS(options?: any): Promise<{
     ok: boolean;
     text: string;

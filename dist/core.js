@@ -2190,6 +2190,16 @@ async function doctorAgentOSUnlocked(options = {}) {
             + migration.repoIds.length
             + migration.retiredCards.length,
     };
+    // A non-canonical repository ID is a fixable *problem*, not a parse failure:
+    // it keeps doctor honest (the workspace is not OK yet) while leaving every
+    // other diagnostic - adapter scan, agents, tasks, git state - running, which
+    // is exactly what was impossible while validation threw. Colliding IDs are
+    // reported through the config error above instead, so skip them here.
+    for (const entry of migration.repoIds) {
+        if (entry.collides)
+            continue;
+        problems.push(`Unsafe repository ID '${entry.from}': rename it to '${entry.to}' or run \`agentos doctor --fix --normalize-repo-ids\``);
+    }
     const diagnostics = [];
     for (const note of migrationNotes)
         diagnostics.push(`migrated: ${note}`);
@@ -2695,11 +2705,149 @@ function buildRepoIdInventory(project) {
             to: normalized,
             collides,
             next: collides
-                ? `manual decision required: '${normalized}' already exists in .agentos/project.yaml repos; pick a different ID`
-                : `rename '${id}' to '${normalized}' in .agentos/project.yaml and rename .agentos/repos/${id}.md to .agentos/repos/${normalized}.md (automated normalization lands in a later slice)`,
+                ? `manual decision required: '${normalized}' already exists in .agentos/project.yaml repos; rename one of them by hand`
+                : `run \`agentos doctor --fix --normalize-repo-ids\` (or rename '${id}' to '${normalized}' in .agentos/project.yaml and .agentos/repos/${id}.md by hand)`,
         });
     }
     return entries;
+}
+// Renames one repository key inside the block-style `repos:` mapping by
+// rewriting only that key's line: comments, quoting, key order, indentation and
+// every other byte of project.yaml stay exactly as the user wrote them. Returns
+// null when the mapping is not in a shape this can edit safely (flow style,
+// duplicate key lines, no repos block, zero or multiple matches) - callers
+// report that instead of guessing, because a bad guess here would silently
+// repoint one repo's context at another.
+function renameRepoIdKey(text, from, to) {
+    const lines = text.split('\n');
+    const start = lines.findIndex((line) => /^repos:\s*(#.*)?$/.test(line));
+    if (start < 0)
+        return null;
+    let childIndent = null;
+    const matches = [];
+    for (let i = start + 1; i < lines.length; i++) {
+        const line = lines[i];
+        if (!line.trim() || /^\s*#/.test(line))
+            continue;
+        const indent = /^\s*/.exec(line)[0].length;
+        if (indent === 0)
+            break;
+        if (childIndent === null)
+            childIndent = indent;
+        if (indent !== childIndent)
+            continue;
+        const match = /^(\s*)(?:"([^"]+)"|'([^']+)'|([^:#]+?))(\s*:)(.*)$/.exec(line);
+        if (!match)
+            continue;
+        if ((match[2] ?? match[3] ?? match[4]).trim() !== from)
+            continue;
+        matches.push({ index: i, indent: match[1], colon: match[5], rest: match[6] });
+    }
+    if (matches.length !== 1)
+        return null;
+    const next = lines.slice();
+    const target = matches[0];
+    next[target.index] = `${target.indent}${to}${target.colon}${target.rest}`;
+    return next.join('\n');
+}
+// `doctor --fix --normalize-repo-ids`: rename non-canonical repository IDs to
+// their lowercase-hyphen form (plus their `.agentos/repos/<id>.md` notes) in one
+// transaction, and leave an audit note under `.agentos/runs/`. Every condition
+// that could make a rename ambiguous is planned up front and refuses the whole
+// command with zero writes - a half-renamed workspace would be worse than an
+// unmigrated one.
+async function normalizeRepoIdsUnlocked(options = {}) {
+    const root = await findAgentOSRoot(options.cwd ?? process.cwd());
+    if (!root)
+        return { ok: false, text: 'AgentOS repo ID normalization: FAIL\nNo .agentos directory found here or in parent directories.' };
+    // Same preflight every other mutating command performs: refuse before the
+    // first read/write when a managed path is a symlink out of the workspace. The
+    // repo-note move reads and deletes `.agentos/repos/<id>.md`, so without this
+    // a symlinked directory would let the rename escape the workspace.
+    await assertWorkspaceBoundaries(root);
+    const dryRun = Boolean(options.dryRun);
+    const projectPath = join(root, '.agentos/project.yaml');
+    try {
+        await assertProjectYamlWellFormed(projectPath);
+    }
+    catch (error) {
+        if (error instanceof ProjectConfigError) {
+            return { ok: false, text: `AgentOS repo ID normalization: FAIL\nCannot normalize repository IDs: ${error.message}` };
+        }
+        throw error;
+    }
+    const text = await safeRead(projectPath);
+    const ids = Object.keys(parseProjectYaml(text).repos ?? {});
+    const renames = ids.filter((id) => id !== safeId(id)).map((id) => ({ from: id, to: safeId(id) })).sort((a, b) => a.from.localeCompare(b.from));
+    if (!renames.length)
+        return { ok: true, text: 'AgentOS repo ID normalization: OK\nNo unsafe repository IDs found; nothing to do.' };
+    let stagedText = text;
+    const actions = [];
+    for (const rename of renames) {
+        const fromNote = `.agentos/repos/${rename.from}.md`;
+        const toNote = `.agentos/repos/${rename.to}.md`;
+        const fromExists = await exists(join(root, fromNote));
+        const toExists = await exists(join(root, toNote));
+        if (fromExists && toExists) {
+            return {
+                ok: false,
+                text: [
+                    'AgentOS repo ID normalization: FAIL',
+                    `Refusing to rename '${rename.from}': both ${fromNote} and ${toNote} exist, so AgentOS cannot tell which note belongs to the canonical ID.`,
+                    'Merge or remove one of them by hand, then re-run.',
+                ].join('\n'),
+            };
+        }
+        const nextText = renameRepoIdKey(stagedText, rename.from, rename.to);
+        if (nextText === null) {
+            return {
+                ok: false,
+                text: [
+                    'AgentOS repo ID normalization: FAIL',
+                    `Could not find exactly one standalone '${rename.from}:' key inside the block-style repos mapping in .agentos/project.yaml.`,
+                    `Edit .agentos/project.yaml by hand (flow-style mappings and duplicated key lines cannot be renamed safely), changing '${rename.from}' to '${rename.to}', then re-run.`,
+                ].join('\n'),
+            };
+        }
+        stagedText = nextText;
+        actions.push({ ...rename, fromNote, toNote, moveNote: fromExists, noteBody: fromExists ? await readFile(join(root, fromNote)) : null });
+    }
+    const lines = actions.map((action) => `- ${action.from} -> ${action.to}${action.moveNote ? ` (renames ${action.fromNote} -> ${action.toNote})` : ''}`);
+    if (dryRun) {
+        return { ok: true, text: ['AgentOS repo ID normalization: DRY RUN', `Root: ${root}`, '', ...lines, '', 'No files were written. Re-run without --dry-run to apply.'].join('\n') };
+    }
+    const stamp = new Date().toISOString();
+    const runNoteRel = `.agentos/runs/${stamp.slice(0, 10)}-repo-id-migration.md`;
+    const runNote = [
+        '# Repository ID normalization',
+        '',
+        `Date: ${stamp}`,
+        `Root: ${root}`,
+        'Command: agentos doctor --fix --normalize-repo-ids',
+        `project.yaml before sha256: ${createHash('sha256').update(text).digest('hex')}`,
+        `project.yaml after sha256: ${createHash('sha256').update(stagedText).digest('hex')}`,
+        '',
+        'Renames:',
+        '',
+        ...lines,
+        '',
+        'Follow-up: run `agentos doctor --fix` to refresh adapter files whose generated sections still name the old ID.',
+        '',
+    ].join('\n');
+    await withMutationTransaction(async () => {
+        await writeFileAtomic(projectPath, stagedText);
+        for (const action of actions) {
+            if (!action.moveNote)
+                continue;
+            await writeFileAtomic(join(root, action.toNote), action.noteBody);
+            await removeTracked(join(root, action.fromNote));
+        }
+        await writeFileAtomic(join(root, runNoteRel), runNote);
+    });
+    return {
+        ok: true,
+        text: ['AgentOS repo ID normalization: OK', `Root: ${root}`, '', ...lines, `Run note: ${runNoteRel}`, '', 'Next: run `agentos doctor --fix` to refresh adapter files that named the old ID.'].join('\n'),
+    };
 }
 function skillsMdReferencesRetiredId(text, id) {
     if (!text)
@@ -3654,9 +3802,26 @@ async function assertProjectYamlWellFormed(path) {
     if (parsed.repos !== undefined) {
         if (!parsed.repos || typeof parsed.repos !== 'object' || Array.isArray(parsed.repos))
             throw new ProjectConfigError('repos must be a mapping.');
+        const repoIds = Object.keys(parsed.repos);
         for (const [id, repo] of Object.entries(parsed.repos)) {
-            if (id !== safeId(id))
-                throw new ProjectConfigError(`Unsafe repository ID: ${id}. Use lowercase letters, digits, and hyphens.`);
+            if (!id.trim())
+                throw new ProjectConfigError('repos contains an empty repository ID; give every repository a lowercase-hyphen ID.');
+            // A repository ID is not just a label: it becomes the filename
+            // `.agentos/repos/<id>.md` and is interpolated into generated cards and
+            // child pointers. It must therefore stay a safe relative path fragment
+            // with a conservative character set. This is exactly the protection the
+            // old `id !== safeId(id)` rule provided - an ID like `../../../victim`
+            // used to be fatal and must stay fatal, while a merely non-canonical ID
+            // like `frontend_client` is now normalizable.
+            try {
+                assertRelativeBoundaryPath(id);
+            }
+            catch {
+                throw new ProjectConfigError(`Unsafe repository ID '${id}': IDs must be workspace-relative path fragments (no leading slash, drive letter, backslash, NUL byte, or '..' segment).`);
+            }
+            if (!/^[A-Za-z0-9_.\- ]+$/.test(id)) {
+                throw new ProjectConfigError(`Unsafe repository ID '${id}': IDs may only contain letters, digits, spaces, dots, underscores, and hyphens, because AgentOS writes them into file paths and generated cards.`);
+            }
             if (!repo || typeof repo !== 'object' || Array.isArray(repo))
                 throw new ProjectConfigError(`repos.${id} must be a mapping.`);
             try {
@@ -3666,6 +3831,12 @@ async function assertProjectYamlWellFormed(path) {
                 throw new ProjectConfigError(error.message);
             }
         }
+        // A non-canonical ID (`frontend_client`) is *normalizable*, not fatal: it is
+        // reported as a fixable problem by `doctor` and renamed by
+        // `doctor --fix --normalize-repo-ids`. Only a genuine ambiguity stays a hard
+        // error, because AgentOS cannot decide which key keeps the canonical name.
+        for (const collision of repoIdCollisions(repoIds))
+            throw new ProjectConfigError(collision);
     }
 }
 function dumpProjectYaml(data) {
@@ -3681,6 +3852,22 @@ function oneLine(text, max = 700) {
 }
 function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 function safeId(s) { return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'project'; }
+// Two repository IDs that differ only in case or punctuation (`frontend_client`
+// vs `frontend-client`) would collide once normalized. That is not something
+// AgentOS may resolve on its own - guessing which key keeps the canonical name
+// could silently point one repo's context at another - so it stays a hard
+// configuration error and is reported as such by `doctor`.
+function repoIdCollisions(ids) {
+    const byCanonical = new Map();
+    for (const id of ids) {
+        const canonical = safeId(id);
+        byCanonical.set(canonical, [...(byCanonical.get(canonical) ?? []), id]);
+    }
+    return [...byCanonical.entries()]
+        .filter(([, group]) => group.length > 1)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([canonical, group]) => `Unsafe repository IDs collide after normalization: ${group.map((id) => `'${id}'`).join(', ')} all normalize to '${canonical}'; rename one of them by hand, then re-run.`);
+}
 function title(s) { return s.split('-').map((p) => p[0]?.toUpperCase() + p.slice(1)).join(' '); }
 function plannedFiles(mode, workspaceKind, repos) { return [...REQUIRED_FILES, '.agentos/skills.md', '.agentos/runs/README.md', '.hermes.md', ...(mode === 'new' ? ['.agentos/product.md', '.agentos/architecture.md'] : [])]; }
 function renderDryRun({ cwd, mode, workspaceKind, repos, agentSelection }) {
@@ -3748,6 +3935,13 @@ export async function adaptersAgentOS(options = {}) {
     if (!options.explain)
         return { ok: false, text: 'Usage: agentos adapters explain <file>' };
     return explainAdapterAgentOS(options.explain, options);
+}
+// Opt-in migration: never runs as part of a plain `doctor --fix`, and a dry run
+// takes no lock because it writes nothing.
+export async function normalizeRepoIdsAgentOS(options = {}) {
+    const root = await findAgentOSRoot(options.cwd ?? process.cwd());
+    const action = () => normalizeRepoIdsUnlocked(options);
+    return root && !options.dryRun ? withWorkspaceWriter(root, action) : action();
 }
 export async function compactAgentOS(options = {}) {
     const root = await findAgentOSRoot(options.cwd ?? process.cwd());
