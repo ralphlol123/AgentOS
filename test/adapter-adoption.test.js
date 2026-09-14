@@ -88,6 +88,7 @@ test('an interleaved custom adapter is classified for adoption, not as an owners
 
   assert.equal(entry.classification, 'adopt', `expected adopt, got ${entry.classification}`);
   assert.equal(entry.requiresOptIn, true);
+  assert.equal(entry.safe, false, 'a consumer must not treat an adopt entry as safe to apply by default');
   assert.ok(result.problems.some((problem) => /adopt-custom-adapters/.test(problem)), 'doctor must name the opt-in flag');
   assert.ok(result.problems.some((problem) => /AGENTS\.md/.test(problem)), 'doctor must name the file');
   assert.equal(await readFile(join(root, 'AGENTS.md'), 'utf8'), original, 'reporting must not write');
@@ -121,6 +122,17 @@ test('doctor --fix --dry-run previews the adoption plan without writing', async 
   assert.match(alsoWithFlag.text, /bytes \d+-\d+/, 'the preview must show the legacy byte span');
   assert.equal(await readFile(join(root, 'AGENTS.md'), 'utf8'), original, 'a preview must not write');
   assert.equal(await exists(join(root, 'AGENTS.md.agentos.bak')), false);
+});
+
+test('an opt-in migration without --fix is a usage error, not a silent no-op', async t => {
+  const root = await workspace(t);
+  await writeFile(join(root, 'AGENTS.md'), interleaved());
+
+  const result = await doctorAgentOS({ cwd: root, adoptCustomAdapters: true, json: true });
+
+  assert.equal(result.ok, false);
+  assert.ok(result.problems.some((problem) => /require --fix/.test(problem)), `expected a usage problem, got: ${result.problems.join(' | ')}`);
+  assert.equal(await readFile(join(root, 'AGENTS.md'), 'utf8'), interleaved(), 'nothing may be written');
 });
 
 test('opting in replaces only the legacy section and preserves every custom byte', async t => {

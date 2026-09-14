@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { promisify } from 'node:util';
-import { initAgentOS, doctorAgentOS } from '../dist/core.js';
+import { initAgentOS, doctorAgentOS, __setAtomicWriteFaultForTests, __clearAtomicWriteFaultForTests } from '../dist/core.js';
 
 // Slice 4: retired-card cleanup completion.
 //
@@ -143,6 +143,45 @@ test('pruning is idempotent', async t => {
 
   assert.equal(await readFile(join(root, '.agentos/skills.md'), 'utf8'), indexAfterFirst);
   assert.equal(second.diagnostics.some((note) => /prune|retired skill card/.test(note)), false, 'nothing left to prune');
+});
+
+// Regression for the review finding on slice 4: pruning deleted the card and
+// only then tracked the emptied directory, so the transaction snapshot recorded
+// an empty directory - a later failure rolled the card away for good.
+test('a failure after pruning restores the removed card instead of losing it', async t => {
+  const root = await workspace(t);
+  await installCard(root, 'core', 'systematic-debugging', HISTORICAL_SUMMARY_CARD);
+  // Poisoning the index guarantees a skills.md write after the removal, so the
+  // injected fault lands once the card is already gone.
+  await poisonSkillsIndex(root, ['systematic-debugging']);
+  const cardPath = join(root, '.agentos/skills/core/systematic-debugging/SKILL.md');
+
+  __setAtomicWriteFaultForTests(join(root, '.agentos/skills.md'), 'before-rename');
+  try {
+    await doctorAgentOS({ cwd: root, fix: true, pruneRetired: true, json: true }).catch(() => {});
+  } finally {
+    __clearAtomicWriteFaultForTests();
+  }
+
+  assert.equal(await exists(cardPath), true, 'rollback must restore the pruned card');
+  assert.equal(await readFile(cardPath, 'utf8'), HISTORICAL_SUMMARY_CARD, 'and byte-for-byte');
+});
+
+test('a dry run with --prune-retired lists what it would remove and writes nothing', async t => {
+  const root = await workspace(t);
+  await installCard(root, 'core', 'systematic-debugging', HISTORICAL_SUMMARY_CARD);
+  await installCard(root, 'frontend', 'ai-slop-design-review', CUSTOMIZED_SKILL_CARD);
+  const cardPath = join(root, '.agentos/skills/core/systematic-debugging/SKILL.md');
+  const before = await readFile(cardPath, 'utf8');
+
+  const preview = await doctorAgentOS({ cwd: root, fix: true, dryRun: true, pruneRetired: true, json: true });
+
+  assert.equal(preview.dry_run, true);
+  assert.match(preview.text, /Retired cards: 1 would be pruned, 1 left for manual review/);
+  assert.equal(preview.summary.retired_prune_count, 1, 'the provably historical card is the only one counted');
+  assert.equal(preview.retired_cards.would_prune[0].id, 'systematic-debugging');
+  assert.equal(preview.retired_cards.manual_review[0].id, 'ai-slop-design-review');
+  assert.equal(await readFile(cardPath, 'utf8'), before, 'a preview must not remove anything');
 });
 
 test('CLI requires --fix alongside --prune-retired', async t => {

@@ -715,7 +715,10 @@ async function planAdapterReconciliation(path, section) {
         // carried over verbatim, and the block uses the file's own newline style.
         const before = content.slice(0, classification.startIdx);
         const after = content.slice(classification.endIdx);
-        const suffix = after.startsWith(nl) ? after : `${nl}${after}`;
+        // Nothing after the span means nothing to separate: a file that ended
+        // without a trailing newline must still end that way, so that literally
+        // only the matched span changes.
+        const suffix = after === '' ? '' : (after.startsWith(nl) ? after : `${nl}${after}`);
         return {
             action: 'adopt',
             content: `${before}${buildManagedBlockText(section, nl)}${suffix}`,
@@ -829,8 +832,8 @@ async function applyAdapterPlans(plans) {
 // Test-only: exercises the plan/apply split directly so a test can prove the
 // apply phase honors a precomputed plan even if the file changes underneath
 // it afterward, instead of rereading/reclassifying at write time.
-export async function __planAdapterFilesForTests(targets) {
-    return planAdapterFiles(targets);
+export async function __planAdapterFilesForTests(targets, options = {}) {
+    return planAdapterFiles(targets, options);
 }
 export async function __applyAdapterPlansForTests(plans) {
     return applyAdapterPlans(plans);
@@ -2140,8 +2143,24 @@ async function doctorAgentOSUnlocked(options = {}) {
     // would do to each adapter file - including which files would be adopted -
     // computed with the same pure planner the real fix uses.
     if (options.fix && options.dryRun) {
-        const preview = await previewAdapterPlans(root, { adoptCustomAdapters: Boolean(options.adoptCustomAdapters) });
+        const preview = await previewAdapterPlans(root, {
+            adoptCustomAdapters: Boolean(options.adoptCustomAdapters),
+            pruneRetired: Boolean(options.pruneRetired),
+        });
         return options.json ? withJsonText(preview) : preview;
+    }
+    // Migrations are never implicit, including for library callers: asking for an
+    // opt-in migration without `fix` is a usage error, not a silent no-op.
+    if (!options.fix && (options.adoptCustomAdapters || options.pruneRetired)) {
+        const requested = [options.adoptCustomAdapters ? '--adopt-custom-adapters' : null, options.pruneRetired ? '--prune-retired' : null].filter(Boolean).join(' and ');
+        return doctorResult({
+            root,
+            fix: false,
+            problems: [`${requested} require --fix; migrations never run implicitly.`],
+            warnings: [],
+            diagnostics: [],
+            migration: emptyMigrationInventory(),
+        });
     }
     const projectPath = join(root, '.agentos/project.yaml');
     let projectConfigError = null;
@@ -2776,10 +2795,25 @@ async function fixLegacyCatalogState(root, options = {}) {
                 actions.push(`left customized retired skill card ${entry.relPath} untouched (review by hand; canonical skill is '${canonical}')`);
                 continue;
             }
-            await removeTracked(entry.abs);
             const cardDir = dirname(entry.abs);
+            let siblings = [];
             try {
-                if ((await readdir(cardDir)).length === 0)
+                siblings = await readdir(cardDir);
+            }
+            catch { }
+            // Order matters: when the card is the directory's only entry, track the
+            // *directory* while it still contains the card. The mutation transaction
+            // widens to a broader path by replacing the narrower snapshot it holds, so
+            // deleting the file first and then tracking the (now empty) directory
+            // would record an empty directory - a later failure in the same
+            // transaction would then roll the directory back empty and the card would
+            // be gone for good.
+            if (siblings.every((name) => name === basename(entry.abs)))
+                await removeTracked(cardDir);
+            else
+                await removeTracked(entry.abs);
+            try {
+                if ((await readdir(cardDir)).length === 0 && await exists(cardDir))
                     await removeTracked(cardDir);
             }
             catch { }
@@ -2835,7 +2869,11 @@ function adapterInventoryEntry(root, target, plan) {
         label: target.label,
         path,
         classification: plan.action,
-        safe: plan.action !== 'conflict',
+        // `safe` means "AgentOS can classify this unambiguously AND a default
+        // `doctor --fix` would be allowed to apply it". `adopt` is deliberately not
+        // safe by that definition: the file also holds hand-written content, so a
+        // consumer must check requiresOptIn before acting.
+        safe: plan.action !== 'conflict' && plan.action !== 'adopt',
         ...(plan.action === 'conflict' ? { reason: plan.reason } : {}),
         ...(plan.action === 'adopt' ? { requiresOptIn: true, legacySpan: plan.legacySpan } : {}),
         next: MIGRATION_NEXT[plan.action] ?? 'review manually',
@@ -3153,6 +3191,9 @@ async function previewAdapterPlans(root, options = {}) {
     const project = await safeRead(join(root, projectRel));
     const policy = adapterPolicy(project);
     const allRepos = parseReposFromProjectYaml(project, { includeRoot: true });
+    // Same repo-level preflight the real fix performs, so the preview cannot
+    // advertise a child adapter the repair would refuse to touch.
+    await assertRepoBoundaries(root, allRepos);
     const workspaceKind = firstYamlValue(project, 'workspace_kind') ?? 'unknown';
     const targets = [
         ...rootAdapterTargets(root, workspaceKind, allRepos),
@@ -3182,17 +3223,25 @@ async function previewAdapterPlans(root, options = {}) {
         const reason = entry.reason ? ` — ${entry.reason}` : '';
         return `- ${entry.label}: ${entry.classification}${span}${reason}`;
     });
+    // Retired-card pruning is part of the same repair, so a preview that omitted
+    // it would misdescribe what `doctor --fix --prune-retired` is about to do.
+    const retired = options.pruneRetired ? await buildRetiredCardInventory(root) : [];
+    const wouldPrune = retired.filter((card) => card.eligibility === 'prunable' || card.eligibility === 'already-canonical');
+    const wouldKeep = retired.filter((card) => card.eligibility !== 'prunable' && card.eligibility !== 'already-canonical');
     return {
         ok: true,
         dry_run: true,
         root,
         fix: true,
         adopt_custom_adapters: Boolean(options.adoptCustomAdapters),
+        prune_retired: Boolean(options.pruneRetired),
         adapters: entries,
+        retired_cards: { would_prune: wouldPrune, manual_review: wouldKeep },
         summary: {
             adapter_count: entries.length,
             adopt_count: adoptable.length,
             conflict_count: entries.filter((entry) => entry.classification === 'conflict').length,
+            retired_prune_count: wouldPrune.length,
         },
         text: [
             'AgentOS doctor --fix: DRY RUN',
@@ -3200,13 +3249,20 @@ async function previewAdapterPlans(root, options = {}) {
             options.adoptCustomAdapters
                 ? 'Adoption: enabled (--adopt-custom-adapters)'
                 : 'Adoption: not enabled; adoptable files are listed but would not be changed',
+            options.pruneRetired
+                ? `Retired cards: ${wouldPrune.length} would be pruned, ${wouldKeep.length} left for manual review`
+                : 'Retired cards: not enabled; no card would be pruned',
             '',
             ...lines,
             '',
             adoptable.length
                 ? `${adoptable.length} adapter file(s) would have only their legacy AgentOS section replaced; bytes outside that span are preserved and one .agentos.bak is written per file.`
                 : 'No adapter would be adopted.',
-            'No files were written. Re-run without --dry-run to apply.',
+            ...(options.pruneRetired && wouldPrune.length
+                ? [`${wouldPrune.length} provably-generated retired card(s) would be removed: ${wouldPrune.map((card) => card.path || card.id).join(', ')}`]
+                : []),
+            'No files were written.',
+            'This preview covers adapter changes and (with --prune-retired) retired-card pruning. Re-run without --dry-run to apply.',
         ].join('\n'),
     };
 }

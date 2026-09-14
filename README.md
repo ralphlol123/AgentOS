@@ -55,8 +55,9 @@ agentos doctor --fix --adopt-custom-adapters       # adopt, then repair as usual
 ```
 
 - A plain `doctor --fix` still makes **zero** changes when a file needs adoption — it refuses and names the flag, exactly as it does for an ownership conflict.
-- `--adopt-custom-adapters` only runs together with `--fix`, and `--fix --dry-run` prints each file's classification and, for adoptable files, the exact byte span that would be replaced.
+- `--adopt-custom-adapters` only runs together with `--fix` (the same rule is enforced for library callers, not just the CLI), and `--fix --dry-run` prints each file's classification and, for adoptable files, the exact byte span that would be replaced. The preview covers adapter changes and, with `--prune-retired`, retired-card pruning; it is not a preview of every diagnostic `doctor --fix` performs.
 - Only a *single* matching section is adoptable. Two candidate sections, or a section shown inside a fenced code block, stay a conflict — AgentOS never guesses which bytes are its own.
+- Adoption recognizes only the enumerated historical bodies, byte-exact apart from the template placeholders (`Workspace: …`, `Repos: …`, child `name`/`path`) which match a single line each. A hand-written file that reproduces one of those bodies exactly is treated as AgentOS-owned, which is the same rule whole-file recognition has always used.
 
 A marker only counts if it appears as its own standalone line (after stripping a trailing `\r`) outside a fenced code block. Fence tracking follows CommonMark closely enough for this purpose: an opening run of 3+ backticks or tildes only closes on a later run of the *same character* with length *at least* the opener's and only spaces/tabs after it — a shorter run, a different delimiter, a would-be closer with trailing text, or marker text embedded in a longer line is never treated as forming or extending an owned block; its mere presence makes the file a conflict instead. Adapter files must be valid UTF-8; invalid byte sequences fail closed before mutation rather than being decoded and rewritten with replacement characters.
 
@@ -84,7 +85,7 @@ agentos adapters explain AGENTS.md
 
 Three classes, matching the real upgrade pain seen when moving a workspace from an older AgentOS:
 
-- **adapters** — every root and child adapter file with its classification (`create`, `noop`, `update`, `migrate`, `append`, `adopt`, `conflict`), the same pure classification `doctor --fix` uses. `adopt` entries carry `requiresOptIn: true` and the legacy byte span; a `conflict` (two candidate sections, a fenced example, broken markers) is reported with its reason and `safe: false`. The inventory never guesses ownership.
+- **adapters** — every root and child adapter file with its classification (`create`, `noop`, `update`, `migrate`, `append`, `adopt`, `conflict`), the same pure classification `doctor --fix` uses. `safe` means "unambiguous **and** appliable by a default `doctor --fix`", so both `conflict` and `adopt` entries report `safe: false`; an `adopt` entry also carries `requiresOptIn: true` and the legacy byte span. The inventory never guesses ownership.
 - **repoIds** — repository IDs in `.agentos/project.yaml` that are not lowercase-hyphen safe (e.g. `frontend_client` → `frontend-client`), with `collides` telling you whether the normalized ID would clash with an existing key. A non-canonical ID is a reported problem, not a parse failure, so the rest of `doctor` still runs; fix it with `agentos doctor --fix --normalize-repo-ids`.
 - **retiredCards** — retired agent/skill cards with their canonical replacement and an eligibility class:
   - `prunable` — bytes match a body a real AgentOS version installed (agent cards against the enumerated historical shapes, skill cards against `src/legacy-skill-shapes.ts` content hashes); opt-in cleanup may remove it.
@@ -108,6 +109,7 @@ When a card's ID is retired (the 0.4.0 catalog consolidation), AgentOS either mi
 
 ```bash
 agentos doctor --fix --prune-retired
+agentos doctor --fix --dry-run --prune-retired   # list the cards it would remove, write nothing
 ```
 
   - Only cards whose bytes hash-match a body AgentOS really installed are removed (see `src/legacy-skill-shapes.ts`, regenerated from this repository's own history). One edited character changes the hash, so a local fork is reported as `manual-review` and never touched.
@@ -238,7 +240,7 @@ agentos status
 agentos handoff
 agentos run handoff [--engine name] [--role role] [--repo repo] [--worktree path] [--phase slug] [--reason reason] [--dry-run]
 agentos doctor [--fix] [--json]
-agentos doctor --fix [--dry-run] [--adopt-custom-adapters]
+agentos doctor --fix [--dry-run] [--adopt-custom-adapters] [--prune-retired]
 agentos doctor --fix --normalize-repo-ids [--dry-run]
 agentos adapters explain <file>
 agentos compact [--dry-run]

@@ -118,10 +118,12 @@ test('a workspace with all three upgrade classes migrates end to end without los
   assert.deepEqual(final.migration.summary.action_required, 1, 'the human-owned card is the only outstanding item');
 
   const agents = await readFile(join(root, 'AGENTS.md'), 'utf8');
-  assert.ok(agents.includes(OWNER_RULES), 'owner rules survive verbatim');
-  assert.ok(agents.includes(OWNER_TAIL.trim()), 'owner notes survive verbatim');
   assert.equal(agents.split(MANAGED_START).length - 1, 1, 'exactly one managed block');
   assert.equal(agents.split(MANAGED_END).length - 1, 1);
+  // Byte-for-byte: removing the managed block must leave exactly the owner's
+  // bytes as they were outside the replaced legacy span, in the same order.
+  const stripped = agents.slice(0, agents.indexOf(MANAGED_START)) + agents.slice(agents.indexOf(MANAGED_END) + MANAGED_END.length);
+  assert.equal(stripped, `${OWNER_RULES}\n\n${OWNER_TAIL}`, 'every owner byte outside the managed block is preserved exactly');
   assert.doesNotMatch(agents, /Repos: web=\.\/web/, 'the stale section is gone');
 
   const projectAfter = await readFile(projectPath, 'utf8');
