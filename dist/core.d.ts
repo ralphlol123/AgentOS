@@ -171,7 +171,7 @@ export declare function agentsAgentOS(options?: any): Promise<{
 } | {
     ok: boolean;
     root: string;
-    id: any;
+    id: string;
     dryRun: boolean;
     text: string;
 } | {

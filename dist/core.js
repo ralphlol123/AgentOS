@@ -3,6 +3,7 @@ import { withWorkspaceWriter } from './workspace-lock.js';
 import { readImportSource } from './import-source.js';
 import { appendContextRecord, literalMarkdown, markdownHeadings, markdownSection } from './markdown.js';
 import { collectRunHandoffGitState } from './git-evidence.js';
+import { canonicalAgentId, resolveAgentAlias, resolveSkillAlias, RETIRED_AGENT_IDS, RETIRED_SKILL_IDS, SKILL_ALIASES, agentDeprecationNotice, skillDeprecationNotice } from './aliases.js';
 import { access, chmod, link, mkdir, open, readFile, readdir, rename, rm, stat, lstat, realpath } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -787,7 +788,7 @@ async function initAgentOSUnlocked(options = {}) {
         plan.push({ path, action: adapter?.plan.action ?? (await exists(join(cwd, path)) ? (path.endsWith('.gitignore') || (options.refresh && path === '.agentos/project.yaml') ? 'reconcile' : 'preserve') : 'create') });
     }
     if (options.dryRun)
-        return { mode, workspaceKind, repos, planned, plan, agents: agentSelection, text: renderDryRun({ cwd, mode, workspaceKind, repos, agentSelection }) + '\n' + plan.map(item => `- ${item.action}: ${item.path}`).join('\n') };
+        return { mode, workspaceKind, repos, planned, plan, agents: agentSelection, text: renderDryRun({ cwd, mode, workspaceKind, repos, agentSelection }) + '\n' + plan.map(item => `- ${item.action}: ${item.path}`).join('\n') + (existing ? '' : '\n' + collectAgentDeprecationNotices(options.agents).map((n) => `Note: ${n}`).join('\n')) };
     // Every filesystem mutation init makes - the .agentos scaffold directories
     // and files, per-agent/engine/repo files, root/child adapters, their
     // one-time backups, and child .gitignore blocks - runs inside a single
@@ -830,7 +831,8 @@ async function initAgentOSUnlocked(options = {}) {
             for (const repo of childRepos)
                 await ensureChildRepoGitignore(join(cwd, repo.path));
     });
-    return { mode, workspaceKind, repos, agents: agentSelection, text: `AgentOS initialized (${mode}, ${workspaceKind}, agents: ${agentSelection.profile}) at ${cwd}` };
+    const deprecationNotes = existing ? [] : collectAgentDeprecationNotices(options.agents).map((n) => `Note: ${n}`);
+    return { mode, workspaceKind, repos, agents: agentSelection, text: [`AgentOS initialized (${mode}, ${workspaceKind}, agents: ${agentSelection.profile}) at ${cwd}`, ...deprecationNotes].join('\n') };
 }
 export async function statusAgentOS(options = {}) {
     const root = await findAgentOSRoot(options.cwd ?? process.cwd());
@@ -1221,14 +1223,14 @@ async function skillsAgentOSUnlocked(options = {}) {
     const mode = options.mode === 'full' ? 'full' : 'summary';
     const repos = parseReposFromProjectYaml(await safeRead(join(root, '.agentos/project.yaml')), { includeRoot: true });
     const hasGit = await exists(join(root, '.git'));
-    const ids = resolveRequestedSkillIds(options, repos, hasGit);
+    const { ids, deprecations } = resolveRequestedSkillIds(options, repos, hasGit);
     const unknown = ids.filter((id) => !SKILL_BY_ID[id]);
     if (unknown.length)
         throw new Error(`Unknown skill(s): ${unknown.join(', ')}. Run \`agentos skills list\` to see available skills and category packs.`);
     const skills = ids.map((id) => SKILL_BY_ID[id]);
     const files = skills.flatMap(skill => skillInstallFiles(skill, mode));
     await preflightSkillFiles(root, files, options.replace);
-    const lines = [`AgentOS skills add${dryRun ? ' dry run' : ''}`, `Root: ${root}`, `Mode: ${mode}`, ''];
+    const lines = [`AgentOS skills add${dryRun ? ' dry run' : ''}`, `Root: ${root}`, `Mode: ${mode}`, ...deprecations.map((note) => `Note: ${note}`), ''];
     for (const file of files)
         lines.push(`${dryRun ? 'Would write' : 'Wrote'}: ${file.relPath}`);
     if (!dryRun) {
@@ -1381,7 +1383,12 @@ async function agentsAgentOSUnlocked(options = {}) {
     if (id === 'planner' && !capabilities.planning)
         capabilities.planning = 'planner';
     project.agents = { profile: 'custom', capabilities, enabled: [...enabled] };
-    const lines = [`AgentOS agents add${dryRun ? ' dry run' : ''}`, `Root: ${root}`, `Agent: ${id}`, '', `${dryRun ? 'Would write' : 'Wrote'}: ${relPath}`, `${dryRun ? 'Would patch' : 'Patched'}: .agentos/project.yaml`];
+    const deprecation = (!isPathLike(raw) && !options.name) ? resolveAgentAlias(raw) : { id, deprecated: false };
+    const lines = [
+        `AgentOS agents add${dryRun ? ' dry run' : ''}`, `Root: ${root}`, `Agent: ${id}`,
+        ...(deprecation.deprecated ? [`Note: ${agentDeprecationNotice(deprecation.from, id)}`] : []),
+        '', `${dryRun ? 'Would write' : 'Wrote'}: ${relPath}`, `${dryRun ? 'Would patch' : 'Patched'}: .agentos/project.yaml`,
+    ];
     if (!dryRun) {
         await withMutationTransaction(async () => {
             await mkdirTracked(dirname(join(root, relPath)));
@@ -1498,16 +1505,21 @@ async function templatesListAgentOS(root) {
     return { ok: true, root, entries, text: lines.join('\n') };
 }
 async function templatesShowAgentOS(root, id) {
-    const entry = await findTemplateRegistryEntry(id);
-    if (!entry)
+    const resolved = await findTemplateRegistryEntry(id);
+    if (!resolved)
         return { ok: false, root, text: `AgentOS templates show: FAIL\nUnknown template id: ${id}. Run \`agentos templates list\`.` };
+    const entry = resolved.entry;
     const content = await readFile(entry.absPath, 'utf8');
-    return { ok: true, root, entry, text: [`Template: ${entry.id}`, `Path: ${entry.relPath}`, '', content].join('\n') };
+    const note = resolved.deprecated
+        ? `\nNote: ${entry.type === 'skill' ? skillDeprecationNotice(resolved.from, resolved.canonical) : agentDeprecationNotice(resolved.from, resolved.canonical)}`
+        : '';
+    return { ok: true, root, entry, text: [`Template: ${entry.id}`, `Path: ${entry.relPath}`, '', content].join('\n') + note };
 }
 async function templatesCopyAgentOS(root, options = {}) {
-    const entry = await findTemplateRegistryEntry(options.id);
-    if (!entry)
+    const resolved = await findTemplateRegistryEntry(options.id);
+    if (!resolved)
         return { ok: false, root, text: `AgentOS templates copy: FAIL\nUnknown template id: ${options.id}. Run \`agentos templates list\`.` };
+    const entry = resolved.entry;
     const dryRun = Boolean(options.dryRun);
     const replace = Boolean(options.replace);
     const content = await readFile(entry.absPath, 'utf8');
@@ -1516,13 +1528,24 @@ async function templatesCopyAgentOS(root, options = {}) {
         return { ok: false, root, dryRun, text: [`AgentOS templates copy: FAIL`, `Template: ${entry.id}`, ...validation.messages.map((m) => `- ${m}`)].join('\n') };
     const relPath = entry.type === 'agent' ? `.agentos/agents/${entry.name}.md` : `.agentos/skills/${entry.category}/${entry.name}/SKILL.md`;
     const targetPath = join(root, relPath);
-    if (await exists(targetPath) && !replace) {
+    const existsTarget = await exists(targetPath);
+    // A retired alias may resolve to a canonical card the standard profile
+    // already installed (e.g. `qa` -> `tester`, present in the minimal team).
+    // When the on-disk card is byte-identical to the canonical template, the
+    // copy is already satisfied: proceed idempotently with the deprecation
+    // notice instead of a spurious overwrite refusal. Customized cards
+    // (differing bytes) and direct copies remain protected by the refusal below.
+    const alreadyCanonical = !replace && existsTarget && resolved.deprecated && (await safeRead(targetPath)) === content;
+    if (existsTarget && !replace && !alreadyCanonical) {
         return { ok: false, root, dryRun, entry, text: [`AgentOS templates copy: FAIL`, `Root: ${root}`, `Template: ${entry.id}`, '', `Target already exists: ${relPath}`, 'Refusing to overwrite local project context by default.', 'Use --replace only after reviewing the existing file and confirming replacement is intended.'].join('\n') };
     }
     const files = entry.type === 'skill' ? skillInstallFiles(SKILL_BY_ID[entry.name], 'full') : [{ relPath, content }];
     await preflightSkillFiles(root, files, replace);
-    const action = dryRun ? (replace ? 'Would replace' : 'Would copy') : (replace ? 'Replaced' : 'Copied');
-    const lines = [`AgentOS templates copy${dryRun ? ' dry run' : ''}`, `Root: ${root}`, `Template: ${entry.id}`, '', `${action}: ${entry.relPath} -> ${relPath}`, ...files.slice(1).map(file => `${action}: ${file.relPath}`)];
+    const action = alreadyCanonical ? 'Already installed' : dryRun ? (replace ? 'Would replace' : 'Would copy') : (replace ? 'Replaced' : 'Copied');
+    const note = resolved.deprecated
+        ? `Note: ${entry.type === 'skill' ? skillDeprecationNotice(resolved.from, resolved.canonical) : agentDeprecationNotice(resolved.from, resolved.canonical)}`
+        : null;
+    const lines = [`AgentOS templates copy${dryRun ? ' dry run' : ''}`, `Root: ${root}`, `Template: ${entry.id}`, ...(note ? [note] : []), '', `${action}: ${entry.relPath} -> ${relPath}`, ...files.slice(1).map(file => `${action}: ${file.relPath}`)];
     if (!dryRun) {
         if (entry.type === 'agent')
             await assertProjectYamlWellFormed(join(root, '.agentos/project.yaml'));
@@ -1559,7 +1582,25 @@ async function templateRegistryEntries() {
 }
 async function findTemplateRegistryEntry(id) {
     const wanted = String(id || '').trim();
-    return (await templateRegistryEntries()).find((entry) => entry.id === wanted || entry.id.endsWith(`:${wanted}`));
+    const entries = await templateRegistryEntries();
+    const direct = entries.find((entry) => entry.id === wanted || entry.id.endsWith(`:${wanted}`));
+    if (direct)
+        return { entry: direct, deprecated: false };
+    // Resolve retired agent/skill IDs to their canonical template so
+    // `templates show`/`templates copy` keep working for old workspaces.
+    const skill = resolveSkillAlias(wanted);
+    if (skill.deprecated) {
+        const entry = entries.find((e) => e.type === 'skill' && e.name === skill.id);
+        if (entry)
+            return { entry, deprecated: true, from: skill.from, canonical: skill.id };
+    }
+    const agent = resolveAgentAlias(wanted);
+    if (agent.deprecated) {
+        const entry = entries.find((e) => e.type === 'agent' && e.name === agent.id);
+        if (entry)
+            return { entry, deprecated: true, from: agent.from, canonical: agent.id };
+    }
+    return null;
 }
 async function quarantineImportedTemplate(root, name, type, fetched, review) {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -1648,12 +1689,13 @@ function skillRelPath(skill) {
 }
 function resolveRequestedSkillIds(options, repos, hasGit) {
     if (options.detected)
-        return detectedSkillIds(repos, hasGit);
+        return { ids: detectedSkillIds(repos, hasGit), deprecations: [] };
     const raw = options.add;
     if (!raw)
         throw new Error('agentos skills add requires --detected or at least one skill id/category-pack.');
     const items = (Array.isArray(raw) ? raw : String(raw).split(',')).map((s) => String(s).trim()).filter(Boolean);
     const ids = [];
+    const deprecations = [];
     const seen = new Set();
     for (const item of items) {
         if (item.endsWith('-pack')) {
@@ -1668,12 +1710,15 @@ function resolveRequestedSkillIds(options, repos, hasGit) {
                 continue;
             }
         }
-        if (!seen.has(item)) {
-            seen.add(item);
-            ids.push(item);
+        const { id, deprecated, from } = resolveSkillAlias(item);
+        if (deprecated)
+            deprecations.push(skillDeprecationNotice(from, id));
+        if (!seen.has(id)) {
+            seen.add(id);
+            ids.push(id);
         }
     }
-    return ids;
+    return { ids, deprecations };
 }
 function detectedSkillIds(repos, hasGit) {
     const categories = new Set(['core']);
@@ -1983,9 +2028,13 @@ async function doctorAgentOSUnlocked(options = {}) {
     }
     const projectPath = join(root, '.agentos/project.yaml');
     let projectConfigError = null;
+    const migrationNotes = [];
     if (options.fix) {
         try {
-            await withMutationTransaction(() => fixAgentOSAdapters(root));
+            await withMutationTransaction(async () => {
+                await fixAgentOSAdapters(root);
+                migrationNotes.push(...(await fixLegacyCatalogState(root)));
+            });
         }
         catch (error) {
             if (error instanceof ProjectConfigError)
@@ -2053,6 +2102,7 @@ async function doctorAgentOSUnlocked(options = {}) {
         if (!project.includes('- opencode'))
             warnings.push('.agentos/project.yaml engines.allowed does not list opencode');
         await checkAgentAndSkillConfig(root, project, warnings);
+        await checkLegacyCatalogState(root, project, warnings);
     }
     for (const repo of repos.filter(repo => repo.path !== '.' && policy.pointers)) {
         const parent = relative(resolve('/', repo.path), '/').replace(/\\/g, '/');
@@ -2109,6 +2159,8 @@ async function doctorAgentOSUnlocked(options = {}) {
         }
     }
     const diagnostics = [];
+    for (const note of migrationNotes)
+        diagnostics.push(`migrated: ${note}`);
     await checkTasksAndHandoff(root, problems, warnings, diagnostics);
     await checkRepoCommands(repos, warnings, diagnostics);
     await checkGitState(root, repos, warnings, diagnostics);
@@ -2415,6 +2467,123 @@ async function fixAgentOSAdapters(root) {
     if (policy.gitignore === 'ignore')
         for (const repo of childRepos)
             await ensureChildRepoGitignore(join(root, repo.path));
+}
+// --- Retired agent card shapes (slice 4 safe migration) ---
+// A retired agent card is safe to migrate (i.e. clearly-generated rather than
+// customized) only when its content byte-matches one of the closed set of
+// historical generated shapes below, reconstructed from the agentMd/template
+// generators that actually produced them. Anything else is treated as a
+// customized card and left untouched by doctor --fix.
+const RETIRED_AGENT_MANDATES = {
+    'project-manager': 'Break down coding/product requests into scoped, dependency-aware implementation plans before specialist agents edit files.',
+    implementation: 'Own implementation work inside the declared repo/file scope.',
+    qa: 'Verify changed behavior with real commands and browser checks when UI is touched.',
+    'code-reviewer': 'Review diffs for correctness, security, scope, and project consistency.',
+    'frontend-engineer': 'Own frontend implementation within declared frontend repo scope.',
+    'backend-engineer': 'Own backend implementation within declared backend repo scope.',
+    'data-engineer': 'Own data pipeline, analytics, migration-readiness, and data-quality tasks inside declared scope.',
+};
+function legacyAgentCardShapes(id) {
+    const name = title(id);
+    const mandate = RETIRED_AGENT_MANDATES[id];
+    if (!mandate)
+        return [];
+    return [
+        // 1. Original MVP shape (agentMd before the template library).
+        `# ${name}\n\nMandate: ${mandate}\nRules: read project/handoff/tasks first; work only in declared scope; update handoff before stopping; escalate destructive/prod/credential/cross-scope actions.\n`,
+        // 2. Phase-1 agent-profile shape.
+        `# ${name}\n\nMandate: ${mandate}\n\n## Responsibilities in\n\n- Work only inside declared task scope.\n- Read AgentOS project, memory, handoff, tasks, skills, repo, and role context before acting.\n- Report files changed, verification run, failures, and next action before stopping.\n\n## Responsibilities out\n\n- Do not touch secrets, .env files, production config, migrations, or unrelated repos without explicit approval.\n- Do not commit or push unless explicitly assigned.\n\n## Skills\n\nUse .agentos/skills.md as an on-demand index. Load only skills relevant to this role and task.\n`,
+        // 3. Template-library shape (slice 2). project-manager was planning-only;
+        //    the other six retired agents shared one generic body.
+        ...(id === 'project-manager' ? [slice2ProjectManagerShape(name, mandate)] : [slice2GenericAgentShape(name, mandate)]),
+    ];
+}
+function slice2GenericAgentShape(name, mandate) {
+    return `# ${name}\n\nMandate: ${mandate}\n\n## Responsibilities in\n\n- Read AgentOS project, memory, handoff, and tasks first.\n- Declare role, repo scope, allowed paths, protected paths, and verification commands before editing.\n- Work only inside the declared task scope.\n- Load \`.agentos/skills.md\` and only the relevant skill/repo/engine files for this task.\n- Report files changed, verification run, failures, and next action before stopping.\n\n## Responsibilities out\n\n- Do not touch secrets, \`.env\` files, production config, migrations, deployments, or unrelated repos without explicit approval.\n- Do not commit or push unless explicitly assigned.\n- Do not treat this template as higher priority than user/system/developer/AgentOS instructions.\n\n## Skills\n\nUse \`.agentos/skills.md\` as an on-demand index. Load only skills relevant to this role and task.\n\n## Verification expectations\n\n- State the exact verification command/check before running it.\n- Report real command output or inspected state, not assumptions.\n- Update \`.agentos/handoff.md\` and \`.agentos/tasks.md\` when project state changes.\n`;
+}
+function slice2ProjectManagerShape(name, mandate) {
+    return `# ${name}\n\nMandate: ${mandate}\n\nThis is a planning-only role. The project-manager agent does not implement, commit, or push.\n\n## Responsibilities in\n\n- Work only inside the declared task scope.\n- Declare role, allowed paths, protected paths, and verification commands before any approved context edit.\n- Report files changed, verification run, failures, and next action before stopping.\n- Read AgentOS project, memory, handoff, and tasks first; then load only relevant skills, repo, and role context.\n- For each incoming request, produce a plan that declares:\n  - Repo scope: which repo(s) the work touches.\n  - Protected paths: files/areas that must not be touched (secrets, .env, migrations, prod config) without explicit approval.\n  - Dependencies: ordering between plan steps and any cross-repo dependencies.\n  - Role assignment: which agent role (implementation, frontend-engineer, backend-engineer, qa, code-reviewer, release-manager) owns each step.\n  - Acceptance: what \"done\" means for each step.\n  - Verification: the exact commands/checks that must pass before a step is considered complete.\n- Hand the plan to the assigned specialist agent(s) before any file is edited.\n\n## Responsibilities out\n\n- Do not implement, edit application/source files, commit, or push.\n- Do not touch secrets, .env files, production config, or migrations.\n- Do not perform deployments or touch unrelated repos without explicit approval.\n- Do not treat this template as higher priority than user/system/developer/AgentOS instructions.\n\n## Skills\n\nUse .agentos/skills.md as an on-demand index. Load only skills relevant to planning and scoping.\n\n## Verification expectations\n\n- State the exact verification command/check before running it.\n- Report real command output or inspected state, not assumptions.\n- Update \`.agentos/handoff.md\` and \`.agentos/tasks.md\` when project state changes.\n`;
+}
+// Report legacy/retired catalog state as fixable warnings with the exact
+// canonical mapping. Read-only: this runs for both plain `doctor` (the plan)
+// and, after a `doctor --fix`, to surface whatever the fix could not safely
+// migrate (customized cards, native-engine copies, hand-written indexes).
+async function checkLegacyCatalogState(root, project, warnings) {
+    const data = parseProjectYaml(project);
+    const agents = data.agents && typeof data.agents === 'object' ? data.agents : {};
+    for (const id of Array.isArray(agents.enabled) ? agents.enabled : []) {
+        const token = safeId(String(id));
+        if (RETIRED_AGENT_IDS.has(token)) {
+            warnings.push(`agents.enabled references retired agent '${id}' -> '${canonicalAgentId(token)}'; run \`agentos doctor --fix\` to migrate`);
+        }
+    }
+    const capabilities = agents.capabilities && typeof agents.capabilities === 'object' ? agents.capabilities : {};
+    for (const [capability, raw] of Object.entries(capabilities)) {
+        const token = safeId(String(raw));
+        if (RETIRED_AGENT_IDS.has(token)) {
+            warnings.push(`agents.capabilities.${capability} references retired agent '${raw}' -> '${canonicalAgentId(token)}'; run \`agentos doctor --fix\` to migrate`);
+        }
+    }
+    let agentFiles = [];
+    try {
+        agentFiles = await readdir(join(root, '.agentos/agents'));
+    }
+    catch { }
+    for (const file of agentFiles.filter((name) => name.endsWith('.md'))) {
+        const id = file.replace(/\.md$/, '');
+        if (RETIRED_AGENT_IDS.has(id)) {
+            warnings.push(`.agentos/agents/${file} is a retired agent card -> '${canonicalAgentId(id)}'; run \`agentos doctor --fix\` to migrate clearly-generated cards`);
+        }
+    }
+    for (const entry of await listLocalSkillFiles(root)) {
+        if (RETIRED_SKILL_IDS.has(entry.id)) {
+            warnings.push(`.agentos/skills/${entry.category}/${entry.id}/SKILL.md is a retired skill card -> '${SKILL_ALIASES[entry.id]}'; reinstall the canonical skill and remove this card`);
+        }
+    }
+    const skillsMdText = await safeRead(join(root, '.agentos/skills.md'));
+    if (skillsMdText) {
+        for (const id of RETIRED_SKILL_IDS) {
+            const bullet = new RegExp(`^-\\s+${escapeRegExp(id)}(?:\\s|$|[—:])`, 'm');
+            const details = new RegExp(`Details:\\s+\\.agentos/skills/[^/]+/${escapeRegExp(id)}/SKILL\\.md`, 'm');
+            if (bullet.test(skillsMdText) || details.test(skillsMdText)) {
+                warnings.push(`.agentos/skills.md still lists retired skill '${id}' -> '${SKILL_ALIASES[id]}'`);
+            }
+        }
+    }
+}
+// Safe migration of clearly-generated retired agent cards (slice 4). Runs
+// inside doctor --fix's mutation transaction. Never deletes or overwrites a
+// customized card, and never touches native engine copies (.claude/.opencode).
+async function fixLegacyCatalogState(root) {
+    const actions = [];
+    let agentFiles = [];
+    try {
+        agentFiles = await readdir(join(root, '.agentos/agents'));
+    }
+    catch { }
+    for (const file of agentFiles.filter((name) => name.endsWith('.md')).sort()) {
+        const id = file.replace(/\.md$/, '');
+        if (!RETIRED_AGENT_IDS.has(id))
+            continue;
+        const canonical = canonicalAgentId(id);
+        const source = join(root, '.agentos/agents', file);
+        const content = await safeRead(source);
+        if (!legacyAgentCardShapes(id).includes(content)) {
+            actions.push(`left customized retired agent card ${file} untouched (manual migration to '${canonical}' needed)`);
+            continue;
+        }
+        const target = join(root, '.agentos/agents', `${canonical}.md`);
+        if (await exists(target)) {
+            await removeTracked(source);
+            actions.push(`removed stale generated agent card ${file} ('${canonical}.md' already present)`);
+        }
+        else {
+            await writeFileAtomic(target, agentMd(AGENT_DEFINITIONS[canonical]));
+            await removeTracked(source);
+            actions.push(`migrated generated agent card ${file} -> ${canonical}.md`);
+        }
+    }
+    return actions;
 }
 const CHILD_REPO_GITIGNORE_BLOCK = `# AgentOS parent-workspace pointer files
 /AGENTS.md
@@ -2755,6 +2924,18 @@ function productMd({ projectName }) { return `# Product\n\nProject: ${projectNam
 function architectureMd() { return '# Architecture\n\nDefine stack, boundaries, data model, and deployment before scaffolding code.\n'; }
 function runsReadmeMd() { return '# Runs\n\nStore per-task briefs, results, verification logs, and diff summaries here.\n'; }
 const MINIMAL_AGENT_IDS = ['developer', 'tester', 'reviewer', 'release-manager'];
+function collectAgentDeprecationNotices(requested) {
+    const raw = String(requested || '').trim().toLowerCase();
+    if (!raw || raw === 'minimal' || raw === 'detected')
+        return [];
+    const notices = [];
+    for (const item of raw.split(',').map((s) => s.trim()).filter(Boolean)) {
+        const { id, deprecated, from } = resolveAgentAlias(item);
+        if (deprecated)
+            notices.push(agentDeprecationNotice(from, id));
+    }
+    return notices;
+}
 function resolveAgentSelection(requested, repos) {
     const raw = String(requested || 'detected').trim().toLowerCase();
     if (raw === 'minimal')
@@ -2812,14 +2993,7 @@ function detectedSpecialistIds(_repos) {
     return [];
 }
 function normalizeAgentAlias(value) {
-    const id = safeId(value);
-    const aliases = {
-        review: 'reviewer',
-        release: 'release-manager',
-        planning: 'planner',
-        pm: 'planner',
-    };
-    return aliases[id] || id;
+    return canonicalAgentId(value);
 }
 function agentCapabilities(enabled) {
     const set = new Set(enabled);
@@ -2837,6 +3011,8 @@ function agentCapabilities(enabled) {
         capabilities.release = 'release-manager';
     if (set.has('planner'))
         capabilities.planning = 'planner';
+    if (set.has('security-reviewer'))
+        capabilities.security = 'security-reviewer';
     return capabilities;
 }
 function agentConfigObject(agentSelection) {

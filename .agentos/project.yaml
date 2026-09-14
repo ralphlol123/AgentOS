@@ -26,16 +26,18 @@ repos:
     package_manager_test_command: bun run test:package-managers
     pack_command: bun pm pack --dry-run
 agents:
-  profile: detected
+  profile: custom
   capabilities:
-    implementation: implementation
-    qa: qa
-    review: code-reviewer
+    implementation: developer
+    frontend: developer
+    backend: developer
+    qa: tester
+    review: reviewer
     release: release-manager
   enabled:
-    - implementation
-    - qa
-    - code-reviewer
+    - developer
+    - tester
+    - reviewer
     - release-manager
 engines:
   allowed:

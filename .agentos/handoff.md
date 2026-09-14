@@ -2,15 +2,15 @@
 
 ## Current objective
 
-Catalog cleanup slice 2: implementation complete, awaiting independent review. Worktree `/home/hermes/agentos-catalog-cleanup`, branch `feat/catalog-cleanup`, HEAD `b983635f72da9ca09c5a08db733b92bf384aa04a` (slice 1 reviewed/committed). Slice 2 remains uncommitted; no push, merge, publication, version bump, or client rollout.
+Catalog cleanup slice 4 (retired-ID aliases + safe migration): implementation complete, awaiting independent review. Worktree `/home/hermes/agentos-catalog-cleanup`, branch `feat/catalog-cleanup`, HEAD `775fe082b1ed6a8f893f9e64713fad92ac11174c` (slices 1–3 committed as `b983635`, `ae3d17e`, `775fe08`). Slice 4 remains uncommitted; no push, merge, publication, version bump, or client rollout.
 
-The catalog now contains 15 framework-neutral workflows plus 9 optional reference files. `skills add` and `templates copy` install reference bytes beside the card using the existing atomic-write/command-rollback paths. Preflight protects differing custom cards/references, including orphan references; explicit replacement preserves unrelated owner files. Removal/rollback preserves native copies. Installed inventory no longer calls missing/modified shipped references source-match. The read-only commit-message workflow retains staged-first inspection, explicit untracked handling, independent repo messages, and discovered conventions. Review approval requires resolution of must-fix findings, not acknowledgment alone. Historical legacy adapter shapes were preserved.
+Slice 4 adds `src/aliases.ts` (agent + skill deprecated-alias tables and resolve helpers) and wires alias resolution with deprecation notices into `init --agents`, `agents add`, `skills add`, `templates show`, and `templates copy`; `doctor` detects retired enabled/capabilities, retired agent cards, and stale skills.md entries, and `doctor --fix` safely migrates clearly-generated retired cards (closed-set legacy shapes) while preserving customized cards and native `.claude`/`.opencode` copies. The one prior failing test — `templates copy id='qa'` returning ok:false — was fixed by letting a deprecated alias resolve idempotently to an already-installed canonical card (byte-identical) instead of refusing with "target already exists"; differing/customized cards still refuse.
 
-Verification: build/check, catalog parity (56), reference safety regressions (25), full suite (275), CLI smoke, and npm/pnpm/Bun packed-manager checks passed. Packed checks compare all 15 installed cards and 9 reference files with packaged source, exercise copy/removal, and retain prior mutation checks. Node 26.5.0 / Bun 1.3.14. Re-run logs and exact changed-file inventory are in the slice-2 resume/run note. Doctor/status are OK; expected warnings are dirty tracked files and the slice-1 commit ahead of origin/main. Smoke uses disposable non-git fixtures and reports that limitation.
+Verification: build, check, `test/catalog-parity.test.js` (53), full suite (281), CLI smoke, and npm/pnpm/Bun packaged-manager checks (15 cards/9 references per manager) all pass. `test/aliases-and-migration.test.js` 9/9. Node/Bun from `bun --version`.
 
-Local `.agentos/skills.md` records all 15 available catalog cards as NOT installed; actual local installed inventory is empty. Retired recommendations are explicitly unavailable in this intermediate catalog. Full self-install remains slice 5, aliases/migration slice 4, agent consolidation slice 3. No later slice or external-engine acceptance is claimed.
+Dogfood `.agentos/` migrated via `doctor --fix` to the six-agent + 15-skill model: project.yaml `agents.enabled`/`capabilities` remapped (implementation→developer, qa→tester, code-reviewer→reviewer), retired cards migrated to `developer.md`/`tester.md`/`reviewer.md`, `release-manager.md` regenerated to canonical, and `.agentos/skills.md` retired-skill bullets + role routing updated to canonical IDs/aliases. Root adapters (AGENTS.md/CLAUDE.md/.hermes.md) were wrapped in `agentos:managed` markers by the adapter repair; content preserved byte-for-byte. No custom content was clobbered; no native `.claude`/`.opencode` copies exist in this worktree to preserve.
 
-Scope: this isolated worktree and disposable fixtures only. Preserve the pre-existing staged template deletions. Original dirty `/home/hermes/agentos-for-projects`, KargaX, Labahub, secrets, migrations, production config, and custom/native cards are protected. Next: independently review slice 2; no commit or later-slice work in this run.
+Scope: this isolated worktree and disposable fixtures only. Original dirty `/home/hermes/agentos-for-projects`, KargaX, Labahub, secrets, migrations, production config, and custom/native cards are protected. Next: independently review slice 4; no commit or later-slice work in this run.
 
 Below is historical rollout context, not the active implementation task.
 
@@ -108,7 +108,7 @@ Dogfood temp workspace verified:
 
 ## Next exact action
 
-Independently review catalog cleanup slice 2 in `/home/hermes/agentos-catalog-cleanup`. Read `.agentos/runs/2026-09-14-catalog-cleanup-resume.md` and current staged/unstaged/untracked diffs. No commit/push is authorized in this run. Slices 3–5 remain deferred.
+Independently review catalog cleanup slice 4 in `/home/hermes/agentos-catalog-cleanup`. Read `.agentos/runs/2026-09-14-catalog-cleanup-resume.md` and current staged/unstaged/untracked diffs (`src/aliases.ts`, `src/core.ts`, `test/aliases-and-migration.test.js`, `dist/`, and the dogfood `.agentos/` + root-adapter changes). No commit/push is authorized in this run. Slice 5 (full self-install) remains deferred.
 
 ## Open decisions
 

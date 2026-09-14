@@ -1,60 +1,30 @@
 # Tasks
 
-Active scope: catalog cleanup slice 2 in `/home/hermes/agentos-catalog-cleanup` on `feat/catalog-cleanup`. Earlier milestones and follow-ups below are historical, not authorization to edit client workspaces or resume other tasks.
+Active scope: catalog cleanup slice 4 (retired-ID aliases + safe migration) in `/home/hermes/agentos-catalog-cleanup` on `feat/catalog-cleanup`. Earlier milestones below are historical, not authorization to edit client workspaces or resume other tasks.
 
 ## Done
 
-- [x] Engine Run Handoff Notes first implementation completed on `feat/engine-run-handoff-notes`: `agentos run handoff`, grounded handoff notes, state updates, docs, and tests.
-- [x] Grilled and updated Worktrees Optional + Installation Wizard plan in `.agentos/plans/2026-08-10-worktrees-optional-install-wizard.md` plus Obsidian `Projects/AgentOS/Plans/2026-08-10/worktrees-optional-install-wizard.md`.
-- [x] Phase 1 agent model shipped and pushed.
-- [x] Photobooth rollout to detected profile + on-demand skills verified.
-- [x] `agentos run` Phase 2 placed on hold per Ralph.
-- [x] Template registry polish merged.
-- [x] Import safety hardening merged.
-- [x] Generalized Ralph's KargaX commit workflow into reusable `conventional-commit` skill template.
-- [x] Packed installed CLI smoke passed for `conventional-commit` template and `github-pack` inclusion.
-- [x] PR #6 merged `feat/conventional-commit-skill-template` into `main`.
-- [x] Local cleanup completed: checked out updated `main` and deleted the merged local feature branch.
-- [x] Built and merged AgentOS `0.2.0`: Obsidian workspace-folder support, `agentos skills remove`, and CLI package-version source of truth.
-- [x] Recorded and pushed roadmap item for subrepo-launched engine access to AgentOS skills.
-- [x] Built `feat/subrepo-engine-skill-access`: child repo pointers now direct OpenCode/Codex/Hermes/Claude to parent `.agentos/skills.md` and engine adapters; `doctor` reports stale child pointers and `doctor --fix` repairs them; version bumped to `0.3.0`.
-
-## Reliability improvement slices
-
-- [x] Task 1: fail closed on invalid project config; merged as PR #13.
-- [x] Task 2: filesystem boundary containment; 91 tests passed; merged as PR #14 (`a21c718`).
-- [x] Task 3: atomic state writes and best-effort command rollback implemented with Claude Code on `fix/atomic-state-writes`; 18 focused tests and 109 full tests pass; final independent review PASS. Branch delivery is via PR; merge pending.
+- [x] Slice 1 (`b983635`): canonical package-owned templates, summary/full workflows, parity regressions.
+- [x] Slice 2 (`ae3d17e`): 15 framework-neutral skills + 9 optional references, reference byte parity, rollback/symlink/lock safety.
+- [x] Slice 3 (`775fe08`): six-role agent consolidation (planner, developer, tester, reviewer, release-manager, security-reviewer).
+- [x] Slice 4 code + tests: `src/aliases.ts` (AGENT_ALIASES/SKILL_ALIASES + resolve helpers), `init --agents`/`agents add`/`skills add`/`templates show`/`templates copy` alias resolution with deprecation notices, `doctor` legacy detection + `doctor --fix` safe card migration via closed-set legacy shapes.
 
 ## Now
 
-- [x] Implement slice 1 only: canonical package-owned templates, complete summary/full workflows, matching add/copy/init role contracts, public ID/path preservation, custom-card safeguards, and test-first parity regressions.
-- [x] Verify build/check, 260 full tests, disposable CLI smoke, existing npm/pnpm/Bun packaged regression checks, and diff whitespace.
-- [x] Slice 1 independently reviewed and committed as `b983635`.
-- [x] Resume slice-2 WIP: 15 framework-neutral skills, optional local references, read-only commit workflow, old-ID tests/docs/index updated.
-- [x] Verify reference byte parity, custom/orphan preservation, atomic rollback, symlink boundaries, cross-process locks, local removal/native preservation, and reference-aware installed inventory.
-- [x] Pass build/check, 56 catalog parity + 25 reference safety tests, 275 full tests, smoke, and npm/pnpm/Bun packaged-manager verification (15 cards/9 references per manager).
-- [ ] Independent review of slice 2. Stop here: NO COMMIT/PUSH; no client rollout or version bump.
-- [ ] Only after the review/parent gates, continue sequentially with slices 3–5 (agent consolidation, aliases/safe migration, full self-install). These are not implemented by this run.
+- [x] Fix `templates copy` retired-agent-alias resolution (the one failing test): `templates copy id='qa'` now resolves to `tester` and returns ok:true with a deprecation notice when the canonical card is already installed byte-identical; customized/differing cards still refuse.
+- [x] Verify full matrix green: build, check, `test/catalog-parity.test.js` (53), full suite (281), smoke, `test:package-managers` (npm/pnpm/bun 15 cards/9 refs).
+- [x] Migrate this worktree's dogfood `.agentos/` to the six-agent + 15-skill model via `doctor --fix` (project.yaml capabilities/enabled, agent cards, skills.md; release-manager card regenerated to canonical). No custom content clobbered; no native `.claude`/`.opencode` copies present to preserve.
+- [ ] Independent review of slice 4. Stop here: NO COMMIT/PUSH; no client rollout or version bump.
+- [ ] Only after review/parent gates, continue with slice 5 (full self-install). Not implemented by this run.
 
 ## Next
 
-- [ ] Install/verify current AgentOS in KargaX, run `agentos doctor --fix`, then smoke-test child-repo skill access.
+- [ ] Slice 5: full local self-install of the 15-skill catalog into `.agentos/skills/**/SKILL.md` with exact Details pointers.
 - [ ] When Ralph resumes release prep: update release notes/CHANGELOG, run final dry-run + packed install smoke, and publish only after explicit approval.
-- [ ] When Ralph resumes Worktrees Optional + Installation Wizard: start a feature branch from latest `main` and implement the first slice from the saved plan.
+- [ ] Install/verify current AgentOS in KargaX, run `agentos doctor --fix`, then smoke-test child-repo skill access.
 
 ## Later
 
 - [ ] Resume `agentos run` Phase 2 after release.
 - [ ] Add richer local skill authoring/import UX.
 - [ ] Add more specialized reusable agent templates when real projects justify them.
-
-## Discovery reliability follow-up — 2026-09-10
-
-- [x] Implement repository reliability scope R1–R10 with preservation/security regression coverage.
-- [x] Pass 194 Node 26 tests, typecheck, CLI smoke, npm/pnpm/Bun packaged mutations, metadata checks and publication dry-run.
-- [ ] Verify PR runtime/platform CI and provide the review link.
-- [ ] Owner-observed external-engine root/nested-child acceptance before broader compatibility claims.
-- [ ] Human review and merge; publishing and held runner/wizard work remain separate.
-
-- [x] Verify 194/194 Node 22 regression tests and push reliability branch.
-- [ ] Restore connected GitHub app access to ralphlol123/AgentOS (API 404); create PR and verify hosted checks. Branch is ready; PR is not created yet.

@@ -57,26 +57,26 @@ reserved for slice 5; do not mistake this index for an installation.
 - pull-request-workflow — use for PR lifecycle work. **Not installed.**
   Package source: `templates/skills/github/pull-request-workflow.md`
 
-## Retired recommendations from the previous index
+## Retired ID aliases (slice 4)
 
-These IDs are unavailable in the slice-2 catalog and are not installed locally:
-
-- systematic-debugging → debugging
-- nuxt-e2e-testing → frontend-testing (optional Nuxt reference)
-- backend-service-verification → backend-testing
-- shared-repo-git-safety → git-safety
-- requesting-code-review → code-review
-- github-pr-workflow → pull-request-workflow
-
-`test-driven-development` remains available but uninstalled. These mappings are
-informational, not functioning aliases. Compatibility aliases and migration are
-reserved for slice 4. Never delete a customized or native card by retired name.
+Retired skill and agent IDs now resolve to their canonical replacements with a
+deprecation notice across `skills add`, `agents add`, `templates copy`, and
+`init --agents`. None are installed locally. Key skill mappings (full table in
+`src/aliases.ts`): `systematic-debugging` → `debugging`,
+`shared-repo-git-safety` → `git-safety`, `backend-service-verification` →
+`backend-testing`, `requesting-code-review` → `code-review`,
+`github-pr-workflow` → `pull-request-workflow`, `nuxt-e2e-testing` →
+`frontend-testing`, `ai-slop-design-review`/`interface-feel-polish` →
+`frontend-design`. Agent mappings: `implementation`/`frontend-engineer`/
+`backend-engineer`/`data-engineer` → `developer`, `qa` → `tester`,
+`code-reviewer` → `reviewer`, `project-manager` → `planner`. Never delete a
+customized or native card by retired name.
 
 ## Role routing
 
-- implementation: debugging, test-driven-development, documentation; backend-development when applicable.
-- qa: verification, frontend-testing, backend-testing, integration-testing as relevant.
-- code-reviewer: git-safety, code-review; authorization when relevant.
+- developer: debugging, test-driven-development, documentation; backend-development when applicable.
+- tester: verification, frontend-testing, backend-testing, integration-testing as relevant.
+- reviewer: git-safety, code-review; authorization when relevant.
 - release-manager: git-safety, commit-messages, pull-request-workflow, ci-verification.
 
 For source consultation in this package repository, load the exact package card
