@@ -47,6 +47,18 @@ Init/doctor --fix only ever rewrite the bytes strictly between a *valid* single 
 - the file uses the older `custom text\n\n---\n\nAgentOS section` convention and the custom part mentions nothing AgentOS-related; or
 - the file has no AgentOS-related content at all — a genuinely custom file — in which case the managed block is appended after the existing bytes.
 
+**Adopting custom content.** The recorded real-world upgrade case is a root `AGENTS.md` that holds project knowledge *with* a stale AgentOS bootloader section interleaved in it. That file is neither whole-legacy nor safe-custom, so it used to be a conflict that had to be resolved by hand. It is now classified **`adopt`**: AgentOS can see exactly which contiguous byte span is a byte-exact historical section, and can replace only that span while leaving every custom byte before and after it untouched. Adoption is offered, never assumed:
+
+```bash
+agentos doctor --fix --dry-run                     # preview every planned adapter change (read-only)
+agentos doctor --fix --adopt-custom-adapters       # adopt, then repair as usual
+```
+
+- A plain `doctor --fix` still makes **zero** changes when a file needs adoption — it refuses and names the flag, exactly as it does for an ownership conflict.
+- `--adopt-custom-adapters` only runs together with `--fix` (the same rule is enforced for library callers, not just the CLI), and `--fix --dry-run` prints each file's classification and, for adoptable files, the exact byte span that would be replaced. The preview covers adapter changes and, with `--prune-retired`, retired-card pruning; it is not a preview of every diagnostic `doctor --fix` performs.
+- Only a *single* matching section is adoptable. Two candidate sections, or a section shown inside a fenced code block, stay a conflict — AgentOS never guesses which bytes are its own.
+- Adoption recognizes only the enumerated historical bodies, byte-exact apart from the template placeholders (`Workspace: …`, `Repos: …`, child `name`/`path`) which match a single line each. A hand-written file that reproduces one of those bodies exactly is treated as AgentOS-owned, which is the same rule whole-file recognition has always used.
+
 A marker only counts if it appears as its own standalone line (after stripping a trailing `\r`) outside a fenced code block. Fence tracking follows CommonMark closely enough for this purpose: an opening run of 3+ backticks or tildes only closes on a later run of the *same character* with length *at least* the opener's and only spaces/tabs after it — a shorter run, a different delimiter, a would-be closer with trailing text, or marker text embedded in a longer line is never treated as forming or extending an owned block; its mere presence makes the file a conflict instead. Adapter files must be valid UTF-8; invalid byte sequences fail closed before mutation rather than being decoded and rewritten with replacement characters.
 
 Anything else is treated as a **conflict** and left completely untouched: corrupted markers (a start with no end, an end with no start, markers in reversed order, duplicate/nested marker pairs, or marker text embedded/fenced as above), a recognized legacy shape with any extra content appended to it (nothing is ever silently discarded), files that merely *mention* AgentOS in prose without matching one of the shapes above, and two or more repo entries in `.agentos/project.yaml` that resolve to the same adapter file (e.g. `frontend` and `./frontend`, or two differently named entries pointing at the same directory) — AgentOS has no way to know which repo's section should own that path, so it refuses to guess. AgentOS never guesses ownership of ambiguous text. `doctor` and `doctor --json` report each ambiguous file by path (e.g. `frontend/CLAUDE.md adapter ownership is ambiguous: ...`), and additionally flag a *valid* managed block whose content has simply gone stale (`... managed block is stale and does not match the current canonical section`) even when unrelated surrounding text happens to satisfy older, broader health checks elsewhere in `doctor`. `doctor --fix` preflights every root and child adapter file *before its first mutation* — if even one is ambiguous, the entire command (adapters, `.agentos/project.yaml`, `skills.md`, agent/engine files) makes zero changes rather than partially repairing the rest; the same preflight-before-first-mutation rule applies to `agentos init`, including for hybrid workspaces where the root itself is also a package (root adapters always stay bootloaders — only non-root repos ever receive child pointers). If `.agentos/project.yaml` itself is malformed, `doctor` reports that config error alone and skips every adapter diagnostic that would otherwise be derived from it — it never compares real adapters against a canonical section built from a `{}` fallback, which would produce misleading "stale, run `doctor --fix`" noise unrelated to the adapters themselves.
@@ -73,13 +85,13 @@ agentos adapters explain AGENTS.md
 
 Three classes, matching the real upgrade pain seen when moving a workspace from an older AgentOS:
 
-- **adapters** — every root and child adapter file with its classification (`create`, `noop`, `update`, `migrate`, `append`, `conflict`), the same pure classification `doctor --fix` uses. A `conflict` (for example custom project knowledge interleaved with a stale bootloader) is reported with its reason and `safe: false`; the inventory never guesses ownership.
+- **adapters** — every root and child adapter file with its classification (`create`, `noop`, `update`, `migrate`, `append`, `adopt`, `conflict`), the same pure classification `doctor --fix` uses. `safe` means "unambiguous **and** appliable by a default `doctor --fix`", so both `conflict` and `adopt` entries report `safe: false`; an `adopt` entry also carries `requiresOptIn: true` and the legacy byte span. The inventory never guesses ownership.
 - **repoIds** — repository IDs in `.agentos/project.yaml` that are not lowercase-hyphen safe (e.g. `frontend_client` → `frontend-client`), with `collides` telling you whether the normalized ID would clash with an existing key. A non-canonical ID is a reported problem, not a parse failure, so the rest of `doctor` still runs; fix it with `agentos doctor --fix --normalize-repo-ids`.
 - **retiredCards** — retired agent/skill cards with their canonical replacement and an eligibility class:
-  - `prunable` — bytes match a recognized historical generated body; opt-in cleanup may remove it.
+  - `prunable` — bytes match a body a real AgentOS version installed (agent cards against the enumerated historical shapes, skill cards against `src/legacy-skill-shapes.ts` content hashes); opt-in cleanup may remove it.
   - `already-canonical` — same, and the canonical card is already installed, so only the stale file remains.
   - `customized` — hand-edited, or an older generated body AgentOS cannot prove; never auto-removed.
-  - `manual-review` — retired skill card; no byte-match evidence source exists yet, so a human decides.
+  - `manual-review` — a card with no byte-match evidence; a human decides (typically a local fork).
   - `index-only` — listed in `.agentos/skills.md` with no card on disk.
 
 `agentos adapters explain <file>` answers the same question for exactly one path: target level (root/child), classification, managed-block status with byte offsets, the reason for a conflict, and the next command. If `.agentos/project.yaml` cannot be parsed, it still reports marker structure rather than nothing, and says why the canonical section is unavailable.
@@ -87,6 +99,22 @@ Three classes, matching the real upgrade pain seen when moving a workspace from 
 When `.agentos/project.yaml` fails validation there is no canonical section for any path, so the classification falls back to marker structure and uses its own vocabulary: `managed-block` (a valid block exists, staleness unknown), `create` (missing or empty), `migrate` (a recognized historical body), `append` (unrelated custom content), and `conflict`. With a valid config, a path that is not an adapter target is refused outright (with the known-target list) rather than classified.
 
 Nothing in the inventory performs a migration. The `doctor --fix` behavior — fail-closed preflight, one-time `.agentos.bak` backups, byte-preserving managed-block updates — is unchanged.
+
+## Retired card cleanup
+
+When a card's ID is retired (the 0.4.0 catalog consolidation), AgentOS either migrates it or reports it — never guesses:
+
+- **Retired agent cards** are migrated by `doctor --fix` when their bytes match an enumerated historical generated body: the canonical card is written and the stale file removed. A hand-edited card is reported and left alone.
+- **Retired skill cards** and a stale local-skills index are handled by an explicit opt-in, because removal is deletion rather than replacement:
+
+```bash
+agentos doctor --fix --prune-retired
+agentos doctor --fix --dry-run --prune-retired   # list the cards it would remove, write nothing
+```
+
+  - Only cards whose bytes hash-match a body AgentOS really installed are removed (see `src/legacy-skill-shapes.ts`, regenerated from this repository's own history). One edited character changes the hash, so a local fork is reported as `manual-review` and never touched.
+  - `.agentos/skills.md`'s local-skills block is rebuilt from what is actually on disk, which drops stale retired bullets and `Details:` lines while leaving the `Policy: on-demand` line and everything outside the managed block intact.
+  - Engine-native copies (`.claude/skills/`, `.opencode/skills/`) are out of scope and never touched.
 
 ## Repository ID normalization
 
@@ -212,6 +240,7 @@ agentos status
 agentos handoff
 agentos run handoff [--engine name] [--role role] [--repo repo] [--worktree path] [--phase slug] [--reason reason] [--dry-run]
 agentos doctor [--fix] [--json]
+agentos doctor --fix [--dry-run] [--adopt-custom-adapters] [--prune-retired]
 agentos doctor --fix --normalize-repo-ids [--dry-run]
 agentos adapters explain <file>
 agentos compact [--dry-run]

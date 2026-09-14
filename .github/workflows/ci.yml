@@ -53,4 +53,16 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run test:package-managers
       - run: bun pm pack --dry-run
-      - run: bun run publish:dry-run
+      # `npm publish --dry-run` still talks to the registry, and npm refuses a
+      # dry run for a version that already exists ("You cannot publish over the
+      # previously published versions"), which would leave every push red
+      # between a release and the next version bump. Skip it in exactly that
+      # case; anything else still fails.
+      - name: publish dry run
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "agentos-for-projects@${VERSION}" version >/dev/null 2>&1; then
+            echo "agentos-for-projects@${VERSION} is already published; skipping the publish dry run."
+          else
+            bun run publish:dry-run
+          fi

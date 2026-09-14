@@ -469,7 +469,7 @@ test('init preflights every root/child adapter before its first filesystem mutat
 
 // --- Finding 3: strict exact-shape legacy recognition ----------------------
 
-test('one heading plus a known legacy phrase plus appended custom prose is a conflict, not a silent migration (whole-file shape)', async () => {
+test('one heading plus a known legacy phrase plus appended custom prose is never migrated silently: it is adopted only with the explicit opt-in (whole-file shape)', async () => {
   const root = await tempProject();
   await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
   const withCustomTail = '# AGENTS.md\n\nAgentOS for Projects bootloader.\n\nWorkspace: single-repo\nRepos: none\n\nRead first: `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`.\n\nP.S. our team added this paragraph below the AgentOS section and it must never be discarded.\n';
@@ -477,12 +477,22 @@ test('one heading plus a known legacy phrase plus appended custom prose is a con
 
   const report = await doctorAgentOS({ cwd: root });
   assert.equal(report.ok, false);
-  assert.match(report.text, /AGENTS\.md.*ambiguous/i);
+  // Reported precisely as an opt-in migration, never performed silently.
+  assert.match(report.text, /AGENTS\.md.*adopt/i);
+  assert.match(report.text, /adopt-custom-adapters/);
 
   const fixed = await doctorAgentOS({ cwd: root, fix: true });
   assert.equal(fixed.ok, false);
-  assert.equal(await readFile(join(root, 'AGENTS.md'), 'utf8'), withCustomTail, 'appended custom prose after a legacy-looking section must never be discarded');
-  assert.equal(await exists(join(root, 'AGENTS.md.agentos.bak')), false, 'an ambiguous file must not be backed up or converted');
+  assert.equal(await readFile(join(root, 'AGENTS.md'), 'utf8'), withCustomTail, 'without the opt-in the file must be byte-identical');
+  assert.equal(await exists(join(root, 'AGENTS.md.agentos.bak')), false, 'an un-opted-in file must not be backed up or converted');
+
+  // With the opt-in, only the legacy span is replaced and the appended prose survives verbatim.
+  const adopted = await doctorAgentOS({ cwd: root, fix: true, adoptCustomAdapters: true });
+  assert.equal(adopted.ok, true, adopted.text);
+  const migrated = await readFile(join(root, 'AGENTS.md'), 'utf8');
+  assert.ok(migrated.endsWith('P.S. our team added this paragraph below the AgentOS section and it must never be discarded.\n'), 'appended custom prose must survive adoption byte-for-byte');
+  assert.doesNotMatch(migrated, /Repos: none/, 'the stale legacy body is the only thing replaced');
+  assert.equal(await readFile(join(root, 'AGENTS.md.agentos.bak'), 'utf8'), withCustomTail, 'the backup holds the pre-adoption bytes');
 });
 
 test('one heading plus a known legacy phrase plus appended custom prose is a conflict after the old "---" separator too', async () => {

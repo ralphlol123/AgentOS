@@ -2,6 +2,25 @@
 
 All notable changes to AgentOS for Projects are documented here.
 
+## [0.5.0] - 2026-09-14
+
+### Migration UX (upgrading an older workspace)
+
+- `doctor` / `doctor --json` report a read-only **migration inventory** — `migration.adapters`, `migration.repoIds`, `migration.retiredCards`, `migration.summary` — so an owner can see everything an older workspace still needs migrated before approving anything. It is report-only: no writes, and no change to doctor's exit status.
+- New `agentos adapters explain <file>` reports the classification, managed-block status with byte offsets, the reason for a conflict, the legacy section span, and the next command for one adapter path — including when `.agentos/project.yaml` fails validation.
+- **Adopting custom-content adapters.** An adapter that holds custom project knowledge with a stale AgentOS section interleaved in it is now classified `adopt` instead of an ownership conflict. `agentos doctor --fix --adopt-custom-adapters` replaces only that byte span — custom bytes before and after it are preserved verbatim and one `.agentos.bak` is written — and `agentos doctor --fix --dry-run` previews every planned adapter change read-only. A plain `doctor --fix` still refuses and names the flag.
+- **Repository ID normalization.** `agentos doctor --fix --normalize-repo-ids [--dry-run]` renames a non-canonical repo ID (`frontend_client` → `frontend-client`) together with its repo note, preserving every other byte of `project.yaml` (comments, quoting, key order), and records an audit note under `.agentos/runs/`. It refuses with zero writes on any ambiguity: colliding IDs, both note files present, or a mapping that cannot be edited line-by-line.
+- **Retired card cleanup.** Retired skill cards now carry per-card eligibility — `prunable` when their bytes hash-match a card body a real AgentOS version installed, `manual-review` otherwise. `agentos doctor --fix --prune-retired` removes only provably-generated cards, leaves forks reported and untouched, and rebuilds the local-skills index in `.agentos/skills.md`.
+
+### Changed
+
+- A non-canonical repository ID is no longer a parse-time failure that blocks every command: it is a reported, fixable `doctor` problem, so the rest of the diagnostics (adapter scan, agents, tasks, git state) still run. Genuinely unmigratable configs still fail closed exactly as before.
+
+### Fixed
+
+- Repository IDs are written into file paths (`.agentos/repos/<id>.md`) and into generated cards, so they are validated as safe workspace-relative path fragments with a conservative character set; a key like `../../../victim` can no longer create or delete a file outside the workspace.
+- `doctor --fix --normalize-repo-ids` now runs the workspace boundary preflight like every other mutating command, so a symlinked `.agentos/repos` cannot redirect the rename out of the workspace.
+
 ## [0.4.0] - 2026-09-14
 
 ### Agents

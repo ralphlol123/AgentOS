@@ -4,6 +4,7 @@ import { readImportSource } from './import-source.js';
 import { appendContextRecord, literalMarkdown, markdownHeadings, markdownSection } from './markdown.js';
 import { collectRunHandoffGitState } from './git-evidence.js';
 import { canonicalAgentId, resolveAgentAlias, resolveSkillAlias, RETIRED_AGENT_IDS, RETIRED_SKILL_IDS, SKILL_ALIASES, agentDeprecationNotice, skillDeprecationNotice } from './aliases.js';
+import { LEGACY_SKILL_CARD_HASHES } from './legacy-skill-shapes.js';
 import { access, chmod, link, mkdir, open, readFile, readdir, rename, rm, stat, lstat, realpath } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -541,6 +542,84 @@ function isSingleLegacyAdapterSection(trimmed, section) {
         return true;
     return LEGACY_ADAPTER_TEMPLATES.some((template) => template.test(normalized));
 }
+// True when any line of [startIdx, endIdx] sits inside a fenced code block (or
+// opens one), i.e. the matched text is a documentation example rather than a
+// section AgentOS wrote. Uses the same fence rules as marker detection: a fence
+// only closes on the same character with at least the opener's length and
+// nothing but spaces/tabs after it.
+function spanIsFenced(content, startIdx, endIdx) {
+    let open = null;
+    let inside = false;
+    forEachAdapterLine(content, (line, lineStart) => {
+        if (lineStart > endIdx)
+            return;
+        const fenceMarker = parseFenceMarker(line);
+        if (open) {
+            if (fenceMarker && fenceMarker.char === open.char && fenceMarker.length >= open.length && /^[ \t]*$/.test(fenceMarker.rest)) {
+                open = null;
+                return;
+            }
+            if (lineStart >= startIdx)
+                inside = true;
+            return;
+        }
+        if (fenceMarker) {
+            open = fenceMarker;
+            if (lineStart >= startIdx)
+                inside = true;
+            return;
+        }
+    });
+    return inside;
+}
+// Locates one contiguous historical AgentOS section embedded in custom content
+// - the real-world upgrade shape, where a root `AGENTS.md` holds project
+// knowledge with a stale bootloader interleaved in it. Candidate spans are
+// matched line-range by line-range against the same closed set of byte-exact
+// historical bodies used for whole-file recognition (never a fuzzy
+// "looks AgentOS-ish" search), and only a single maximal match is adoptable:
+// two candidates, or a candidate inside a fenced code block, are reported as
+// ambiguous so AgentOS never guesses which bytes it owns.
+function locateLegacyEmbeddedSection(content, nl) {
+    const lines = content.split(nl);
+    const offsets = [];
+    let cursor = 0;
+    for (const line of lines) {
+        offsets.push(cursor);
+        cursor += line.length + nl.length;
+    }
+    const spans = [];
+    for (let start = 0; start < lines.length; start++) {
+        if (!lines[start].trim())
+            continue;
+        for (let end = start + 1; end <= lines.length; end++) {
+            const candidate = lines.slice(start, end).join('\n');
+            if (!LEGACY_ADAPTER_TEMPLATES.some((template) => template.test(candidate)))
+                continue;
+            spans.push({ startIdx: offsets[start], endIdx: offsets[end - 1] + lines[end - 1].length });
+        }
+    }
+    if (!spans.length)
+        return { kind: 'none' };
+    // Keep maximal spans only: a shorter match inside a longer one is the same
+    // section, not a second candidate.
+    const maximal = spans.filter((span) => !spans.some((other) => other !== span
+        && other.startIdx <= span.startIdx && other.endIdx >= span.endIdx
+        && (other.startIdx < span.startIdx || other.endIdx > span.endIdx)));
+    const distinct = [...new Map(maximal.map((span) => [`${span.startIdx}:${span.endIdx}`, span])).values()]
+        .sort((a, b) => a.startIdx - b.startIdx);
+    if (distinct.length > 1) {
+        return {
+            kind: 'ambiguous',
+            reason: `file contains ${distinct.length} distinct legacy AgentOS sections; AgentOS cannot tell which one it owns, so nothing was changed - remove the stale duplicate section(s) by hand`,
+        };
+    }
+    const span = distinct[0];
+    if (spanIsFenced(content, span.startIdx, span.endIdx)) {
+        return { kind: 'ambiguous', reason: 'a legacy AgentOS section appears inside a fenced code block (a documentation example); it is never treated as an owned section' };
+    }
+    return { kind: 'found', startIdx: span.startIdx, endIdx: span.endIdx };
+}
 // Classifies a file with no managed-block markers that is not empty. Only
 // returns a migratable kind when ownership of the AgentOS-looking content is
 // unambiguous; anything else - including a file that merely mentions
@@ -559,6 +638,13 @@ function classifyUnmarkedAdapterContent(content, trimmed, section) {
             return { kind: 'legacy-bounded', prefixEnd: idx };
         }
     }
+    // Custom content with exactly one legacy AgentOS section interleaved in it is
+    // adoptable, but only under an explicit opt-in - see planAdapterFiles.
+    const embedded = locateLegacyEmbeddedSection(content, detectAdapterNewline(content));
+    if (embedded.kind === 'found')
+        return { kind: 'legacy-embedded', startIdx: embedded.startIdx, endIdx: embedded.endIdx };
+    if (embedded.kind === 'ambiguous')
+        return { kind: 'conflict', reason: embedded.reason };
     if (countKnownLegacyPhrases(content) > 0 || /\bAgentOS\b/.test(content)) {
         return { kind: 'conflict', reason: 'file contains AgentOS-related content that does not match a recognized managed-block or legacy layout; resolve manually, then re-run doctor --fix' };
     }
@@ -623,6 +709,24 @@ async function planAdapterReconciliation(path, section) {
         return { action: 'migrate', content: buildFreshManagedFile(section, nl), needsBackup: true, sourceSnapshot };
     if (classification.kind === 'legacy-bounded')
         return { action: 'migrate', content: joinPrefixWithManagedBlock(content.slice(0, classification.prefixEnd), section, nl), needsBackup: true, sourceSnapshot };
+    if (classification.kind === 'legacy-embedded') {
+        // Replace exactly the legacy byte span with the canonical managed block.
+        // Everything before and after it - the owner's custom knowledge - is
+        // carried over verbatim, and the block uses the file's own newline style.
+        const before = content.slice(0, classification.startIdx);
+        const after = content.slice(classification.endIdx);
+        // Nothing after the span means nothing to separate: a file that ended
+        // without a trailing newline must still end that way, so that literally
+        // only the matched span changes.
+        const suffix = after === '' ? '' : (after.startsWith(nl) ? after : `${nl}${after}`);
+        return {
+            action: 'adopt',
+            content: `${before}${buildManagedBlockText(section, nl)}${suffix}`,
+            needsBackup: true,
+            sourceSnapshot,
+            legacySpan: [classification.startIdx, classification.endIdx],
+        };
+    }
     return { action: 'append', content: joinPrefixWithManagedBlock(content, section, nl), needsBackup: true, sourceSnapshot };
 }
 async function backupAdapterFileOnce(path, sourceSnapshot) {
@@ -664,7 +768,7 @@ function detectDuplicateAdapterTargets(targets) {
 // per target at write time: the decision "what should this file become" is
 // made exactly once per command, closing the gap where an apply-time reread
 // could reclassify a target against bytes that moved since preflight.
-async function planAdapterFiles(targets) {
+async function planAdapterFiles(targets, options = {}) {
     const duplicates = detectDuplicateAdapterTargets(targets);
     const duplicatePaths = new Set(duplicates.map((d) => d.resolvedPath));
     const conflicts = duplicates.map(({ path, reason }) => ({ path, reason }));
@@ -676,6 +780,15 @@ async function planAdapterFiles(targets) {
         plans.push({ target, plan });
         if (plan.action === 'conflict')
             conflicts.push({ path: target.label, reason: plan.reason });
+        // Adoption edits a file that also holds hand-written content, so it is never
+        // part of a default repair: without the explicit opt-in the whole command
+        // still makes zero changes, exactly as an ownership conflict does.
+        if (plan.action === 'adopt' && !options.allowAdopt) {
+            conflicts.push({
+                path: target.label,
+                reason: 'holds custom content interleaved with a legacy AgentOS section; re-run with `agentos doctor --fix --adopt-custom-adapters` to replace only that section (your custom bytes are preserved and one .agentos.bak is written)',
+            });
+        }
     }
     if (conflicts.length)
         throw new AdapterConflictError(conflicts);
@@ -719,8 +832,8 @@ async function applyAdapterPlans(plans) {
 // Test-only: exercises the plan/apply split directly so a test can prove the
 // apply phase honors a precomputed plan even if the file changes underneath
 // it afterward, instead of rereading/reclassifying at write time.
-export async function __planAdapterFilesForTests(targets) {
-    return planAdapterFiles(targets);
+export async function __planAdapterFilesForTests(targets, options = {}) {
+    return planAdapterFiles(targets, options);
 }
 export async function __applyAdapterPlansForTests(plans) {
     return applyAdapterPlans(plans);
@@ -2026,14 +2139,37 @@ async function doctorAgentOSUnlocked(options = {}) {
         const result = doctorResult({ root: null, fix: Boolean(options.fix), problems: ['No .agentos directory found.'], warnings: [], diagnostics: [], migration: emptyMigrationInventory() });
         return options.json ? withJsonText(result) : { ...result, text: 'AgentOS doctor: FAIL\nNo .agentos directory found.' };
     }
+    // `doctor --fix --dry-run` is a read-only preview of exactly what the repair
+    // would do to each adapter file - including which files would be adopted -
+    // computed with the same pure planner the real fix uses.
+    if (options.fix && options.dryRun) {
+        const preview = await previewAdapterPlans(root, {
+            adoptCustomAdapters: Boolean(options.adoptCustomAdapters),
+            pruneRetired: Boolean(options.pruneRetired),
+        });
+        return options.json ? withJsonText(preview) : preview;
+    }
+    // Migrations are never implicit, including for library callers: asking for an
+    // opt-in migration without `fix` is a usage error, not a silent no-op.
+    if (!options.fix && (options.adoptCustomAdapters || options.pruneRetired)) {
+        const requested = [options.adoptCustomAdapters ? '--adopt-custom-adapters' : null, options.pruneRetired ? '--prune-retired' : null].filter(Boolean).join(' and ');
+        return doctorResult({
+            root,
+            fix: false,
+            problems: [`${requested} require --fix; migrations never run implicitly.`],
+            warnings: [],
+            diagnostics: [],
+            migration: emptyMigrationInventory(),
+        });
+    }
     const projectPath = join(root, '.agentos/project.yaml');
     let projectConfigError = null;
     const migrationNotes = [];
     if (options.fix) {
         try {
             await withMutationTransaction(async () => {
-                await fixAgentOSAdapters(root);
-                migrationNotes.push(...(await fixLegacyCatalogState(root)));
+                await fixAgentOSAdapters(root, { allowAdopt: Boolean(options.adoptCustomAdapters) });
+                migrationNotes.push(...(await fixLegacyCatalogState(root, { pruneRetired: Boolean(options.pruneRetired) })));
             });
         }
         catch (error) {
@@ -2168,6 +2304,10 @@ async function doctorAgentOSUnlocked(options = {}) {
             adapterInventory.push(adapterInventoryEntry(root, target, plan));
             if (plan.action === 'conflict')
                 problems.push(`${target.label} adapter ownership is ambiguous: ${plan.reason}`);
+            // Adoption is offered, never assumed: the file also holds hand-written
+            // content, so the owner opts in explicitly.
+            else if (plan.action === 'adopt')
+                problems.push(`${target.label} holds custom content interleaved with a legacy AgentOS section; run \`agentos doctor --fix --adopt-custom-adapters\` to replace only that section (custom bytes are preserved, one .agentos.bak is written)`);
             // A valid managed block whose content no longer matches the canonical
             // section is reported directly here, even when custom text elsewhere in
             // the file happens to satisfy the substring checks above - those checks
@@ -2491,7 +2631,7 @@ async function assertRepoBoundaries(root, repos) {
         }
     }
 }
-async function fixAgentOSAdapters(root) {
+async function fixAgentOSAdapters(root, options = {}) {
     await assertWorkspaceBoundaries(root);
     const projectPath = join(root, '.agentos/project.yaml');
     await assertProjectYamlWellFormed(projectPath);
@@ -2507,7 +2647,7 @@ async function fixAgentOSAdapters(root) {
     // anywhere makes this command a strict no-op rather than a partial repair.
     // The returned plans are applied verbatim below, without rereading/
     // reclassifying each target a second time at write time.
-    const adapterPlans = await planAdapterFiles(adapterTargets);
+    const adapterPlans = await planAdapterFiles(adapterTargets, { allowAdopt: options.allowAdopt });
     await mkdirTracked(join(root, '.agentos/agents'));
     await mkdirTracked(join(root, '.agentos/engines'));
     await mkdirTracked(join(root, '.agentos/repos'));
@@ -2613,7 +2753,7 @@ async function checkLegacyCatalogState(root, project, warnings) {
 // Safe migration of clearly-generated retired agent cards (slice 4). Runs
 // inside doctor --fix's mutation transaction. Never deletes or overwrites a
 // customized card, and never touches native engine copies (.claude/.opencode).
-async function fixLegacyCatalogState(root) {
+async function fixLegacyCatalogState(root, options = {}) {
     const actions = [];
     let agentFiles = [];
     try {
@@ -2642,6 +2782,53 @@ async function fixLegacyCatalogState(root) {
             actions.push(`migrated generated agent card ${file} -> ${canonical}.md`);
         }
     }
+    // Opt-in completion (slice 4): retired *skill* cards were detection-only, and
+    // a stale local-skills index was never rebuilt. Removal is deletion, not
+    // replacement, so it only ever touches cards whose bytes hash-match a body
+    // this tool really installed - a fork is reported and left alone.
+    if (options.pruneRetired) {
+        for (const entry of (await listLocalSkillFiles(root)).slice().sort((a, b) => a.relPath.localeCompare(b.relPath))) {
+            if (!RETIRED_SKILL_IDS.has(entry.id))
+                continue;
+            const canonical = SKILL_ALIASES[entry.id];
+            if (!skillCardIsHistoricallyGenerated(entry.id, await safeRead(entry.abs))) {
+                actions.push(`left customized retired skill card ${entry.relPath} untouched (review by hand; canonical skill is '${canonical}')`);
+                continue;
+            }
+            const cardDir = dirname(entry.abs);
+            let siblings = [];
+            try {
+                siblings = await readdir(cardDir);
+            }
+            catch { }
+            // Order matters: when the card is the directory's only entry, track the
+            // *directory* while it still contains the card. The mutation transaction
+            // widens to a broader path by replacing the narrower snapshot it holds, so
+            // deleting the file first and then tracking the (now empty) directory
+            // would record an empty directory - a later failure in the same
+            // transaction would then roll the directory back empty and the card would
+            // be gone for good.
+            if (siblings.every((name) => name === basename(entry.abs)))
+                await removeTracked(cardDir);
+            else
+                await removeTracked(entry.abs);
+            try {
+                if ((await readdir(cardDir)).length === 0 && await exists(cardDir))
+                    await removeTracked(cardDir);
+            }
+            catch { }
+            actions.push(`removed generated retired skill card ${entry.relPath} -> '${canonical}'`);
+        }
+        const skillsMdPath = join(root, '.agentos/skills.md');
+        const beforeIndex = await safeRead(skillsMdPath);
+        if (beforeIndex) {
+            const nextIndex = await ensureLocalSkillsSection(root, beforeIndex);
+            if (nextIndex !== beforeIndex) {
+                await writeFileAtomic(skillsMdPath, nextIndex);
+                actions.push('refreshed .agentos/skills.md local-skills index after pruning');
+            }
+        }
+    }
     return actions;
 }
 // ---------------------------------------------------------------------------
@@ -2661,6 +2848,7 @@ const MIGRATION_NEXT = {
     update: 'run `agentos doctor --fix` to refresh the stale managed block',
     migrate: 'run `agentos doctor --fix` to convert this historical adapter',
     append: 'run `agentos doctor --fix` to add the managed block after your content',
+    adopt: 'run `agentos doctor --fix --adopt-custom-adapters` to replace only the legacy AgentOS section; your custom bytes are preserved and one `.agentos.bak` is written',
     conflict: 'resolve manually, then re-run `agentos doctor --fix`',
 };
 function emptyMigrationInventory() {
@@ -2681,8 +2869,13 @@ function adapterInventoryEntry(root, target, plan) {
         label: target.label,
         path,
         classification: plan.action,
-        safe: plan.action !== 'conflict',
+        // `safe` means "AgentOS can classify this unambiguously AND a default
+        // `doctor --fix` would be allowed to apply it". `adopt` is deliberately not
+        // safe by that definition: the file also holds hand-written content, so a
+        // consumer must check requiresOptIn before acting.
+        safe: plan.action !== 'conflict' && plan.action !== 'adopt',
         ...(plan.action === 'conflict' ? { reason: plan.reason } : {}),
+        ...(plan.action === 'adopt' ? { requiresOptIn: true, legacySpan: plan.legacySpan } : {}),
         next: MIGRATION_NEXT[plan.action] ?? 'review manually',
     };
 }
@@ -2856,6 +3049,20 @@ function skillsMdReferencesRetiredId(text, id) {
     const details = new RegExp(`Details:\\s+\\.agentos/skills/[^/]+/${escapeRegExp(id)}/SKILL\\.md`, 'm');
     return bullet.test(text) || details.test(text);
 }
+// SHA-256 over UTF-8 bytes with CRLF normalized to LF - the same normalization
+// the allowlist was generated with, so a card copied between platforms still
+// matches its historical body.
+function normalizedSkillCardHash(content) {
+    return createHash('sha256').update(Buffer.from(String(content).replace(/\r\n/g, '\n'), 'utf8')).digest('hex');
+}
+// True only when the card's bytes are byte-for-byte a body some AgentOS version
+// really installed for this ID (see src/legacy-skill-shapes.ts, regenerated from
+// this repository's own history). Any edit - even one character - changes the
+// hash, so a fork can never be mistaken for a generated card.
+function skillCardIsHistoricallyGenerated(id, content) {
+    const allowed = LEGACY_SKILL_CARD_HASHES[id];
+    return Array.isArray(allowed) && allowed.includes(normalizedSkillCardHash(content));
+}
 // Eligibility vocabulary:
 //   prunable          - bytes match a recognized historical generated body; opt-in cleanup may remove it
 //   already-canonical - same, and the canonical card is already installed, so only the stale file remains
@@ -2896,14 +3103,18 @@ async function buildRetiredCardInventory(root) {
         if (!RETIRED_SKILL_IDS.has(entry.id))
             continue;
         const canonical = SKILL_ALIASES[entry.id];
+        const generated = skillCardIsHistoricallyGenerated(entry.id, await safeRead(entry.abs));
+        const eligibility = generated ? (localSkillIds.has(canonical) ? 'already-canonical' : 'prunable') : 'manual-review';
         entries.push({
             kind: 'skill',
             id: entry.id,
             canonical,
             path: entry.relPath,
-            eligibility: 'manual-review',
+            eligibility,
             canonicalInstalled: localSkillIds.has(canonical),
-            next: `confirm whether this is a local fork, then run \`agentos skills remove ${entry.id}\` and \`agentos skills add ${canonical}\``,
+            next: eligibility === 'manual-review'
+                ? `confirm whether this is a local fork, then run \`agentos skills remove ${entry.id}\` and \`agentos skills add ${canonical}\``
+                : `run \`agentos doctor --fix --prune-retired\` to remove this provably-generated card and repair the local index`,
         });
     }
     const skillsMd = await safeRead(join(root, '.agentos/skills.md'));
@@ -2955,6 +3166,105 @@ function renderManagedBlockLine(managed) {
     if (managed.status === 'conflict')
         return `Managed block: conflict — ${managed.reason}`;
     return 'Managed block: none';
+}
+// Read-only preview behind `agentos doctor --fix --dry-run`: the same pure
+// per-target planner the real repair uses, reported instead of applied. It
+// shows which files would be adopted and the exact byte span that would be
+// replaced, so an owner can review the one destructive-looking step before
+// allowing it.
+async function previewAdapterPlans(root, options = {}) {
+    const projectRel = '.agentos/project.yaml';
+    let configError = null;
+    try {
+        await assertProjectYamlWellFormed(join(root, projectRel));
+    }
+    catch (error) {
+        if (error instanceof ProjectConfigError)
+            configError = error;
+        else
+            throw error;
+    }
+    if (configError) {
+        return { ok: false, dry_run: true, root, fix: true, adopt_custom_adapters: Boolean(options.adoptCustomAdapters), adapters: [], summary: { adapter_count: 0, adopt_count: 0, conflict_count: 0 }, text: `AgentOS doctor --fix: DRY RUN\nCannot plan adapter changes: ${configError.message}` };
+    }
+    await assertWorkspaceBoundaries(root);
+    const project = await safeRead(join(root, projectRel));
+    const policy = adapterPolicy(project);
+    const allRepos = parseReposFromProjectYaml(project, { includeRoot: true });
+    // Same repo-level preflight the real fix performs, so the preview cannot
+    // advertise a child adapter the repair would refuse to touch.
+    await assertRepoBoundaries(root, allRepos);
+    const workspaceKind = firstYamlValue(project, 'workspace_kind') ?? 'unknown';
+    const targets = [
+        ...rootAdapterTargets(root, workspaceKind, allRepos),
+        ...childAdapterTargets(root, policy.pointers ? allRepos.filter((repo) => repo.path !== '.') : []),
+    ];
+    const duplicatePaths = new Set(detectDuplicateAdapterTargets(targets).map((duplicate) => duplicate.resolvedPath));
+    const entries = [];
+    for (const target of targets) {
+        const path = relativePosix(root, target.path);
+        if (duplicatePaths.has(resolve(target.path))) {
+            entries.push({ label: target.label, path, classification: 'conflict', reason: 'multiple repo entries in .agentos/project.yaml resolve to this same adapter file', next: MIGRATION_NEXT.conflict });
+            continue;
+        }
+        const plan = await planAdapterReconciliation(target.path, target.section);
+        entries.push({
+            label: target.label,
+            path,
+            classification: plan.action,
+            ...(plan.action === 'conflict' ? { reason: plan.reason } : {}),
+            ...(plan.action === 'adopt' ? { requiresOptIn: true, legacySpan: plan.legacySpan } : {}),
+            next: MIGRATION_NEXT[plan.action] ?? 'review manually',
+        });
+    }
+    const adoptable = entries.filter((entry) => entry.classification === 'adopt');
+    const lines = entries.map((entry) => {
+        const span = entry.legacySpan ? ` (legacy section bytes ${entry.legacySpan[0]}-${entry.legacySpan[1]})` : '';
+        const reason = entry.reason ? ` — ${entry.reason}` : '';
+        return `- ${entry.label}: ${entry.classification}${span}${reason}`;
+    });
+    // Retired-card pruning is part of the same repair, so a preview that omitted
+    // it would misdescribe what `doctor --fix --prune-retired` is about to do.
+    const retired = options.pruneRetired ? await buildRetiredCardInventory(root) : [];
+    const wouldPrune = retired.filter((card) => card.eligibility === 'prunable' || card.eligibility === 'already-canonical');
+    const wouldKeep = retired.filter((card) => card.eligibility !== 'prunable' && card.eligibility !== 'already-canonical');
+    return {
+        ok: true,
+        dry_run: true,
+        root,
+        fix: true,
+        adopt_custom_adapters: Boolean(options.adoptCustomAdapters),
+        prune_retired: Boolean(options.pruneRetired),
+        adapters: entries,
+        retired_cards: { would_prune: wouldPrune, manual_review: wouldKeep },
+        summary: {
+            adapter_count: entries.length,
+            adopt_count: adoptable.length,
+            conflict_count: entries.filter((entry) => entry.classification === 'conflict').length,
+            retired_prune_count: wouldPrune.length,
+        },
+        text: [
+            'AgentOS doctor --fix: DRY RUN',
+            `Root: ${root}`,
+            options.adoptCustomAdapters
+                ? 'Adoption: enabled (--adopt-custom-adapters)'
+                : 'Adoption: not enabled; adoptable files are listed but would not be changed',
+            options.pruneRetired
+                ? `Retired cards: ${wouldPrune.length} would be pruned, ${wouldKeep.length} left for manual review`
+                : 'Retired cards: not enabled; no card would be pruned',
+            '',
+            ...lines,
+            '',
+            adoptable.length
+                ? `${adoptable.length} adapter file(s) would have only their legacy AgentOS section replaced; bytes outside that span are preserved and one .agentos.bak is written per file.`
+                : 'No adapter would be adopted.',
+            ...(options.pruneRetired && wouldPrune.length
+                ? [`${wouldPrune.length} provably-generated retired card(s) would be removed: ${wouldPrune.map((card) => card.path || card.id).join(', ')}`]
+                : []),
+            'No files were written.',
+            'This preview covers adapter changes and (with --prune-retired) retired-card pruning. Re-run without --dry-run to apply.',
+        ].join('\n'),
+    };
 }
 async function explainAdapterAgentOS(fileRaw, options = {}) {
     const cwd = resolve(options.cwd ?? process.cwd());
@@ -3034,6 +3344,8 @@ async function explainAdapterAgentOS(fileRaw, options = {}) {
         lines.push(`Classification: ${plan.action}`);
         if (plan.action === 'conflict')
             lines.push(`Reason: ${plan.reason}`);
+        if (plan.action === 'adopt')
+            lines.push(`Legacy section: bytes ${plan.legacySpan[0]}-${plan.legacySpan[1]} (only this span is replaced; every other byte is preserved)`);
         lines.push(`Next: ${MIGRATION_NEXT[plan.action] ?? 'review manually'}`);
         return { ok: true, text: lines.join('\n') };
     }

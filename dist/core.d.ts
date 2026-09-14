@@ -15,7 +15,9 @@ type AdapterPlanEntry = {
     target: AdapterTarget;
     plan: any;
 };
-export declare function __planAdapterFilesForTests(targets: AdapterTarget[]): Promise<AdapterPlanEntry[]>;
+export declare function __planAdapterFilesForTests(targets: AdapterTarget[], options?: {
+    allowAdopt?: boolean;
+}): Promise<AdapterPlanEntry[]>;
 export declare function __applyAdapterPlansForTests(plans: AdapterPlanEntry[]): Promise<void>;
 export declare function statusAgentOS(options?: any): Promise<{
     ok: boolean;
