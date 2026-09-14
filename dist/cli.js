@@ -76,12 +76,18 @@ async function main() {
                 process.exitCode = 1;
                 return;
             }
+            if (flags['prune-retired'] && !flags.fix) {
+                console.log('Usage: agentos doctor --fix --prune-retired\n--prune-retired only runs together with --fix (migrations are never implicit).');
+                process.exitCode = 1;
+                return;
+            }
             const result = await doctorAgentOS({
                 cwd: process.cwd(),
                 fix: flags.fix,
                 json: flags.json,
                 dryRun: flags['dry-run'],
                 adoptCustomAdapters: flags['adopt-custom-adapters'],
+                pruneRetired: flags['prune-retired'],
             });
             console.log(result.text);
             process.exitCode = result.ok ? 0 : 1;
@@ -276,7 +282,7 @@ async function askDefault(rl, question, defaultValue) {
     return answer.trim() || defaultValue;
 }
 function printHelp() {
-    console.log(`AgentOS for Projects v${VERSION}\n\nUsage:\n  agentos init [--new|--existing] [--agents minimal|detected|developer,tester,reviewer,release-manager] [--refresh] [--dry-run]\n  agentos status\n  agentos handoff\n  agentos run handoff [--engine name] [--role role] [--repo repo] [--worktree path] [--phase slug] [--reason reason] [--dry-run]\n  agentos doctor [--fix] [--json]\n  agentos doctor --fix [--dry-run] [--adopt-custom-adapters]\n  agentos doctor --fix --normalize-repo-ids [--dry-run]\n  agentos adapters explain <file>\n  agentos compact [--dry-run]\n  agentos link-obsidian [--vault <path> --dest <folder> --link <note> --create]\n  agentos obsidian link-workspace --vault <path> --dest <folder> [--create] [--dry-run]\n  agentos obsidian status\n  agentos skills list [--installed]\n  agentos skills remove <skill-id> [--dry-run]\n  agentos skills add [--detected] [skill-id|category-pack,...] [--mode summary|full] [--dry-run] [--replace]\n  agentos agents list [--installed]\n  agentos agents add <agent-id|template-file> [--name id] [--dry-run] [--replace]\n  agentos templates list\n  agentos templates show <id>\n  agentos templates copy <id> [--dry-run] [--replace]\n  agentos templates validate <file> --type agent|skill\n  agentos templates import <url-or-file> --type agent|skill --name <id> [--mode summary|full] [--dry-run] [--yes] [--replace] [--expected-sha256 hash]\n  agentos migrate claude --preserve [--dry-run]\n  agentos prompt [claude|codex|opencode|hermes]\n\nCore rule:\n  One AgentOS per product/workspace.\n  Many repos inside it.\n  Each task declares which repo(s) are in scope.`);
+    console.log(`AgentOS for Projects v${VERSION}\n\nUsage:\n  agentos init [--new|--existing] [--agents minimal|detected|developer,tester,reviewer,release-manager] [--refresh] [--dry-run]\n  agentos status\n  agentos handoff\n  agentos run handoff [--engine name] [--role role] [--repo repo] [--worktree path] [--phase slug] [--reason reason] [--dry-run]\n  agentos doctor [--fix] [--json]\n  agentos doctor --fix [--dry-run] [--adopt-custom-adapters] [--prune-retired]\n  agentos doctor --fix --normalize-repo-ids [--dry-run]\n  agentos adapters explain <file>\n  agentos compact [--dry-run]\n  agentos link-obsidian [--vault <path> --dest <folder> --link <note> --create]\n  agentos obsidian link-workspace --vault <path> --dest <folder> [--create] [--dry-run]\n  agentos obsidian status\n  agentos skills list [--installed]\n  agentos skills remove <skill-id> [--dry-run]\n  agentos skills add [--detected] [skill-id|category-pack,...] [--mode summary|full] [--dry-run] [--replace]\n  agentos agents list [--installed]\n  agentos agents add <agent-id|template-file> [--name id] [--dry-run] [--replace]\n  agentos templates list\n  agentos templates show <id>\n  agentos templates copy <id> [--dry-run] [--replace]\n  agentos templates validate <file> --type agent|skill\n  agentos templates import <url-or-file> --type agent|skill --name <id> [--mode summary|full] [--dry-run] [--yes] [--replace] [--expected-sha256 hash]\n  agentos migrate claude --preserve [--dry-run]\n  agentos prompt [claude|codex|opencode|hermes]\n\nCore rule:\n  One AgentOS per product/workspace.\n  Many repos inside it.\n  Each task declares which repo(s) are in scope.`);
 }
 main();
 //# sourceMappingURL=cli.js.map

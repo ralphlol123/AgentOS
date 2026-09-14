@@ -4,6 +4,7 @@ import { readImportSource } from './import-source.js';
 import { appendContextRecord, literalMarkdown, markdownHeadings, markdownSection } from './markdown.js';
 import { collectRunHandoffGitState } from './git-evidence.js';
 import { canonicalAgentId, resolveAgentAlias, resolveSkillAlias, RETIRED_AGENT_IDS, RETIRED_SKILL_IDS, SKILL_ALIASES, agentDeprecationNotice, skillDeprecationNotice } from './aliases.js';
+import { LEGACY_SKILL_CARD_HASHES } from './legacy-skill-shapes.js';
 import { access, chmod, link, mkdir, open, readFile, readdir, rename, rm, stat, lstat, realpath, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -2058,7 +2059,7 @@ async function doctorAgentOSUnlocked(options: any = {}) {
     try {
       await withMutationTransaction(async () => {
         await fixAgentOSAdapters(root, { allowAdopt: Boolean(options.adoptCustomAdapters) });
-        migrationNotes.push(...(await fixLegacyCatalogState(root)));
+        migrationNotes.push(...(await fixLegacyCatalogState(root, { pruneRetired: Boolean(options.pruneRetired) })));
       });
     } catch (error) {
       if (error instanceof ProjectConfigError) projectConfigError = error;
@@ -2617,7 +2618,7 @@ async function checkLegacyCatalogState(root, project, warnings) {
 // Safe migration of clearly-generated retired agent cards (slice 4). Runs
 // inside doctor --fix's mutation transaction. Never deletes or overwrites a
 // customized card, and never touches native engine copies (.claude/.opencode).
-async function fixLegacyCatalogState(root) {
+async function fixLegacyCatalogState(root, options: { pruneRetired?: boolean } = {}) {
   const actions: string[] = [];
   let agentFiles: string[] = [];
   try { agentFiles = await readdir(join(root, '.agentos/agents')); } catch {}
@@ -2639,6 +2640,36 @@ async function fixLegacyCatalogState(root) {
       await writeFileAtomic(target, agentMd(AGENT_DEFINITIONS[canonical]));
       await removeTracked(source);
       actions.push(`migrated generated agent card ${file} -> ${canonical}.md`);
+    }
+  }
+
+  // Opt-in completion (slice 4): retired *skill* cards were detection-only, and
+  // a stale local-skills index was never rebuilt. Removal is deletion, not
+  // replacement, so it only ever touches cards whose bytes hash-match a body
+  // this tool really installed - a fork is reported and left alone.
+  if (options.pruneRetired) {
+    for (const entry of (await listLocalSkillFiles(root)).slice().sort((a, b) => a.relPath.localeCompare(b.relPath))) {
+      if (!RETIRED_SKILL_IDS.has(entry.id)) continue;
+      const canonical = SKILL_ALIASES[entry.id];
+      if (!skillCardIsHistoricallyGenerated(entry.id, await safeRead(entry.abs))) {
+        actions.push(`left customized retired skill card ${entry.relPath} untouched (review by hand; canonical skill is '${canonical}')`);
+        continue;
+      }
+      await removeTracked(entry.abs);
+      const cardDir = dirname(entry.abs);
+      try {
+        if ((await readdir(cardDir)).length === 0) await removeTracked(cardDir);
+      } catch {}
+      actions.push(`removed generated retired skill card ${entry.relPath} -> '${canonical}'`);
+    }
+    const skillsMdPath = join(root, '.agentos/skills.md');
+    const beforeIndex = await safeRead(skillsMdPath);
+    if (beforeIndex) {
+      const nextIndex = await ensureLocalSkillsSection(root, beforeIndex);
+      if (nextIndex !== beforeIndex) {
+        await writeFileAtomic(skillsMdPath, nextIndex);
+        actions.push('refreshed .agentos/skills.md local-skills index after pruning');
+      }
     }
   }
   return actions;
@@ -2860,6 +2891,22 @@ function skillsMdReferencesRetiredId(text: string, id: string) {
   return bullet.test(text) || details.test(text);
 }
 
+// SHA-256 over UTF-8 bytes with CRLF normalized to LF - the same normalization
+// the allowlist was generated with, so a card copied between platforms still
+// matches its historical body.
+function normalizedSkillCardHash(content: string) {
+  return createHash('sha256').update(Buffer.from(String(content).replace(/\r\n/g, '\n'), 'utf8')).digest('hex');
+}
+
+// True only when the card's bytes are byte-for-byte a body some AgentOS version
+// really installed for this ID (see src/legacy-skill-shapes.ts, regenerated from
+// this repository's own history). Any edit - even one character - changes the
+// hash, so a fork can never be mistaken for a generated card.
+function skillCardIsHistoricallyGenerated(id: string, content: string) {
+  const allowed = LEGACY_SKILL_CARD_HASHES[id];
+  return Array.isArray(allowed) && allowed.includes(normalizedSkillCardHash(content));
+}
+
 // Eligibility vocabulary:
 //   prunable          - bytes match a recognized historical generated body; opt-in cleanup may remove it
 //   already-canonical - same, and the canonical card is already installed, so only the stale file remains
@@ -2895,14 +2942,18 @@ async function buildRetiredCardInventory(root: string) {
   for (const entry of localSkills.slice().sort((a, b) => a.id.localeCompare(b.id))) {
     if (!RETIRED_SKILL_IDS.has(entry.id)) continue;
     const canonical = SKILL_ALIASES[entry.id];
+    const generated = skillCardIsHistoricallyGenerated(entry.id, await safeRead(entry.abs));
+    const eligibility = generated ? (localSkillIds.has(canonical) ? 'already-canonical' : 'prunable') : 'manual-review';
     entries.push({
       kind: 'skill',
       id: entry.id,
       canonical,
       path: entry.relPath,
-      eligibility: 'manual-review',
+      eligibility,
       canonicalInstalled: localSkillIds.has(canonical),
-      next: `confirm whether this is a local fork, then run \`agentos skills remove ${entry.id}\` and \`agentos skills add ${canonical}\``,
+      next: eligibility === 'manual-review'
+        ? `confirm whether this is a local fork, then run \`agentos skills remove ${entry.id}\` and \`agentos skills add ${canonical}\``
+        : `run \`agentos doctor --fix --prune-retired\` to remove this provably-generated card and repair the local index`,
     });
   }
   const skillsMd = await safeRead(join(root, '.agentos/skills.md'));
