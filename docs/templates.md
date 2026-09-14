@@ -12,9 +12,9 @@ templates/
   examples/
 ```
 
-These files are the canonical source for both catalogs and installation paths. `skills add` and `templates copy` install the same complete skill workflow; `agents add`, initialization, and `templates copy` use the same role contracts. All existing IDs are retained: 20 skills and 9 agents. Data and security roles are available explicitly but are not added to the detected/minimal team by this cleanup.
+These files are the canonical source for both catalogs and installation paths. `skills add` and `templates copy` install the same complete skill workflow; `agents add`, initialization, and `templates copy` use the same role contracts. The consolidated catalog contains 15 workflow skills and 9 unchanged agent roles. Data and security roles are available explicitly but are not added to the detected/minimal team by this cleanup.
 
-Project-local runtime copies live under `.agentos/` and may be customized per workspace. Re-init and `doctor --fix` preserve existing cards. Add refuses differing cards without `--replace`; template copy refuses any existing target without `--replace`. Review before replacing: older built-in copies may now appear as `custom-or-imported` because their bytes differ from the canonical source. This slice does not migrate or delete them.
+Project-local runtime copies live under `.agentos/` and may be customized per workspace. Re-init and `doctor --fix` preserve existing cards. Add refuses differing cards without `--replace`; template copy refuses any existing target without `--replace`. Review before replacing: older built-in copies may now appear as `custom-or-imported` because their bytes differ from the canonical source. This slice does not migrate or delete them. Retired skill IDs are unavailable for new installs in this intermediate slice; aliases and migration diagnostics are deferred to slice 4. Existing local or engine-native cards remain on disk.
 
 ## Template registry commands
 
@@ -28,8 +28,8 @@ Show a template by ID:
 
 ```bash
 agentos templates show agent:project-manager
-agentos templates show skill:frontend/ai-slop-design-review
-agentos templates show skill:github/conventional-commit
+agentos templates show skill:frontend/frontend-design
+agentos templates show skill:github/commit-messages
 ```
 
 Copy a template into the current project's `.agentos/` runtime context:
@@ -38,15 +38,15 @@ Copy a template into the current project's `.agentos/` runtime context:
 agentos templates copy agent:security-reviewer --dry-run
 agentos templates copy agent:security-reviewer
 agentos templates copy agent:security-reviewer --replace
-agentos templates copy skill:frontend/ai-slop-design-review
-agentos templates copy skill:github/conventional-commit
+agentos templates copy skill:frontend/frontend-design
+agentos templates copy skill:github/commit-messages
 ```
 
 Validate a local template file before copying/importing it:
 
 ```bash
 agentos templates validate templates/agents/project-manager.md --type agent
-agentos templates validate templates/skills/frontend/ai-slop-design-review.md --type skill
+agentos templates validate templates/skills/frontend/frontend-design.md --type skill
 ```
 
 Template IDs use:
@@ -108,20 +108,24 @@ Agent files are written to:
 
 ## Skill templates
 
-Current repository skill templates include:
+The complete skill catalog (framework-neutral core procedures):
 
 ```text
-templates/skills/core/systematic-debugging.md
+templates/skills/core/debugging.md
 templates/skills/core/test-driven-development.md
-templates/skills/core/shared-repo-git-safety.md
-templates/skills/frontend/ai-slop-design-review.md
-templates/skills/frontend/frontend-build-verification.md
-templates/skills/backend/backend-service-verification.md
-templates/skills/backend/nestjs-feature-implementation.md
-templates/skills/fullstack/full-system-rehearsal.md
-templates/skills/github/conventional-commit.md
-templates/skills/github/github-pr-workflow.md
-templates/skills/github/github-actions-verification.md
+templates/skills/core/git-safety.md
+templates/skills/core/verification.md
+templates/skills/core/documentation.md
+templates/skills/core/code-review.md
+templates/skills/frontend/frontend-design.md
+templates/skills/frontend/frontend-testing.md
+templates/skills/backend/backend-testing.md
+templates/skills/backend/backend-development.md
+templates/skills/backend/authorization.md
+templates/skills/fullstack/integration-testing.md
+templates/skills/github/commit-messages.md
+templates/skills/github/pull-request-workflow.md
+templates/skills/github/ci-verification.md
 ```
 
 List built-in skill IDs and packs:
@@ -147,20 +151,20 @@ agentos skills add backend-pack,github-pack
 Add a specific skill:
 
 ```bash
-agentos skills add systematic-debugging
-agentos skills add conventional-commit
+agentos skills add debugging
+agentos skills add commit-messages
 ```
 
 The default `summary` mode remains accepted for compatibility:
 
 ```bash
-agentos skills add frontend-build-verification --mode summary
+agentos skills add frontend-testing --mode summary
 ```
 
 Both modes retain every procedure, verification, safety gate, and note. Only the `mode` frontmatter value differs; no first-three-steps truncation remains. `templates copy` preserves the canonical `full` metadata:
 
 ```bash
-agentos skills add frontend-build-verification --mode full
+agentos skills add frontend-testing --mode full
 ```
 
 Local skill files are written to:
@@ -174,6 +178,35 @@ AgentOS also updates:
 ```text
 .agentos/skills.md
 ```
+
+## Optional references and replacement safety
+
+Package references live in `templates/skills/<category>/<id>/references/`. Both
+`skills add` modes and `templates copy` install their exact bytes beside `SKILL.md`,
+under `.agentos/skills/<category>/<id>/references/`. References are support files,
+not additional catalog entries. The current package supplies NestJS, Nuxt, GitHub,
+GitHub Actions, Conventional Commits, and backend/security review guidance; no
+reference means no stack-specific guidance is claimed.
+
+Resolve the assigned repo first, detect its stack/version, and follow its project
+conventions before consulting only an applicable reference. The `github` pack is
+a category label, not a mandate to use GitHub or Conventional Commits.
+
+- Preview lists card and reference targets without writing.
+- All targets are preflighted before installing; differing existing references,
+  even without a `SKILL.md`, require explicit `--replace`. Review local content first.
+- Replacement updates shipped files only; unrelated owner reference files stay intact.
+- Cards, references, and the index use per-file atomic writes and best-effort
+  in-process command rollback. This is not crash-safe cross-file atomicity or an OS sandbox.
+- `skills remove <id> --dry-run` previews removal; apply removes the entire selected
+  local skill folder, including its references. Native engine copies are untouched.
+- `skills list --installed` requires both a matching card and every shipped reference
+  to match before reporting `source-match`. Missing/modified references are reported
+  as `custom-or-imported`; additional owner-only reference files are not classified.
+
+`commit-messages` is read-only and staged-first, reports untracked files explicitly,
+produces separate messages per independent repo, and discovers the project's commit
+convention. It does not automatically format, stage, commit, or push.
 
 ## Schemas and examples
 

@@ -107,10 +107,12 @@ Add a pack or individual skill:
 
 ```bash
 agentos skills add frontend-pack
-agentos skills add systematic-debugging --mode full
+agentos skills add debugging --mode full
 ```
 
-Local skills are written under `.agentos/skills/` and indexed in `.agentos/skills.md`.
+Local skills and their optional `references/` files are written under `.agentos/skills/<category>/<id>/` and indexed in `.agentos/skills.md`. Both modes preserve the complete procedure. Load references only for the assigned repo's actual stack; project conventions prevail.
+
+Use `agentos skills list --installed` to distinguish installed cards from the available catalog. Merely listing a skill does not install it. Differing local cards/references require reviewed, explicit `--replace`; native engine copies remain untouched. See [the consolidated catalog and compatibility limits](templates.md).
 
 ## Use templates
 
@@ -138,7 +140,7 @@ Copy a built-in registry template:
 agentos templates copy agent:project-manager --dry-run
 agentos templates copy agent:project-manager
 agentos templates copy agent:project-manager --replace
-agentos templates copy skill:frontend/ai-slop-design-review
+agentos templates copy skill:frontend/frontend-design
 ```
 
 Validate a template file:

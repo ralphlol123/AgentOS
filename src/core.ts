@@ -1199,19 +1199,16 @@ async function skillsAgentOSUnlocked(options: any = {}) {
   if (unknown.length) throw new Error(`Unknown skill(s): ${unknown.join(', ')}. Run \`agentos skills list\` to see available skills and category packs.`);
 
   const skills = ids.map((id) => SKILL_BY_ID[id]);
-  for (const skill of skills) await assertCardReplacement(join(root, skillRelPath(skill)), renderSkillTemplate(skill, mode), options.replace);
+  const files = skills.flatMap(skill => skillInstallFiles(skill, mode));
+  await preflightSkillFiles(root, files, options.replace);
   const lines = [`AgentOS skills add${dryRun ? ' dry run' : ''}`, `Root: ${root}`, `Mode: ${mode}`, ''];
-  for (const skill of skills) {
-    const relPath = skillRelPath(skill);
-    lines.push(`${dryRun ? 'Would write' : 'Wrote'}: ${relPath}`);
-  }
+  for (const file of files) lines.push(`${dryRun ? 'Would write' : 'Wrote'}: ${file.relPath}`);
 
   if (!dryRun) {
     await withMutationTransaction(async () => {
-      for (const skill of skills) {
-        const relPath = skillRelPath(skill);
-        await mkdirTracked(dirname(join(root, relPath)));
-        await writeFileAtomic(join(root, relPath), renderSkillTemplate(skill, mode));
+      for (const file of files) {
+        await mkdirTracked(dirname(join(root, file.relPath)));
+        await writeFileAtomic(join(root, file.relPath), file.content);
       }
       const skillsMdPath = join(root, '.agentos/skills.md');
       const existing = await safeRead(skillsMdPath);
@@ -1237,7 +1234,12 @@ async function installedCards(root: string, type: 'agent' | 'skill') {
     const agent = type === 'agent' ? AGENT_DEFINITIONS[item.id] : undefined;
     const candidates = skill ? [renderSkillTemplate(skill, 'summary'), renderSkillTemplate(skill, 'full')] : agent ? [agentMd(agent)] : [];
     for (const template of registry.filter(entry => entry.type === type && entry.name === item.id)) candidates.push(await safeRead(template.absPath));
-    entries.push({ id: item.id, path: item.relPath, state: candidates.includes(content) ? 'source-match' : 'custom-or-imported', ...(type === 'agent' ? { enabled: enabled.has(item.id) } : {}) });
+    let referencesMatch = true;
+    for (const ref of skill?.references ?? []) {
+      const bytes = await readFile(join(dirname(item.abs), ref.path)).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
+      if (!bytes?.equals(ref.content)) referencesMatch = false;
+    }
+    entries.push({ id: item.id, path: item.relPath, state: candidates.includes(content) && referencesMatch ? 'source-match' : 'custom-or-imported', ...(type === 'agent' ? { enabled: enabled.has(item.id) } : {}) });
   }
   return { ok: true, entries, text: [`AgentOS installed ${type} cards`, ...entries.map(entry => `- ${entry.id}: ${entry.path} (${entry.state}${type === 'agent' ? `; ${entry.enabled ? 'enabled' : 'not enabled'}` : ''})`), ...(entries.length ? [] : ['No local cards installed.'])].join('\n') };
 }
@@ -1455,13 +1457,17 @@ async function templatesCopyAgentOS(root, options: any = {}) {
   if (await exists(targetPath) && !replace) {
     return { ok: false, root, dryRun, entry, text: [`AgentOS templates copy: FAIL`, `Root: ${root}`, `Template: ${entry.id}`, '', `Target already exists: ${relPath}`, 'Refusing to overwrite local project context by default.', 'Use --replace only after reviewing the existing file and confirming replacement is intended.'].join('\n') };
   }
+  const files = entry.type === 'skill' ? skillInstallFiles(SKILL_BY_ID[entry.name], 'full') : [{ relPath, content }];
+  await preflightSkillFiles(root, files, replace);
   const action = dryRun ? (replace ? 'Would replace' : 'Would copy') : (replace ? 'Replaced' : 'Copied');
-  const lines = [`AgentOS templates copy${dryRun ? ' dry run' : ''}`, `Root: ${root}`, `Template: ${entry.id}`, '', `${action}: ${entry.relPath} -> ${relPath}`];
+  const lines = [`AgentOS templates copy${dryRun ? ' dry run' : ''}`, `Root: ${root}`, `Template: ${entry.id}`, '', `${action}: ${entry.relPath} -> ${relPath}`, ...files.slice(1).map(file => `${action}: ${file.relPath}`)];
   if (!dryRun) {
     if (entry.type === 'agent') await assertProjectYamlWellFormed(join(root, '.agentos/project.yaml'));
     await withMutationTransaction(async () => {
-      await mkdirTracked(dirname(targetPath));
-      await writeFileAtomic(targetPath, content);
+      for (const file of files) {
+        await mkdirTracked(dirname(join(root, file.relPath)));
+        await writeFileAtomic(join(root, file.relPath), file.content);
+      }
       if (entry.type === 'agent') await registerProjectAgent(root, entry.name);
       else await writeFileAtomic(join(root, '.agentos/skills.md'), await ensureLocalSkillsSection(root, await safeRead(join(root, '.agentos/skills.md'))));
     });
@@ -1555,6 +1561,22 @@ async function registerProjectAgent(root, id) {
   if (id === 'project-manager' && !capabilities.planning) capabilities.planning = 'project-manager';
   project.agents = { profile: 'custom', capabilities, enabled: [...enabled] };
   await writeFileAtomic(projectPath, dumpProjectYaml(project));
+}
+
+function skillInstallFiles(skill: SkillDefinition, mode: 'summary' | 'full') {
+  const card = skillRelPath(skill);
+  return [{ relPath: card, content: Buffer.from(renderSkillTemplate(skill, mode)) },
+    ...skill.references.map(ref => ({ relPath: `${dirname(card)}/${ref.path}`, content: ref.content }))];
+}
+
+async function preflightSkillFiles(root: string, files: { relPath: string; content: string | Buffer }[], replace = false) {
+  for (const file of files) {
+    await assertBoundaryTarget(root, file.relPath);
+    const path = join(root, file.relPath);
+    if (!replace && await exists(path) && !(await readFile(path)).equals(Buffer.from(file.content))) {
+      throw new Error(`Existing card or reference differs: ${path}. Review it and use --replace to overwrite local content.`);
+    }
+  }
 }
 
 function skillRelPath(skill: SkillDefinition) {
@@ -2521,7 +2543,7 @@ function subrepoAgentsPointer(repo) {
     '- `../.agentos/engines/codex.md` when using Codex',
     '- load only when relevant: the specific `../.agentos/skills/**/SKILL.md` files for the requested role/task',
     '',
-    'If the user asks for a commit message or mentions a project skill such as `conventional-commit`, use `../.agentos/skills.md` to locate that AgentOS skill and load its `SKILL.md`; do not require the user to repeat the AgentOS skill path every time.',
+    'If the user asks for a commit message or mentions a project skill such as `commit-messages`, use `../.agentos/skills.md` to locate that AgentOS skill and load its `SKILL.md`; do not require the user to repeat the AgentOS skill path every time.',
     '',
     'Rules: do not treat this repo as the whole product; declare scope; edit only in scope; no commit/push unless asked; update parent handoff/tasks.',
     '',
@@ -2548,7 +2570,7 @@ function subrepoClaudePointer(repo) {
     '- `../.agentos/engines/claude-code.md`',
     '- load only when relevant: the specific `../.agentos/skills/**/SKILL.md` files for the requested role/task',
     '',
-    'If the user asks for a commit message or mentions a project skill such as `conventional-commit`, use `../.agentos/skills.md` to locate that AgentOS skill and load its `SKILL.md`; do not require the user to repeat the AgentOS skill path every time.',
+    'If the user asks for a commit message or mentions a project skill such as `commit-messages`, use `../.agentos/skills.md` to locate that AgentOS skill and load its `SKILL.md`; do not require the user to repeat the AgentOS skill path every time.',
     '',
     'Declare scope; edit only in scope; no commit/push unless asked; update parent handoff/tasks.',
     '',
@@ -2595,12 +2617,12 @@ function knowledgeMd(options: any = {}) {
 function skillsMd(agentSelection) {
   const enabled = new Set(agentSelection.enabled);
   const sections = [];
-  if (enabled.has('implementation')) sections.push(['implementation', ['systematic-debugging — use for unclear bugs.', 'test-driven-development — use when adding or changing behavior.']]);
-  if (enabled.has('frontend-engineer')) sections.push(['frontend-engineer', ['frontend-build-verification — use before declaring frontend work done.', 'nuxt-e2e-testing — use for Nuxt route/browser behavior.', 'ai-slop-design-review — use for UI polish/design review.']]);
-  if (enabled.has('backend-engineer')) sections.push(['backend-engineer', ['backend-service-verification — use for local backend service verification.', 'nestjs-auth-guards — use for NestJS auth/permission work.']]);
-  if (enabled.has('qa')) sections.push(['qa', ['nuxt-e2e-testing — use for browser-driven frontend QA.', 'backend-service-verification — use for backend smoke/e2e verification.']]);
-  if (enabled.has('code-reviewer')) sections.push(['code-reviewer', ['shared-repo-git-safety — use before reviewing staged or unstaged changes in shared repos.', 'requesting-code-review — use for pre-commit review.']]);
-  if (enabled.has('release-manager')) sections.push(['release-manager', ['shared-repo-git-safety — use before commit/push/merge.', 'github-pr-workflow — use for PR lifecycle work.']]);
+  if (enabled.has('implementation')) sections.push(['implementation', ['debugging — use for unclear bugs.', 'test-driven-development — use when adding or changing behavior.']]);
+  if (enabled.has('frontend-engineer')) sections.push(['frontend-engineer', ['frontend-testing — use before declaring frontend work done.', 'frontend-design — use for UI design/review/polish.']]);
+  if (enabled.has('backend-engineer')) sections.push(['backend-engineer', ['backend-development — use when implementing backend features.', 'backend-testing — use before declaring backend work done.', 'authorization — use for auth/permission work.']]);
+  if (enabled.has('qa')) sections.push(['qa', ['frontend-testing — use for browser-driven frontend QA.', 'backend-testing — use for backend smoke/e2e verification.', 'integration-testing — use for cross-component rehearsal.']]);
+  if (enabled.has('code-reviewer')) sections.push(['code-reviewer', ['git-safety — use before reviewing staged or unstaged changes in shared repos.', 'code-review — use for preparing and performing reviews.']]);
+  if (enabled.has('release-manager')) sections.push(['release-manager', ['git-safety — use before commit/push/merge.', 'pull-request-workflow — use for PR lifecycle work.']]);
   return `# Skills\n\nPolicy: on-demand.\n\nLoad only skills relevant to the current task and assigned agent role. Do not bulk-load all skills.\n\n${sections.map(([role, skills]) => `## ${role}\n\n${skills.map((skill) => `- ${skill}`).join('\n')}`).join('\n\n')}\n`;
 }
 function decisionsMd() { return '# Decisions\n\nDurable decisions go here with date, reason, alternatives, and status.\n'; }

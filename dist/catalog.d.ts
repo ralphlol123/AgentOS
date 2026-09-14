@@ -5,6 +5,10 @@ export interface SkillDefinition {
     category: SkillCategory;
     summary: string;
     content: string;
+    references: {
+        path: string;
+        content: Buffer;
+    }[];
 }
 export interface AgentDefinition {
     id: string;

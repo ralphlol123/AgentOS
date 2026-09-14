@@ -75,13 +75,13 @@ test('all import previews are nonmutating including yes and blocked sources', as
 test('agent imports register and add requires explicit replacement for customized cards', async t => {
   const root = await fixture(t), source = join(root, 'source.md'); await writeFile(source, '# Agent\nLicense: MIT\nUse evidence.'); await templatesAgentOS({ cwd: root, command: 'import', type: 'agent', name: 'custom-auditor', source, yes: true });
   assert.ok(parse(await readFile(join(root, '.agentos/project.yaml'), 'utf8')).agents.enabled.includes('custom-auditor'));
-  await skillsAgentOS({ cwd: root, add: 'systematic-debugging' }); const path = join(root, '.agentos/skills/core/systematic-debugging/SKILL.md'); await writeFile(path, 'customized'); await assert.rejects(skillsAgentOS({ cwd: root, add: 'systematic-debugging' }), /replace/i); assert.equal(await readFile(path, 'utf8'), 'customized'); await skillsAgentOS({ cwd: root, add: 'systematic-debugging', replace: true }); assert.notEqual(await readFile(path, 'utf8'), 'customized');
+  await skillsAgentOS({ cwd: root, add: 'debugging' }); const path = join(root, '.agentos/skills/core/debugging/SKILL.md'); await writeFile(path, 'customized'); await assert.rejects(skillsAgentOS({ cwd: root, add: 'debugging' }), /replace/i); assert.equal(await readFile(path, 'utf8'), 'customized'); await skillsAgentOS({ cwd: root, add: 'debugging', replace: true }); assert.notEqual(await readFile(path, 'utf8'), 'customized');
   await writeFile(join(root, '.agentos/agents/qa.md'), 'customized'); await assert.rejects(agentsAgentOS({ cwd: root, add: 'qa' }), /replace/i);
 });
 test('CLI rejects typos/invalid flags and boolean flags do not consume IDs', async t => {
   const root = await fixture(t);
   for (const args of [['typo'], ['skills', 'add', '--mode'], ['init', '--dry-run=maybe']]) { const r = spawnSync(process.execPath, [cli, ...args], { cwd: root, encoding: 'utf8' }); assert.ifError(r.error); assert.equal(r.status, 1); }
-  const r = spawnSync(process.execPath, [cli, 'skills', 'add', '--dry-run', 'systematic-debugging'], { cwd: root, encoding: 'utf8' }); assert.ifError(r.error); assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /systematic-debugging/); assert.equal(await exists(join(root, '.agentos/skills')), false);
+  const r = spawnSync(process.execPath, [cli, 'skills', 'add', '--dry-run', 'debugging'], { cwd: root, encoding: 'utf8' }); assert.ifError(r.error); assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /debugging/); assert.equal(await exists(join(root, '.agentos/skills')), false);
 });
 test('HTTP imports bound redirects, total duration, size and aborted responses', async t => {
   const server = createServer((req, res) => {
@@ -105,7 +105,7 @@ test('validation rejects required sections found only in fenced examples', async
 });
 test('writer lock excludes another process, releases on error and explains stale recovery', async t => {
   const root = await fixture(t);
-  await withWorkspaceWriter(root, async () => { const r = spawnSync(process.execPath, [cli, 'skills', 'add', 'systematic-debugging'], { cwd: root, encoding: 'utf8' }); assert.ifError(r.error); assert.equal(r.status, 1); assert.match(r.stderr, /writer lock exists/); assert.equal((await doctorAgentOS({ cwd: root })).ok, true); });
+  await withWorkspaceWriter(root, async () => { const r = spawnSync(process.execPath, [cli, 'skills', 'add', 'debugging'], { cwd: root, encoding: 'utf8' }); assert.ifError(r.error); assert.equal(r.status, 1); assert.match(r.stderr, /writer lock exists/); assert.equal((await doctorAgentOS({ cwd: root })).ok, true); });
   await assert.rejects(withWorkspaceWriter(root, async () => { throw new Error('fixture failure'); }), /fixture failure/); assert.equal(await exists(join(root, '.agentos-write.lock')), false);
   await writeFile(join(root, '.agentos-write.lock'), JSON.stringify({ pid: 2147483647, host: hostname() })); await assert.rejects(initAgentOS({ cwd: root }), /no longer running.*remove only this lock file/s); assert.equal(await exists(join(root, '.agentos-write.lock')), true);
 });
@@ -117,7 +117,7 @@ test('Git evidence excludes sensitive/renamed content and handles spaces/newline
   git(root, ['restore', '--', '.env']); git(root, ['mv', '.env', 'ordinary.txt']); const renamed = await runHandoffAgentOS({ cwd: root }); assert.ok(renamed.git.omittedFiles.includes('ordinary.txt')); assert.doesNotMatch(await readFile(renamed.handoffPath, 'utf8'), /SYNTHETIC_PRIVATE_FIXTURE/);
 });
 test('installed inventory reports customization/activation and validates every registry card', async t => {
-  const root = await fixture(t); await skillsAgentOS({ cwd: root, add: 'systematic-debugging' }); assert.equal((await skillsAgentOS({ cwd: root, list: true, installed: true })).entries[0].state, 'source-match'); await writeFile(join(root, '.agentos/skills/core/systematic-debugging/SKILL.md'), '# Custom'); assert.equal((await skillsAgentOS({ cwd: root, list: true, installed: true })).entries[0].state, 'custom-or-imported'); assert.equal((await agentsAgentOS({ cwd: root, list: true, installed: true })).entries.find(e => e.id === 'qa').enabled, true);
+  const root = await fixture(t); await skillsAgentOS({ cwd: root, add: 'debugging' }); assert.equal((await skillsAgentOS({ cwd: root, list: true, installed: true })).entries[0].state, 'source-match'); await writeFile(join(root, '.agentos/skills/core/debugging/SKILL.md'), '# Custom'); assert.equal((await skillsAgentOS({ cwd: root, list: true, installed: true })).entries[0].state, 'custom-or-imported'); assert.equal((await agentsAgentOS({ cwd: root, list: true, installed: true })).entries.find(e => e.id === 'qa').enabled, true);
   for (const entry of (await templatesAgentOS({ cwd: root, command: 'list' })).entries) assert.equal((await templatesAgentOS({ cwd: root, command: 'validate', source: entry.absPath, type: entry.type })).ok, true, entry.id);
 });
 test('refresh adds discovered repos without overwriting configured identity/commands', async t => {
@@ -130,11 +130,11 @@ test('reinit does not read unrelated archive contents to snapshot existing direc
   const root = await fixture(t), path = join(root, '.agentos/runs/private-history.md'); await writeFile(path, 'history'); await chmod(path, 0); try { await initAgentOS({ cwd: root }); } finally { await chmod(path, 0o600); } assert.equal(await readFile(path, 'utf8'), 'history');
 });
 test('skill removal preserves unrelated prose, CRLF and fenced examples', async t => {
-  const root = await fixture(t); await skillsAgentOS({ cwd: root, add: 'systematic-debugging' });
+  const root = await fixture(t); await skillsAgentOS({ cwd: root, add: 'debugging' });
   const path = join(root, '.agentos/skills.md');
-  const original = '# Skills\r\n\r\n- systematic-debugging — use it\r\n  Details: .agentos/skills/core/systematic-debugging/SKILL.md\r\n\r\nHuman notes remain.\r\n```md\r\n- systematic-debugging — example only\r\n```\r\n';
-  await writeFile(path, original); await skillsAgentOS({ cwd: root, remove: 'systematic-debugging' });
-  assert.ok((await readFile(path, 'utf8')).startsWith(original.replace('- systematic-debugging — use it\r\n  Details: .agentos/skills/core/systematic-debugging/SKILL.md\r\n', '')));
+  const original = '# Skills\r\n\r\n- debugging — use it\r\n  Details: .agentos/skills/core/debugging/SKILL.md\r\n\r\nHuman notes remain.\r\n```md\r\n- debugging — example only\r\n```\r\n';
+  await writeFile(path, original); await skillsAgentOS({ cwd: root, remove: 'debugging' });
+  assert.ok((await readFile(path, 'utf8')).startsWith(original.replace('- debugging — use it\r\n  Details: .agentos/skills/core/debugging/SKILL.md\r\n', '')));
 });
 test('knowledge markers inside examples fail closed without rewriting context', async t => {
   const root = await fixture(t), vault = join(root, 'vault'); await mkdir(vault);

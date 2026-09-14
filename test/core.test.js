@@ -93,7 +93,7 @@ test('init --existing uses detected agent profile with core delivery team, detec
   const skills = await readFile(join(root, '.agentos/skills.md'), 'utf8');
   assert.match(skills, /Policy: on-demand/);
   assert.match(skills, /frontend-engineer/);
-  assert.match(skills, /backend-service-verification/);
+  assert.match(skills, /backend-testing/);
 });
 
 
@@ -333,7 +333,7 @@ test('child repo pointers expose parent AgentOS skills and engine adapters for s
   assert.match(agents, /parent AgentOS root/i);
   assert.match(agents, /\.\.\/\.agentos\/skills\.md/);
   assert.match(agents, /\.\.\/\.agentos\/engines\/opencode\.md/);
-  assert.match(agents, /conventional-commit|kargax-commit/);
+  assert.match(agents, /commit-messages/);
   assert.match(agents, /do not require the user to repeat/i);
 
   assert.match(claude, /\.\.\/\.agentos\/skills\.md/);
@@ -877,9 +877,9 @@ test('skill mode compatibility preserves complete workflows in both modes', asyn
   const root = await tempProject();
   await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
 
-  await skillsAgentOS({ cwd: root, add: 'systematic-debugging' });
-  const summary = await readFile(join(root, '.agentos/skills/core/systematic-debugging/SKILL.md'), 'utf8');
-  assert.match(summary, /^---\nname: systematic-debugging\ncategory: core\nmode: summary\n/);
+  await skillsAgentOS({ cwd: root, add: 'debugging' });
+  const summary = await readFile(join(root, '.agentos/skills/core/debugging/SKILL.md'), 'utf8');
+  assert.match(summary, /^---\nname: debugging\ncategory: core\nmode: summary\n/);
   assert.match(summary, /Trigger:/);
   assert.match(summary, /## Procedure/);
   assert.match(summary, /## Verification/);
@@ -887,8 +887,8 @@ test('skill mode compatibility preserves complete workflows in both modes', asyn
 
   const fullRoot = await tempProject();
   await initAgentOS({ cwd: fullRoot, mode: 'new', yes: true, agents: 'minimal' });
-  await skillsAgentOS({ cwd: fullRoot, add: 'systematic-debugging', mode: 'full' });
-  const full = await readFile(join(fullRoot, '.agentos/skills/core/systematic-debugging/SKILL.md'), 'utf8');
+  await skillsAgentOS({ cwd: fullRoot, add: 'debugging', mode: 'full' });
+  const full = await readFile(join(fullRoot, '.agentos/skills/core/debugging/SKILL.md'), 'utf8');
   assert.match(full, /mode: full/);
   assert.match(full, /## Notes/);
   assert.equal(full, summary.replace('mode: summary', 'mode: full'));
@@ -898,15 +898,15 @@ test('skills add with a specific skill id writes only that skill and updates the
   const root = await tempProject();
   await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
 
-  const result = await skillsAgentOS({ cwd: root, add: 'ai-slop-design-review' });
+  const result = await skillsAgentOS({ cwd: root, add: 'frontend-design' });
   assert.equal(result.ok, true);
-  assert.deepEqual(result.skills, ['ai-slop-design-review']);
-  assert.equal(await exists(join(root, '.agentos/skills/frontend/ai-slop-design-review/SKILL.md')), true);
+  assert.deepEqual(result.skills, ['frontend-design']);
+  assert.equal(await exists(join(root, '.agentos/skills/frontend/frontend-design/SKILL.md')), true);
   assert.equal(await exists(join(root, '.agentos/skills/core')), false);
 
   const skillsMd = await readFile(join(root, '.agentos/skills.md'), 'utf8');
   assert.match(skillsMd, /Policy: on-demand/);
-  assert.match(skillsMd, /Details: \.agentos\/skills\/frontend\/ai-slop-design-review\/SKILL\.md/);
+  assert.match(skillsMd, /Details: \.agentos\/skills\/frontend\/frontend-design\/SKILL\.md/);
 });
 
 test('skills add supports category-pack aliases', async () => {
@@ -914,7 +914,7 @@ test('skills add supports category-pack aliases', async () => {
   await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
   const result = await skillsAgentOS({ cwd: root, add: 'github-pack' });
   assert.equal(result.ok, true);
-  assert.deepEqual(result.skills.slice().sort(), ['conventional-commit', 'github-actions-verification', 'github-code-review', 'github-pr-workflow']);
+  assert.deepEqual(result.skills.slice().sort(), ['ci-verification', 'commit-messages', 'pull-request-workflow']);
 });
 
 test('skills add rejects unknown skill ids loudly', async () => {
@@ -929,48 +929,48 @@ test('skills add rejects unknown skill ids loudly', async () => {
 test('skills add --dry-run reports planned writes without touching the filesystem', async () => {
   const root = await tempProject();
   await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
-  const result = await skillsAgentOS({ cwd: root, add: 'systematic-debugging', dryRun: true });
+  const result = await skillsAgentOS({ cwd: root, add: 'debugging', dryRun: true });
   assert.match(result.text, /Would write/);
-  assert.equal(await exists(join(root, '.agentos/skills/core/systematic-debugging/SKILL.md')), false);
+  assert.equal(await exists(join(root, '.agentos/skills/core/debugging/SKILL.md')), false);
 });
 
 test('skills remove --dry-run reports matching local skills without deleting files', async () => {
   const root = await tempProject();
   await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
-  await skillsAgentOS({ cwd: root, add: 'systematic-debugging,frontend-build-verification' });
+  await skillsAgentOS({ cwd: root, add: 'debugging,frontend-testing' });
 
-  const result = await skillsAgentOS({ cwd: root, remove: 'systematic-debugging', dryRun: true });
+  const result = await skillsAgentOS({ cwd: root, remove: 'debugging', dryRun: true });
   assert.equal(result.ok, true);
   assert.equal(result.dryRun, true);
-  assert.deepEqual(result.removed, ['systematic-debugging']);
+  assert.deepEqual(result.removed, ['debugging']);
   assert.match(result.text, /AgentOS skills remove dry run/);
-  assert.match(result.text, /Would remove: \.agentos\/skills\/core\/systematic-debugging\//);
+  assert.match(result.text, /Would remove: \.agentos\/skills\/core\/debugging\//);
   assert.match(result.text, /Would update: \.agentos\/skills\.md/);
-  assert.equal(await exists(join(root, '.agentos/skills/core/systematic-debugging/SKILL.md')), true);
+  assert.equal(await exists(join(root, '.agentos/skills/core/debugging/SKILL.md')), true);
 });
 
 test('skills remove deletes the AgentOS-local skill and updates the skills index only', async () => {
   const root = await tempProject();
   await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
-  await skillsAgentOS({ cwd: root, add: 'systematic-debugging,frontend-build-verification' });
-  await mkdir(join(root, '.claude/skills/systematic-debugging'), { recursive: true });
-  await writeFile(join(root, '.claude/skills/systematic-debugging/SKILL.md'), '# Native copy\n');
-  await mkdir(join(root, '.opencode/skills/systematic-debugging'), { recursive: true });
-  await writeFile(join(root, '.opencode/skills/systematic-debugging/SKILL.md'), '# Native copy\n');
+  await skillsAgentOS({ cwd: root, add: 'debugging,frontend-testing' });
+  await mkdir(join(root, '.claude/skills/debugging'), { recursive: true });
+  await writeFile(join(root, '.claude/skills/debugging/SKILL.md'), '# Native copy\n');
+  await mkdir(join(root, '.opencode/skills/debugging'), { recursive: true });
+  await writeFile(join(root, '.opencode/skills/debugging/SKILL.md'), '# Native copy\n');
 
-  const result = await skillsAgentOS({ cwd: root, remove: 'systematic-debugging' });
+  const result = await skillsAgentOS({ cwd: root, remove: 'debugging' });
   assert.equal(result.ok, true);
-  assert.deepEqual(result.removed, ['systematic-debugging']);
-  assert.equal(await exists(join(root, '.agentos/skills/core/systematic-debugging/SKILL.md')), false);
-  assert.equal(await exists(join(root, '.agentos/skills/frontend/frontend-build-verification/SKILL.md')), true);
-  assert.equal(await exists(join(root, '.claude/skills/systematic-debugging/SKILL.md')), true);
-  assert.equal(await exists(join(root, '.opencode/skills/systematic-debugging/SKILL.md')), true);
+  assert.deepEqual(result.removed, ['debugging']);
+  assert.equal(await exists(join(root, '.agentos/skills/core/debugging/SKILL.md')), false);
+  assert.equal(await exists(join(root, '.agentos/skills/frontend/frontend-testing/SKILL.md')), true);
+  assert.equal(await exists(join(root, '.claude/skills/debugging/SKILL.md')), true);
+  assert.equal(await exists(join(root, '.opencode/skills/debugging/SKILL.md')), true);
 
   const skillsMd = await readFile(join(root, '.agentos/skills.md'), 'utf8');
-  assert.doesNotMatch(skillsMd, /systematic-debugging/);
+  assert.doesNotMatch(skillsMd, /debugging/);
   assert.doesNotMatch(skillsMd, /### core/);
-  assert.match(skillsMd, /frontend-build-verification/);
-  assert.match(skillsMd, /Details: \.agentos\/skills\/frontend\/frontend-build-verification\/SKILL\.md/);
+  assert.match(skillsMd, /frontend-testing/);
+  assert.match(skillsMd, /Details: \.agentos\/skills\/frontend\/frontend-testing\/SKILL\.md/);
 });
 
 test('skills remove handles imported/local project skills and strips unmanaged index references', async () => {
@@ -978,14 +978,14 @@ test('skills remove handles imported/local project skills and strips unmanaged i
   await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
   await mkdir(join(root, '.agentos/skills/github/kargax-commit'), { recursive: true });
   await writeFile(join(root, '.agentos/skills/github/kargax-commit/SKILL.md'), '# KargaX Commit\n');
-  await writeFile(join(root, '.agentos/skills.md'), `# Skills\n\n## release-manager\n\n- kargax-commit — use before commits.\n  Details: .agentos/skills/github/kargax-commit/SKILL.md\n  Claude-native copy: .claude/skills/kargax-commit/SKILL.md\n\n- conventional-commit — keep this one.\n  Details: .agentos/skills/github/conventional-commit/SKILL.md\n`);
+  await writeFile(join(root, '.agentos/skills.md'), `# Skills\n\n## release-manager\n\n- kargax-commit — use before commits.\n  Details: .agentos/skills/github/kargax-commit/SKILL.md\n  Claude-native copy: .claude/skills/kargax-commit/SKILL.md\n\n- commit-messages — keep this one.\n  Details: .agentos/skills/github/commit-messages/SKILL.md\n`);
 
   const result = await skillsAgentOS({ cwd: root, remove: 'kargax-commit' });
   assert.equal(result.ok, true);
   assert.equal(await exists(join(root, '.agentos/skills/github/kargax-commit/SKILL.md')), false);
   const skillsMd = await readFile(join(root, '.agentos/skills.md'), 'utf8');
   assert.doesNotMatch(skillsMd, /kargax-commit/);
-  assert.match(skillsMd, /conventional-commit/);
+  assert.match(skillsMd, /commit-messages/);
 });
 
 test('skills remove rejects missing local skills loudly', async () => {
@@ -1009,17 +1009,17 @@ test('skills add --detected materializes core, frontend, backend, fullstack, and
   const result = await skillsAgentOS({ cwd: root, detected: true });
   assert.equal(result.ok, true);
   const expectedByCategory = {
-    core: 'systematic-debugging',
-    frontend: 'nuxt-e2e-testing',
-    backend: 'nestjs-feature-implementation',
-    fullstack: 'full-system-rehearsal',
-    github: 'github-pr-workflow',
+    core: 'debugging',
+    frontend: 'frontend-testing',
+    backend: 'backend-development',
+    fullstack: 'integration-testing',
+    github: 'pull-request-workflow',
   };
   for (const [category, id] of Object.entries(expectedByCategory)) {
     assert.equal(await exists(join(root, `.agentos/skills/${category}/${id}/SKILL.md`)), true, `${id} should be materialized`);
   }
   const skillsMd = await readFile(join(root, '.agentos/skills.md'), 'utf8');
-  assert.match(skillsMd, /Details: \.agentos\/skills\/core\/systematic-debugging\/SKILL\.md/);
+  assert.match(skillsMd, /Details: \.agentos\/skills\/core\/debugging\/SKILL\.md/);
 });
 
 test('skill catalog contains no project-specific skill ids', async () => {
@@ -1048,26 +1048,26 @@ test('CLI skills add --detected materializes skills for a project', async () => 
   const result = spawnSync(process.execPath, [join(process.cwd(), 'dist/cli.js'), 'skills', 'add', '--detected'], { cwd: root, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /AgentOS skills add/);
-  assert.equal(await exists(join(root, '.agentos/skills/core/systematic-debugging/SKILL.md')), true);
+  assert.equal(await exists(join(root, '.agentos/skills/core/debugging/SKILL.md')), true);
 });
 
 test('CLI skills remove supports dry-run for an installed local skill', async () => {
   const root = await tempProject();
   await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
-  await skillsAgentOS({ cwd: root, add: 'systematic-debugging' });
+  await skillsAgentOS({ cwd: root, add: 'debugging' });
 
-  const result = spawnSync(process.execPath, [join(process.cwd(), 'dist/cli.js'), 'skills', 'remove', 'systematic-debugging', '--dry-run'], { cwd: root, encoding: 'utf8' });
+  const result = spawnSync(process.execPath, [join(process.cwd(), 'dist/cli.js'), 'skills', 'remove', 'debugging', '--dry-run'], { cwd: root, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /AgentOS skills remove dry run/);
-  assert.match(result.stdout, /Would remove: \.agentos\/skills\/core\/systematic-debugging\//);
-  assert.equal(await exists(join(root, '.agentos/skills/core/systematic-debugging/SKILL.md')), true);
+  assert.match(result.stdout, /Would remove: \.agentos\/skills\/core\/debugging\//);
+  assert.equal(await exists(join(root, '.agentos/skills/core/debugging/SKILL.md')), true);
 });
 
 test('template library files are present for agents, skills, schemas, and examples', async () => {
   assert.equal(await exists(join(process.cwd(), 'templates/agents/project-manager.md')), true);
   assert.equal(await exists(join(process.cwd(), 'templates/agents/security-reviewer.md')), true);
-  assert.equal(await exists(join(process.cwd(), 'templates/skills/frontend/ai-slop-design-review.md')), true);
-  assert.equal(await exists(join(process.cwd(), 'templates/skills/github/conventional-commit.md')), true);
+  assert.equal(await exists(join(process.cwd(), 'templates/skills/frontend/frontend-design.md')), true);
+  assert.equal(await exists(join(process.cwd(), 'templates/skills/github/commit-messages.md')), true);
   assert.equal(await exists(join(process.cwd(), 'templates/schemas/agent-template.schema.json')), true);
   assert.equal(await exists(join(process.cwd(), 'templates/examples/imported-skill.example.md')), true);
 });
@@ -1078,8 +1078,8 @@ test('skills list and agents list expose built-in reusable templates', async () 
   const skills = await skillsAgentOS({ cwd: root, list: true });
   assert.equal(skills.ok, true);
   assert.match(skills.text, /frontend-pack/);
-  assert.match(skills.text, /ai-slop-design-review/);
-  assert.match(skills.text, /conventional-commit/);
+  assert.match(skills.text, /frontend-design/);
+  assert.match(skills.text, /commit-messages/);
   const agents = await agentsAgentOS({ cwd: root, list: true });
   assert.equal(agents.ok, true);
   assert.match(agents.text, /project-manager/);
@@ -1140,8 +1140,8 @@ test('templates list and show expose repository template registry entries', asyn
   assert.equal(list.ok, true);
   assert.match(list.text, /AgentOS template registry/);
   assert.match(list.text, /agent:project-manager/);
-  assert.match(list.text, /skill:frontend\/ai-slop-design-review/);
-  assert.match(list.text, /skill:github\/conventional-commit/);
+  assert.match(list.text, /skill:frontend\/frontend-design/);
+  assert.match(list.text, /skill:github\/commit-messages/);
 
   const shown = await templatesAgentOS({ cwd: root, command: 'show', id: 'agent:project-manager' });
   assert.equal(shown.ok, true);
@@ -1152,16 +1152,16 @@ test('templates list and show expose repository template registry entries', asyn
 test('templates copy materializes repository agent and skill templates', async () => {
   const root = await tempProject();
   await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
-  const dry = await templatesAgentOS({ cwd: root, command: 'copy', id: 'skill:frontend/ai-slop-design-review', dryRun: true });
+  const dry = await templatesAgentOS({ cwd: root, command: 'copy', id: 'skill:frontend/frontend-design', dryRun: true });
   assert.equal(dry.ok, true);
   assert.match(dry.text, /Would copy/);
-  assert.equal(await exists(join(root, '.agentos/skills/frontend/ai-slop-design-review/SKILL.md')), false);
+  assert.equal(await exists(join(root, '.agentos/skills/frontend/frontend-design/SKILL.md')), false);
 
-  const skill = await templatesAgentOS({ cwd: root, command: 'copy', id: 'skill:frontend/ai-slop-design-review' });
+  const skill = await templatesAgentOS({ cwd: root, command: 'copy', id: 'skill:frontend/frontend-design' });
   assert.equal(skill.ok, true);
-  assert.equal(await exists(join(root, '.agentos/skills/frontend/ai-slop-design-review/SKILL.md')), true);
+  assert.equal(await exists(join(root, '.agentos/skills/frontend/frontend-design/SKILL.md')), true);
   const skillsMd = await readFile(join(root, '.agentos/skills.md'), 'utf8');
-  assert.match(skillsMd, /Details: \.agentos\/skills\/frontend\/ai-slop-design-review\/SKILL\.md/);
+  assert.match(skillsMd, /Details: \.agentos\/skills\/frontend\/frontend-design\/SKILL\.md/);
 
   const agent = await templatesAgentOS({ cwd: root, command: 'copy', id: 'agent:security-reviewer' });
   assert.equal(agent.ok, true);
@@ -1435,10 +1435,10 @@ test('templates copy of a skill is unaffected by a malformed project.yaml', asyn
   const projectPath = join(root, '.agentos/project.yaml');
   await writeFile(projectPath, MALFORMED_PROJECT_YAML);
 
-  const skill = await templatesAgentOS({ cwd: root, command: 'copy', id: 'skill:frontend/ai-slop-design-review' });
+  const skill = await templatesAgentOS({ cwd: root, command: 'copy', id: 'skill:frontend/frontend-design' });
 
   assert.equal(skill.ok, true);
-  assert.equal(await exists(join(root, '.agentos/skills/frontend/ai-slop-design-review/SKILL.md')), true);
+  assert.equal(await exists(join(root, '.agentos/skills/frontend/frontend-design/SKILL.md')), true);
   const stillMalformed = await readFile(projectPath, 'utf8');
   assert.equal(stillMalformed, MALFORMED_PROJECT_YAML);
 });

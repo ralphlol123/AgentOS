@@ -1,18 +1,18 @@
 ---
-name: systematic-debugging
+name: debugging
 category: core
 mode: full
 summary: "use for unclear bugs or inconsistent reproduction."
 ---
 
-# Systematic Debugging
+# Debugging
 
-Trigger: Use when a bug's root cause is unclear or reproduction is inconsistent.
+Trigger: Use when a bug's root cause is unclear or reproduction is inconsistent, in any language or stack.
 
 ## Scope and safety
 
 - Read AgentOS project, memory, handoff, and tasks first. Confirm this skill is relevant to the assigned role and task; load only relevant repo/engine context.
-- Declare repo scope and protected paths. Use the project-specific verification commands from `.agentos/project.yaml` and the relevant repo notes; do not invent missing commands.
+- Declare repo scope and protected paths. Detect the assigned repo's actual stack/version from its project files, and use the project-specific verification commands from `.agentos/project.yaml` and the relevant repo notes; do not invent missing commands.
 - Do not touch secrets, `.env`, production config, migrations, deployments, or unrelated work without explicit approval. Do not stage, commit, push, or merge unless explicitly assigned.
 
 ## Procedure

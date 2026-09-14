@@ -264,8 +264,8 @@ agentos skills add --detected
 Add specific skills or category packs:
 
 ```bash
-agentos skills add systematic-debugging
-agentos skills add conventional-commit
+agentos skills add debugging
+agentos skills add commit-messages
 agentos skills add frontend-pack
 agentos skills add backend-pack,github-pack --mode full
 ```
@@ -276,13 +276,27 @@ Skills are written project-locally:
 .agentos/skills/<category>/<skill>/SKILL.md
 ```
 
-`.agentos/skills.md` remains an on-demand index. Agents should load only skills relevant to the current role/task.
+The catalog has 15 framework-neutral workflow skills. Both `skills add` modes and
+`templates copy` install the complete card plus its optional `references/` files
+with byte parity, per-file atomic writes, and best-effort command rollback. Load
+only references matching the assigned repo's actual stack; project conventions
+prevail. Existing differing cards or references require reviewed `--replace`, and
+unrelated owner reference files are preserved.
+
+`.agentos/skills.md` remains an on-demand index, not proof of installation. Use
+`agentos skills list --installed` for local inventory. The read-only `commit-messages`
+workflow prefers staged changes, reports untracked files, discovers commit
+conventions, and produces separate messages per independent repo; it never
+formats or stages automatically. See [the complete catalog](docs/templates.md).
+Retired skill IDs are unavailable for new installs in this intermediate slice;
+compatibility aliases and migration diagnostics are deferred, with existing local
+and native cards preserved.
 
 Remove a project-local AgentOS skill with dry-run first:
 
 ```bash
-agentos skills remove conventional-commit --dry-run
-agentos skills remove conventional-commit
+agentos skills remove commit-messages --dry-run
+agentos skills remove commit-messages
 ```
 
 Removal deletes matching `.agentos/skills/**/<skill-id>/` folders and updates `.agentos/skills.md`. It intentionally leaves native engine copies under `.claude/skills/` and `.opencode/skills/` untouched.
@@ -308,7 +322,7 @@ cd ../kargax-be
 claude
 ```
 
-The child pointer tells OpenCode/Codex/Hermes/Claude to resolve the relative AgentOS root (`..` for immediate children, deeper paths for nested repositories), read the root `.agentos/skills.md`, and then load only the specific `../.agentos/skills/**/SKILL.md` cards relevant to the task. Commit-message requests should resolve AgentOS skills such as `conventional-commit` or a project-local `kargax-commit` from the skills index without the user repeating the full path.
+The child pointer tells OpenCode/Codex/Hermes/Claude to resolve the relative AgentOS root (`..` for immediate children, deeper paths for nested repositories), read the root `.agentos/skills.md`, and then load only the specific `../.agentos/skills/**/SKILL.md` cards relevant to the task. Commit-message requests should resolve AgentOS skills such as `commit-messages` or an explicitly indexed project-local workflow from the skills index without the user repeating the full path.
 
 Run this after upgrading an older workspace so stale child pointers are repaired:
 
@@ -335,8 +349,8 @@ agentos templates list
 agentos templates show agent:project-manager
 agentos templates copy agent:project-manager --dry-run
 agentos templates copy agent:project-manager
-agentos templates copy skill:frontend/ai-slop-design-review
-agentos templates copy skill:github/conventional-commit
+agentos templates copy skill:frontend/frontend-design
+agentos templates copy skill:github/commit-messages
 agentos templates validate templates/agents/project-manager.md --type agent
 ```
 

@@ -51,9 +51,14 @@ test('canonical skill workflows retain portable scope and safety gates', async t
     assert.match(source, /assigned role and task/);
     assert.match(source, /project-specific verification commands/);
     assert.match(source, /No out-of-scope files, secrets, production config, or migrations/);
-    if (entry.name === 'shared-repo-git-safety') {
+    if (entry.name === 'code-review') assert.match(source, /Do not approve while a must-fix finding remains unresolved/);
+    if (entry.name === 'git-safety') {
       assert.match(source, /Preserve unrelated in-progress work/);
       assert.doesNotMatch(source, /Stash or commit unrelated/);
+      // Absorbed secret-handling safeguards must stay reachable without a separate skill.
+      assert.match(source, /\.env/);
+      assert.match(source, /placeholder/i);
+      assert.match(source, /already committed/i);
     }
   });
 });
@@ -74,14 +79,14 @@ async function snapshot(root) {
 
 test('catalog unification preserves customized cards, native copies and capability mappings', async t => {
   const root = await workspace(t);
-  await skillsAgentOS({ cwd: root, add: 'systematic-debugging' });
-  const paths = ['.agentos/skills/core/systematic-debugging/SKILL.md', '.agentos/agents/implementation.md'];
+  await skillsAgentOS({ cwd: root, add: 'debugging' });
+  const paths = ['.agentos/skills/core/debugging/SKILL.md', '.agentos/agents/implementation.md'];
   for (const path of paths) {
     await writeFile(join(root, path), (await readFile(join(root, path), 'utf8')) + '\nCustom owner instructions: preserve exactly.\n');
     await chmod(join(root, path), 0o640);
   }
   for (const engine of ['.claude', '.opencode']) {
-    const path = join(root, engine, 'skills/systematic-debugging');
+    const path = join(root, engine, 'skills/debugging');
     await mkdir(path, { recursive: true });
     await writeFile(join(path, 'SKILL.md'), 'Engine-native owner content.\n');
   }
@@ -89,21 +94,21 @@ test('catalog unification preserves customized cards, native copies and capabili
   await writeFile(projectPath, (await readFile(projectPath, 'utf8')).replace('implementation: implementation', 'implementation: implementation\n    custom-delivery: implementation'));
   const before = await snapshot(root);
   for (const dryRun of [true, false]) {
-    await assert.rejects(() => skillsAgentOS({ cwd: root, add: 'systematic-debugging', dryRun }), /--replace/);
+    await assert.rejects(() => skillsAgentOS({ cwd: root, add: 'debugging', dryRun }), /--replace/);
     await assert.rejects(() => agentsAgentOS({ cwd: root, add: 'implementation', dryRun }), /--replace/);
-    for (const id of ['skill:core/systematic-debugging', 'agent:implementation']) assert.equal((await templatesAgentOS({ cwd: root, command: 'copy', id, dryRun })).ok, false);
+    for (const id of ['skill:core/debugging', 'agent:implementation']) assert.equal((await templatesAgentOS({ cwd: root, command: 'copy', id, dryRun })).ok, false);
     assert.deepEqual(await snapshot(root), before, 'refusal/preview must have zero side effects');
   }
   await initAgentOS({ cwd: root, mode: 'existing', yes: true });
   await doctorAgentOS({ cwd: root, fix: true });
   const after = await snapshot(root);
-  for (const path of [...paths, '.claude/skills/systematic-debugging/SKILL.md', '.opencode/skills/systematic-debugging/SKILL.md']) {
+  for (const path of [...paths, '.claude/skills/debugging/SKILL.md', '.opencode/skills/debugging/SKILL.md']) {
     assert.deepEqual(after.find(e => e[0] === path), before.find(e => e[0] === path), path);
   }
   assert.match(await readFile(projectPath, 'utf8'), /custom-delivery: implementation/);
   for (const api of [skillsAgentOS, agentsAgentOS]) {
     const inventory = await api({ cwd: root, list: true, installed: true });
-    assert.equal(inventory.entries.find(e => e.id === (api === skillsAgentOS ? 'systematic-debugging' : 'implementation')).state, 'custom-or-imported');
+    assert.equal(inventory.entries.find(e => e.id === (api === skillsAgentOS ? 'debugging' : 'implementation')).state, 'custom-or-imported');
   }
 });
 
@@ -111,20 +116,20 @@ test('canonical loader accepts CRLF source cards without losing content', async 
   const root = await mkdtemp(join(tmpdir(), 'agentos-catalog-source-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await cp(new URL('../templates', import.meta.url), join(root, 'templates'), { recursive: true });
-  const path = join(root, 'templates/skills/core/systematic-debugging.md');
+  const path = join(root, 'templates/skills/core/debugging.md');
   const content = (await readFile(path, 'utf8')).replace(/\n/g, '\r\n');
   await writeFile(path, content);
   const catalog = await catalogModule.loadCanonicalCatalog(root);
-  const skill = catalog.skills.find(s => s.id === 'systematic-debugging');
+  const skill = catalog.skills.find(s => s.id === 'debugging');
   assert.equal(skill.content, content);
   assert.equal(catalogModule.renderSkillTemplate(skill, 'summary'), content.replace('mode: full', 'mode: summary'));
 });
 
 test('canonical loader rejects malformed identity metadata and duplicate skill IDs', async t => {
   const cases = [
-    ['name mismatch', 'templates/skills/core/systematic-debugging.md', text => text.replace('name: systematic-debugging', 'name: wrong-id'), /Invalid canonical skill metadata/],
-    ['category mismatch', 'templates/skills/core/systematic-debugging.md', text => text.replace('category: core', 'category: github'), /Invalid canonical skill metadata/],
-    ['missing summary', 'templates/skills/core/systematic-debugging.md', text => text.replace(/^summary:.*\n/m, ''), /Invalid canonical skill metadata/],
+    ['name mismatch', 'templates/skills/core/debugging.md', text => text.replace('name: debugging', 'name: wrong-id'), /Invalid canonical skill metadata/],
+    ['category mismatch', 'templates/skills/core/debugging.md', text => text.replace('category: core', 'category: github'), /Invalid canonical skill metadata/],
+    ['missing summary', 'templates/skills/core/debugging.md', text => text.replace(/^summary:.*\n/m, ''), /Invalid canonical skill metadata/],
     ['missing mandate', 'templates/agents/implementation.md', text => text.replace(/^Mandate:.*\n/m, ''), /Missing canonical agent mandate/],
   ];
   for (const [name, path, change, error] of cases) await t.test(name, async t => {
@@ -138,8 +143,8 @@ test('canonical loader rejects malformed identity metadata and duplicate skill I
     const root = await mkdtemp(join(tmpdir(), 'agentos-catalog-source-'));
     t.after(() => rm(root, { recursive: true, force: true }));
     await cp(new URL('../templates', import.meta.url), join(root, 'templates'), { recursive: true });
-    const text = await readFile(join(root, 'templates/skills/core/systematic-debugging.md'), 'utf8');
-    await writeFile(join(root, 'templates/skills/github/systematic-debugging.md'), text.replace('category: core', 'category: github'));
+    const text = await readFile(join(root, 'templates/skills/core/debugging.md'), 'utf8');
+    await writeFile(join(root, 'templates/skills/github/debugging.md'), text.replace('category: core', 'category: github'));
     await assert.rejects(() => catalogModule.loadCanonicalCatalog(root), /Duplicate canonical skill ID/);
   });
 });
@@ -151,28 +156,23 @@ test('every public skill installs the complete canonical workflow through add an
   const catalog = await skillsAgentOS({ cwd: added, list: true });
   const registry = await templatesAgentOS({ cwd: copied, command: 'list' });
   const expected = {
-    'systematic-debugging': 'core',
+    'debugging': 'core',
     'test-driven-development': 'core',
-    'shared-repo-git-safety': 'core',
-    'agent-output-verification': 'core',
-    'requesting-code-review': 'core',
-    'secret-scanner-safe-edits': 'core',
-    'grounded-codebase-docs': 'core',
-    'frontend-build-verification': 'frontend',
-    'nuxt-e2e-testing': 'frontend',
-    'ai-slop-design-review': 'frontend',
-    'interface-feel-polish': 'frontend',
-    'backend-service-verification': 'backend',
-    'nestjs-feature-implementation': 'backend',
-    'nestjs-auth-guards': 'backend',
-    'backend-pr-review': 'backend',
-    'full-system-rehearsal': 'fullstack',
-    'github-pr-workflow': 'github',
-    'github-code-review': 'github',
-    'conventional-commit': 'github',
-    'github-actions-verification': 'github',
+    'git-safety': 'core',
+    'verification': 'core',
+    'documentation': 'core',
+    'code-review': 'core',
+    'frontend-design': 'frontend',
+    'frontend-testing': 'frontend',
+    'backend-development': 'backend',
+    'backend-testing': 'backend',
+    'authorization': 'backend',
+    'integration-testing': 'fullstack',
+    'pull-request-workflow': 'github',
+    'commit-messages': 'github',
+    'ci-verification': 'github',
   };
-  assert.deepEqual([...catalog.skills].sort(), Object.keys(expected).sort(), 'slice 1 preserves all public skill IDs');
+  assert.deepEqual([...catalog.skills].sort(), Object.keys(expected).sort(), 'consolidated 15-skill framework-agnostic set');
   for (const id of catalog.skills) await t.test(id, async () => {
     const entry = registry.entries.find(e => e.type === 'skill' && e.name === id);
     assert.ok(entry, `${id} must have a portable source template`);
@@ -181,8 +181,11 @@ test('every public skill installs the complete canonical workflow through add an
     const source = await readFile(entry.absPath, 'utf8');
     assert.equal((await templatesAgentOS({ cwd: copied, command: 'copy', id: entry.id })).ok, true);
     assert.equal(await readFile(join(copied, path), 'utf8'), source);
+    const refs = await readdir(entry.absPath.replace(/\.md$/, '/references')).catch(error => { if (error.code === 'ENOENT') return []; throw error; });
+    for (const name of refs) assert.deepEqual(await readFile(join(copied, path, '..', 'references', name)), await readFile(entry.absPath.replace(/\.md$/, `/references/${name}`)));
     for (const mode of ['summary', 'full']) {
       await skillsAgentOS({ cwd: added, add: id, mode, replace: true });
+      for (const name of refs) assert.deepEqual(await readFile(join(added, path, '..', 'references', name)), await readFile(entry.absPath.replace(/\.md$/, `/references/${name}`)));
       assert.equal(workflow(await readFile(join(added, path), 'utf8')), workflow(source), `${id}: ${mode} must retain the entire workflow`);
     }
   });
@@ -199,10 +202,10 @@ test('default skill mode retains late procedure steps and mandatory safety notes
   const root = await workspace(t);
   const gates = {
     'test-driven-development': [/expected reason \(RED\)/, /minimum implementation.*\(GREEN\)/, /Refactor with the test suite green/, /wrong reason.*not a valid RED/, /all existing tests/],
-    'systematic-debugging': [/Fix the confirmed root cause/, /Remove temporary debugging/, /original failing case/, /existing test suite/],
-    'nestjs-auth-guards': [/Fail closed/, /both an authorized and an unauthorized/, /correct status code/],
-    'github-actions-verification': [/Never disable a security-relevant CI check/, /explicit approval/],
-    'conventional-commit': [/secrets/, /72 characters/, /past tense/, /re-inspect/i],
+    'debugging': [/Fix the confirmed root cause/, /Remove temporary debugging/, /original failing case/, /existing test suite/],
+    'authorization': [/Fail closed/, /both an authorized and an unauthorized/, /correct status code/],
+    'ci-verification': [/Never disable a security-relevant CI check/, /explicit approval/],
+    'commit-messages': [/secrets/, /staged/, /untracked/i, /split/i, /discover/i, /re-inspect/i, /read-only/i],
   };
   const registry = await templatesAgentOS({ cwd: root, command: 'list' });
   for (const [id, requirements] of Object.entries(gates)) await t.test(id, async () => {

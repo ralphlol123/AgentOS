@@ -1,6 +1,6 @@
 # Tasks
 
-Active scope: catalog cleanup slice 1 in `/home/hermes/agentos-catalog-cleanup` on `feat/catalog-cleanup`. Earlier milestones and follow-ups below are historical, not authorization to edit client workspaces or resume other tasks.
+Active scope: catalog cleanup slice 2 in `/home/hermes/agentos-catalog-cleanup` on `feat/catalog-cleanup`. Earlier milestones and follow-ups below are historical, not authorization to edit client workspaces or resume other tasks.
 
 ## Done
 
@@ -29,8 +29,12 @@ Active scope: catalog cleanup slice 1 in `/home/hermes/agentos-catalog-cleanup` 
 
 - [x] Implement slice 1 only: canonical package-owned templates, complete summary/full workflows, matching add/copy/init role contracts, public ID/path preservation, custom-card safeguards, and test-first parity regressions.
 - [x] Verify build/check, 260 full tests, disposable CLI smoke, existing npm/pnpm/Bun packaged regression checks, and diff whitespace.
-- [ ] Independent review of slice 1. No commit/push/merge/publish; no client rollout.
-- [ ] After review passes, proceed sequentially with approved slices 2–5 (skill consolidation, agent consolidation, aliases/safe migration, self-install/packed acceptance). None of these later slices is implemented here.
+- [x] Slice 1 independently reviewed and committed as `b983635`.
+- [x] Resume slice-2 WIP: 15 framework-neutral skills, optional local references, read-only commit workflow, old-ID tests/docs/index updated.
+- [x] Verify reference byte parity, custom/orphan preservation, atomic rollback, symlink boundaries, cross-process locks, local removal/native preservation, and reference-aware installed inventory.
+- [x] Pass build/check, 56 catalog parity + 25 reference safety tests, 275 full tests, smoke, and npm/pnpm/Bun packaged-manager verification (15 cards/9 references per manager).
+- [ ] Independent review of slice 2. Stop here: NO COMMIT/PUSH; no client rollout or version bump.
+- [ ] Only after the review/parent gates, continue sequentially with slices 3–5 (agent consolidation, aliases/safe migration, full self-install). These are not implemented by this run.
 
 ## Next
 

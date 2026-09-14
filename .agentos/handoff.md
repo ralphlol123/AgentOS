@@ -2,17 +2,15 @@
 
 ## Current objective
 
-Catalog cleanup slice 1: canonical definitions and installation parity. Implemented directly by Hermes in `/home/hermes/agentos-catalog-cleanup`, branch `feat/catalog-cleanup`, based on `293d97562f9228a49848e85d90baa7e2cccb43f3`. Independent review is pending; no commit, push, merge, publication, or client rollout.
+Catalog cleanup slice 2: implementation complete, awaiting independent review. Worktree `/home/hermes/agentos-catalog-cleanup`, branch `feat/catalog-cleanup`, HEAD `b983635f72da9ca09c5a08db733b92bf384aa04a` (slice 1 reviewed/committed). Slice 2 remains uncommitted; no push, merge, publication, version bump, or client rollout.
 
-`src/catalog.ts` now derives skills, agents, and the registry from package-owned Markdown. All 20 skill IDs/categories and 9 existing agent-template IDs are retained; data/security are explicitly addable, not detected by default. Summary/full skill modes preserve the complete body and differ only in mode metadata. The strict planning-only project-manager contract and portable safety gates are retained. Existing customized/local/native cards and capability mappings remain protected by the existing replacement, boundary, locking, and rollback paths.
+The catalog now contains 15 framework-neutral workflows plus 9 optional reference files. `skills add` and `templates copy` install reference bytes beside the card using the existing atomic-write/command-rollback paths. Preflight protects differing custom cards/references, including orphan references; explicit replacement preserves unrelated owner files. Removal/rollback preserves native copies. Installed inventory no longer calls missing/modified shipped references source-match. The read-only commit-message workflow retains staged-first inspection, explicit untracked handling, independent repo messages, and discovered conventions. Review approval requires resolution of must-fix findings, not acknowledgment alone. Historical legacy adapter shapes were preserved.
 
-Verification: test-first RED exposed missing source coverage, differing add/copy workflows, lost late steps/safety notes, and the permissive PM source. Focused parity, custom-card preservation, metadata rejection, and CRLF tests are GREEN. `bun run build`, `bun run check`, full `bun run test` (260 passed), `bun run smoke`, and existing `bun run test:package-managers` (npm/pnpm/Bun packed mutation checks) passed on Node 26.5.0 / Bun 1.3.14. Smoke warnings were expected non-git disposable fixture repos. Worktree `node dist/cli.js status` and `node dist/cli.js doctor --json` both returned OK; doctor reported only the expected tracked-working-tree-changes warning. Package version remains 0.3.0.
+Verification: build/check, catalog parity (56), reference safety regressions (25), full suite (275), CLI smoke, and npm/pnpm/Bun packed-manager checks passed. Packed checks compare all 15 installed cards and 9 reference files with packaged source, exercise copy/removal, and retain prior mutation checks. Node 26.5.0 / Bun 1.3.14. Re-run logs and exact changed-file inventory are in the slice-2 resume/run note. Doctor/status are OK; expected warnings are dirty tracked files and the slice-1 commit ahead of origin/main. Smoke uses disposable non-git fixtures and reports that limitation.
 
-Files: `src/catalog.ts`, `src/core.ts`, `test/catalog-parity.test.js`, `test/core.test.js`, all 20 `templates/skills/` cards (9 newly materialized), `templates/agents/project-manager.md`, `docs/templates.md`, generated `dist/catalog.*` / `dist/core.*`, and these worktree handoff/task notes.
+Local `.agentos/skills.md` records all 15 available catalog cards as NOT installed; actual local installed inventory is empty. Retired recommendations are explicitly unavailable in this intermediate catalog. Full self-install remains slice 5, aliases/migration slice 4, agent consolidation slice 3. No later slice or external-engine acceptance is claimed.
 
-Limits: package templates must be present at runtime; catalogs are loaded once per process. No aliases, renames/consolidation, migration, self-install rollout, or external-engine acceptance. Older source cards may be reported as custom-or-imported and are not automatically replaced. Existing import excerpt limits and capability/default-role policy remain unchanged. Passing the existing packed regression command is not completion of slice 5.
-
-Scope: this isolated worktree and disposable fixtures only. The original dirty `/home/hermes/agentos-for-projects`, KargaX, Labahub, local customized cards, secrets, migrations, and production configuration are protected. Next: independently review slice 1; do not begin slice 2 until that review gate passes.
+Scope: this isolated worktree and disposable fixtures only. Preserve the pre-existing staged template deletions. Original dirty `/home/hermes/agentos-for-projects`, KargaX, Labahub, secrets, migrations, production config, and custom/native cards are protected. Next: independently review slice 2; no commit or later-slice work in this run.
 
 Below is historical rollout context, not the active implementation task.
 
@@ -110,7 +108,7 @@ Dogfood temp workspace verified:
 
 ## Next exact action
 
-Independently review catalog cleanup slice 1 in `/home/hermes/agentos-catalog-cleanup`. No commits or client-workspace commands are authorized in this slice. After review passes, the parent may begin the approved slice 2; slices 2–5 are not implemented here.
+Independently review catalog cleanup slice 2 in `/home/hermes/agentos-catalog-cleanup`. Read `.agentos/runs/2026-09-14-catalog-cleanup-resume.md` and current staged/unstaged/untracked diffs. No commit/push is authorized in this run. Slices 3–5 remain deferred.
 
 ## Open decisions
 

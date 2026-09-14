@@ -1,4 +1,4 @@
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile, readdir, lstat } from 'node:fs/promises';
 import { dirname, join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
@@ -24,7 +24,8 @@ export async function loadCanonicalCatalog(packageRoot) {
             }
             if (skills.some(skill => skill.id === id))
                 throw new Error(`Duplicate canonical skill ID: ${id}`);
-            skills.push({ id, category, summary: metadata.summary, content });
+            const references = await loadSkillReferences(join(packageRoot, relDir, id, 'references'));
+            skills.push({ id, category, summary: metadata.summary, content, references });
             entries.push({ id: `skill:${category}/${id}`, type: 'skill', name: id, category, relPath, absPath });
         }
     }
@@ -41,6 +42,28 @@ export async function loadCanonicalCatalog(packageRoot) {
         entries.push({ id: `agent:${id}`, type: 'agent', name: id, relPath, absPath });
     }
     return { skills, agents, entries: entries.sort((a, b) => a.id.localeCompare(b.id)) };
+}
+// References are package-owned bytes, not independently registered cards.
+async function loadSkillReferences(root) {
+    const files = [];
+    async function visit(abs, path) {
+        const info = await lstat(abs).catch(error => { if (error.code === 'ENOENT' && !path)
+            return null; throw error; });
+        if (!info)
+            return;
+        if (info.isSymbolicLink())
+            throw new Error(`Canonical references must not be symlinks: ${abs}`);
+        if (info.isDirectory()) {
+            for (const name of (await readdir(abs)).sort())
+                await visit(join(abs, name), path ? `${path}/${name}` : name);
+        }
+        else if (info.isFile() && path)
+            files.push({ path: `references/${path}`, content: await readFile(abs) });
+        else
+            throw new Error(`Invalid canonical reference: ${abs}`);
+    }
+    await visit(root, '');
+    return files;
 }
 // One immutable-package snapshot per process, shared by all installation paths.
 const catalog = await loadCanonicalCatalog(dirname(dirname(fileURLToPath(import.meta.url))));
