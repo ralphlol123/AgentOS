@@ -14,11 +14,13 @@ Active scope: post-release. Catalog cleanup (slices 1–5) shipped — merged vi
 
 ## Now
 
-- [ ] Improve version-upgrade migration UX. Lessons from the 0.3.0 → 0.4.0 rollout to real workspaces:
-  - `doctor --fix` only auto-migrates **byte-matched historical card shapes**, so a workspace whose root `AGENTS.md`/`CLAUDE.md` hold custom project knowledge *interleaved with* a stale AgentOS bootloader hits "adapter ownership is ambiguous" and needs manual resolution (back up → strip bootloader → regenerate → re-add custom content).
-  - Unsafe repo IDs (e.g. `frontend_client`) block `doctor --fix` until renamed by hand.
-  - Retired agent/skill cards are only detected, not cleaned up automatically.
-  - Desired behavior: classify and safely migrate custom-content adapters (preserve custom bytes, wrap/replace only the AgentOS block), auto-normalize repo IDs, and offer guided/automated cleanup of retired cards — while never clobbering customized content. Roll the fixes through the normal slice → verify → review → commit flow.
+- [ ] Version-upgrade migration UX — approved plan: `.agentos/plans/2026-09-14-upgrade-migration-ux.md` (five slices). Owner defaults locked: always write the `.agentos.bak` sidecar; repo-ID normalization behind an explicit flag; retired cleanup report-only by default; slice 5 targets `0.5.0`.
+  - [x] Slice 1 — read-only migration inventory: `doctor`/`doctor --json` carry `migration.{adapters,repoIds,retiredCards,summary}`, plus `agentos adapters explain <file>`. 12 tests in `test/migration-inventory.test.js`; full local gate green (build, check, test 293/293, smoke, package-managers npm/pnpm/Bun, `npm pack --dry-run`, doctor `OK`). Two independent read-only review rounds: round 1 passed every functional invariant (read-only proof, problems/warnings/exit-status parity, fail-closed safety) and found two doc/usage mismatches; round 2 confirmed those fixed and found one remaining README/code mismatch. All doc findings fixed and re-verified against live repros before the single slice commit.
+  - [ ] Slice 2 — repo-ID normalization: split unmigratable (hard error) from normalizable, transactional rename of the key + `.agentos/repos/<id>.md`, collision refusal, run note under `.agentos/runs/`.
+  - [ ] Slice 3 — custom-content adapter migration: `legacy-embedded` classification, opt-in `--adopt-custom-adapters` with dry-run preview, byte-span replacement preserving all custom bytes.
+  - [ ] Slice 4 — retired-card cleanup completion: per-card eligibility, retired **skill** card pruning, `.agentos/skills.md` repair, evidence-driven `legacyAgentCardShapes` expansion, opt-in `--prune-retired`.
+  - [ ] Slice 5 — release `0.5.0`: CHANGELOG, version bump, packed-install dogfood, synthetic fixture replay.
+  - Recorded rollout lessons behind the design: `doctor --fix` only auto-migrates byte-matched historical card shapes (so interleaved custom content hits "adapter ownership is ambiguous" and needs manual resolution); unsafe repo IDs block `doctor --fix` until renamed by hand; retired skill cards and stale `.agentos/skills.md` entries still need manual cleanup. Correction found while planning: retired **agent** cards are already detected and migrated by `doctor --fix` when byte-matched (`checkLegacyCatalogState`/`fixLegacyCatalogState`).
 
 ## Next
 

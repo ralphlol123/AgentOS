@@ -60,6 +60,35 @@ Limitations:
 - The plan-vs-apply staleness check (above) assumes non-hostile, non-concurrent use, same as the rest of this section: it catches accidental drift and defends in depth, but AgentOS still assumes a single writer per checkout, not protection against an adversarial concurrent process.
 
 
+## Migration inventory
+
+`doctor` and `doctor --json` include a read-only **migration inventory**: the workspace's adapter files, unsafe repository IDs, and retired catalog cards, classified before anyone approves a fix. It is reporting only — it never writes, never changes doctor's exit status (problems and warnings still do), and stays silent on a clean workspace.
+
+Scope: the inventory covers **files and IDs** — adapters, repo IDs, retired cards. Retired IDs *referenced* inside `.agentos/project.yaml` (`agents.enabled`, `agents.capabilities`) never become inventory entries; they are reported only as ordinary `doctor` warnings by `checkLegacyCatalogState`. A retired entry left in `.agentos/skills.md` with no card on disk is reported **both** ways: that same ordinary warning, plus an `index-only` retired-card entry — so a retired ID can legitimately appear twice in one human run (once as a warning, once as an inventory line), and neither adds to the other's counts. `summary.action_required` counts non-`noop` adapters plus all repo-ID and retired-card entries; `summary.adapter_count` counts every inventoried adapter, `noop` included.
+
+```bash
+agentos doctor --json | jq '.migration.summary'
+agentos adapters explain AGENTS.md
+```
+
+Three classes, matching the real upgrade pain seen when moving a workspace from an older AgentOS:
+
+- **adapters** — every root and child adapter file with its classification (`create`, `noop`, `update`, `migrate`, `append`, `conflict`), the same pure classification `doctor --fix` uses. A `conflict` (for example custom project knowledge interleaved with a stale bootloader) is reported with its reason and `safe: false`; the inventory never guesses ownership.
+- **repoIds** — repository IDs in `.agentos/project.yaml` that are not lowercase-hyphen safe (e.g. `frontend_client` → `frontend-client`). Because strict validation rejects these during parsing, the inventory reads the mapping leniently instead: the workspace stays blocked for writes until the ID is renamed, but the owner can still *see* the required rename, plus whether the normalized ID would collide with an existing key.
+- **retiredCards** — retired agent/skill cards with their canonical replacement and an eligibility class:
+  - `prunable` — bytes match a recognized historical generated body; opt-in cleanup may remove it.
+  - `already-canonical` — same, and the canonical card is already installed, so only the stale file remains.
+  - `customized` — hand-edited, or an older generated body AgentOS cannot prove; never auto-removed.
+  - `manual-review` — retired skill card; no byte-match evidence source exists yet, so a human decides.
+  - `index-only` — listed in `.agentos/skills.md` with no card on disk.
+
+`agentos adapters explain <file>` answers the same question for exactly one path: target level (root/child), classification, managed-block status with byte offsets, the reason for a conflict, and the next command. If `.agentos/project.yaml` cannot be parsed, it still reports marker structure rather than nothing, and says why the canonical section is unavailable.
+
+When `.agentos/project.yaml` fails validation there is no canonical section for any path, so the classification falls back to marker structure and uses its own vocabulary: `managed-block` (a valid block exists, staleness unknown), `create` (missing or empty), `migrate` (a recognized historical body), `append` (unrelated custom content), and `conflict`. With a valid config, a path that is not an adapter target is refused outright (with the known-target list) rather than classified.
+
+Nothing in the inventory performs a migration. The `doctor --fix` behavior — fail-closed preflight, one-time `.agentos.bak` backups, byte-preserving managed-block updates — is unchanged.
+
+
 Project-owned context layer for model-agnostic coding agents.
 
 AgentOS installs a portable `.agentos/` project brain into a single repo or product workspace so Claude Code, Codex, OpenCode, Hermes, ChatGPT, and other agents can share the same scoped project context without bulk-loading every file.
@@ -167,6 +196,7 @@ agentos status
 agentos handoff
 agentos run handoff [--engine name] [--role role] [--repo repo] [--worktree path] [--phase slug] [--reason reason] [--dry-run]
 agentos doctor [--fix] [--json]
+agentos adapters explain <file>
 agentos compact [--dry-run]
 agentos link-obsidian [--vault <path> --dest <folder> --link <note> --create]
 agentos obsidian link-workspace --vault <path> --dest <folder> [--create] [--dry-run]

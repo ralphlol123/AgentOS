@@ -34,7 +34,7 @@ export function validateCommandFlags(command, flags) {
     const allowed = {
         init: ['new', 'existing', 'agents', 'dry-run', 'yes', 'y', 'refresh'], status: [], handoff: [], prompt: [],
         run: ['engine', 'role', 'repo', 'worktree', 'phase', 'reason', 'dry-run'], doctor: ['fix', 'json'], compact: ['dry-run'],
-        'link-obsidian': ['vault', 'dest', 'link', 'create', 'dry-run'], obsidian: ['vault', 'dest', 'create', 'dry-run'],
+        'link-obsidian': ['vault', 'dest', 'link', 'create', 'dry-run'], obsidian: ['vault', 'dest', 'create', 'dry-run'], adapters: [],
         skills: ['detected', 'mode', 'dry-run', 'replace', 'installed'], agents: ['name', 'dry-run', 'replace', 'installed'],
         templates: ['type', 'name', 'mode', 'dry-run', 'yes', 'replace', 'expected-sha256'], migrate: ['preserve', 'dry-run'],
     };

@@ -61,6 +61,10 @@ export declare function initAgentOS(options?: any): Promise<{
     };
     text: string;
 }>;
+export declare function adaptersAgentOS(options?: any): Promise<{
+    ok: boolean;
+    text: string;
+}>;
 export declare function compactAgentOS(options?: any): Promise<{
     ok: boolean;
     text: string;

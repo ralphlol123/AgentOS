@@ -2023,7 +2023,7 @@ export async function handoffAgentOS(options = {}) {
 async function doctorAgentOSUnlocked(options = {}) {
     const root = await findAgentOSRoot(options.cwd ?? process.cwd());
     if (!root) {
-        const result = doctorResult({ root: null, fix: Boolean(options.fix), problems: ['No .agentos directory found.'], warnings: [], diagnostics: [] });
+        const result = doctorResult({ root: null, fix: Boolean(options.fix), problems: ['No .agentos directory found.'], warnings: [], diagnostics: [], migration: emptyMigrationInventory() });
         return options.json ? withJsonText(result) : { ...result, text: 'AgentOS doctor: FAIL\nNo .agentos directory found.' };
     }
     const projectPath = join(root, '.agentos/project.yaml');
@@ -2135,18 +2135,37 @@ async function doctorAgentOSUnlocked(options = {}) {
     // whole scan in that case; projectConfigError is already reported above,
     // and doctor --fix already refuses to touch adapters until the config
     // itself is fixed.
+    // Slice 1 migration inventory: the same read-only per-target classification
+    // pass below feeds both the existing problems list and a machine-readable
+    // report of everything a workspace still needs migrated. Nothing here writes
+    // (planAdapterReconciliation is pure); the inventory only *reports* so an
+    // owner can see the whole upgrade surface before approving any fix.
+    const adapterInventory = [];
     if (!projectConfigError) {
         const allRepos = parseReposFromProjectYaml(project, { includeRoot: true });
         const workspaceKind = firstYamlValue(project, 'workspace_kind') ?? 'unknown';
         const adapterTargets = [...rootAdapterTargets(root, workspaceKind, allRepos), ...childAdapterTargets(root, policy.pointers ? repos.filter(repo => repo.path !== '.') : [])];
         const duplicateAdapterTargets = detectDuplicateAdapterTargets(adapterTargets);
         const duplicateAdapterPaths = new Set(duplicateAdapterTargets.map((d) => d.resolvedPath));
-        for (const duplicate of duplicateAdapterTargets)
+        for (const duplicate of duplicateAdapterTargets) {
             problems.push(`${duplicate.path}: ${duplicate.reason}`);
+            const duplicatePath = relativePosix(root, duplicate.resolvedPath);
+            adapterInventory.push({
+                level: duplicatePath.includes('/') ? 'child' : 'root',
+                label: duplicatePath,
+                path: duplicatePath,
+                duplicates: duplicate.path.split(', ').map((label) => label.trim()),
+                classification: 'conflict',
+                safe: false,
+                reason: duplicate.reason,
+                next: MIGRATION_NEXT.conflict,
+            });
+        }
         for (const target of adapterTargets) {
             if (duplicateAdapterPaths.has(resolve(target.path)))
                 continue;
             const plan = await planAdapterReconciliation(target.path, target.section);
+            adapterInventory.push(adapterInventoryEntry(root, target, plan));
             if (plan.action === 'conflict')
                 problems.push(`${target.label} adapter ownership is ambiguous: ${plan.reason}`);
             // A valid managed block whose content no longer matches the canonical
@@ -2158,6 +2177,19 @@ async function doctorAgentOSUnlocked(options = {}) {
                 problems.push(`${target.label} managed block is stale and does not match the current canonical section; run \`agentos doctor --fix\``);
         }
     }
+    const migration = {
+        adapters: adapterInventory.slice().sort((a, b) => a.path.localeCompare(b.path)),
+        repoIds: buildRepoIdInventory(project),
+        retiredCards: await buildRetiredCardInventory(root),
+    };
+    migration.summary = {
+        adapter_count: migration.adapters.length,
+        repo_id_count: migration.repoIds.length,
+        retired_card_count: migration.retiredCards.length,
+        action_required: migration.adapters.filter((entry) => entry.classification !== 'noop').length
+            + migration.repoIds.length
+            + migration.retiredCards.length,
+    };
     const diagnostics = [];
     for (const note of migrationNotes)
         diagnostics.push(`migrated: ${note}`);
@@ -2165,10 +2197,10 @@ async function doctorAgentOSUnlocked(options = {}) {
     await checkRepoCommands(repos, warnings, diagnostics);
     await checkGitState(root, repos, warnings, diagnostics);
     await checkPorts(repos, warnings, diagnostics);
-    const result = doctorResult({ root, fix: Boolean(options.fix), problems, warnings, diagnostics });
+    const result = doctorResult({ root, fix: Boolean(options.fix), problems, warnings, diagnostics, migration });
     return options.json ? withJsonText(result) : result;
 }
-function doctorResult({ root, fix, problems, warnings, diagnostics }) {
+function doctorResult({ root, fix, problems, warnings, diagnostics, migration = emptyMigrationInventory() }) {
     const ok = problems.length === 0;
     const status = ok ? 'OK' : 'FAIL';
     return {
@@ -2179,26 +2211,45 @@ function doctorResult({ root, fix, problems, warnings, diagnostics }) {
         problems,
         warnings,
         diagnostics,
+        migration,
         summary: {
             problem_count: problems.length,
             warning_count: warnings.length,
             diagnostic_count: diagnostics.length,
         },
-        text: renderDoctorText({ status, fix, problems, warnings, diagnostics }),
+        text: renderDoctorText({ status, fix, problems, warnings, diagnostics, migration }),
     };
 }
 function withJsonText(result) {
     return { ...result, text: `${JSON.stringify(result, null, 2)}\n` };
 }
-function renderDoctorText({ status, fix, problems, warnings, diagnostics }) {
+function renderDoctorText({ status, fix, problems, warnings, diagnostics, migration = emptyMigrationInventory() }) {
     return [
         `AgentOS doctor: ${status}`,
         fix ? 'Fix mode: checked/repaired adapter files before validation' : null,
         '',
         problems.length ? `Problems:\n${problems.map((p) => `✗ ${p}`).join('\n')}` : '✓ Required files and adapter pointers are present',
         warnings.length ? `\nWarnings:\n${warnings.map((w) => `- ${w}`).join('\n')}` : '',
+        renderMigrationSection(migration),
         diagnostics.length ? `\nDiagnostics:\n${diagnostics.map((d) => `- ${d}`).join('\n')}` : '',
     ].filter(Boolean).join('\n').trim();
+}
+// Human-readable half of the migration inventory. Deliberately silent when
+// nothing needs migrating, so existing doctor output is unchanged on a clean
+// workspace. Reporting only: every line states the next command, and none of
+// these entries change doctor's exit status - problems/warnings still do.
+function renderMigrationSection(migration) {
+    const lines = [
+        ...migration.adapters
+            .filter((entry) => entry.classification !== 'noop')
+            // A conflict's reason already ends with its own instruction ("… resolve
+            // manually, then re-run doctor --fix"), so appending `next` again would
+            // say the same thing twice.
+            .map((entry) => `${entry.label}: adapter ${entry.classification}${entry.reason ? ` — ${entry.reason}` : `; ${entry.next}`}`),
+        ...migration.repoIds.map((entry) => `${entry.from} -> ${entry.to}: unsafe repository ID; ${entry.next}`),
+        ...migration.retiredCards.map((entry) => `${entry.path || entry.id}: retired ${entry.kind} '${entry.id}' -> '${entry.canonical}' (${entry.eligibility}); ${entry.next}`),
+    ];
+    return lines.length ? `\nMigration:\n${lines.map((line) => `- ${line}`).join('\n')}` : '';
 }
 async function checkAgentAndSkillConfig(root, project, warnings) {
     const data = parseProjectYaml(project);
@@ -2541,13 +2592,11 @@ async function checkLegacyCatalogState(root, project, warnings) {
         }
     }
     const skillsMdText = await safeRead(join(root, '.agentos/skills.md'));
-    if (skillsMdText) {
-        for (const id of RETIRED_SKILL_IDS) {
-            const bullet = new RegExp(`^-\\s+${escapeRegExp(id)}(?:\\s|$|[—:])`, 'm');
-            const details = new RegExp(`Details:\\s+\\.agentos/skills/[^/]+/${escapeRegExp(id)}/SKILL\\.md`, 'm');
-            if (bullet.test(skillsMdText) || details.test(skillsMdText)) {
-                warnings.push(`.agentos/skills.md still lists retired skill '${id}' -> '${SKILL_ALIASES[id]}'`);
-            }
+    for (const id of RETIRED_SKILL_IDS) {
+        // Shared with the migration inventory: one definition of "this index still
+        // references a retired skill", so detection and reporting cannot drift.
+        if (skillsMdReferencesRetiredId(skillsMdText, id)) {
+            warnings.push(`.agentos/skills.md still lists retired skill '${id}' -> '${SKILL_ALIASES[id]}'`);
         }
     }
 }
@@ -2584,6 +2633,268 @@ async function fixLegacyCatalogState(root) {
         }
     }
     return actions;
+}
+// ---------------------------------------------------------------------------
+// Slice 1: read-only migration inventory.
+//
+// Three upgrade classes need owner visibility before anything is written:
+// custom-content adapters, unsafe repository IDs, and retired catalog cards.
+// Everything in this section is read-only - it classifies with the same pure
+// planners the fix paths use, and reports the exact next command. Retired
+// *agent* cards are already migrated by `doctor --fix` when their bytes match a
+// known historical body (fixLegacyCatalogState); the inventory says which cards
+// that covers and which need a human decision, so nobody has to read the fix
+// code to know what is safe.
+const MIGRATION_NEXT = {
+    create: 'run `agentos doctor --fix` to create the managed block',
+    noop: 'nothing to do',
+    update: 'run `agentos doctor --fix` to refresh the stale managed block',
+    migrate: 'run `agentos doctor --fix` to convert this historical adapter',
+    append: 'run `agentos doctor --fix` to add the managed block after your content',
+    conflict: 'resolve manually, then re-run `agentos doctor --fix`',
+};
+function emptyMigrationInventory() {
+    return {
+        adapters: [],
+        repoIds: [],
+        retiredCards: [],
+        summary: { adapter_count: 0, repo_id_count: 0, retired_card_count: 0, action_required: 0 },
+    };
+}
+function relativePosix(from, to) {
+    return relative(from, to).replace(/\\/g, '/');
+}
+function adapterInventoryEntry(root, target, plan) {
+    const path = relativePosix(root, target.path);
+    return {
+        level: path.includes('/') ? 'child' : 'root',
+        label: target.label,
+        path,
+        classification: plan.action,
+        safe: plan.action !== 'conflict',
+        ...(plan.action === 'conflict' ? { reason: plan.reason } : {}),
+        next: MIGRATION_NEXT[plan.action] ?? 'review manually',
+    };
+}
+// Repository IDs are validated strictly during parsing (an unsafe ID makes
+// every config-reading command fail closed), which is exactly why the report
+// reads the mapping leniently instead: the owner must be able to see the fix
+// even while the workspace is blocked.
+function buildRepoIdInventory(project) {
+    const parsed = parseProjectYaml(project);
+    const repos = parsed.repos && typeof parsed.repos === 'object' && !Array.isArray(parsed.repos) ? parsed.repos : {};
+    const ids = Object.keys(repos);
+    const entries = [];
+    for (const id of ids.slice().sort()) {
+        const normalized = safeId(id);
+        if (normalized === id)
+            continue;
+        const collides = ids.some((other) => other !== id && other === normalized);
+        entries.push({
+            from: id,
+            to: normalized,
+            collides,
+            next: collides
+                ? `manual decision required: '${normalized}' already exists in .agentos/project.yaml repos; pick a different ID`
+                : `rename '${id}' to '${normalized}' in .agentos/project.yaml and rename .agentos/repos/${id}.md to .agentos/repos/${normalized}.md (automated normalization lands in a later slice)`,
+        });
+    }
+    return entries;
+}
+function skillsMdReferencesRetiredId(text, id) {
+    if (!text)
+        return false;
+    const bullet = new RegExp(`^-\\s+${escapeRegExp(id)}(?:\\s|$|[—:])`, 'm');
+    const details = new RegExp(`Details:\\s+\\.agentos/skills/[^/]+/${escapeRegExp(id)}/SKILL\\.md`, 'm');
+    return bullet.test(text) || details.test(text);
+}
+// Eligibility vocabulary:
+//   prunable          - bytes match a recognized historical generated body; opt-in cleanup may remove it
+//   already-canonical - same, and the canonical card is already installed, so only the stale file remains
+//   customized        - hand-edited (or an unrecognized older generated body); never auto-removed
+//   manual-review     - retired skill card: no byte-match evidence source exists yet (slice 4 adds it)
+//   index-only        - listed in .agentos/skills.md with no card on disk
+async function buildRetiredCardInventory(root) {
+    const entries = [];
+    let agentFiles = [];
+    try {
+        agentFiles = await readdir(join(root, '.agentos/agents'));
+    }
+    catch { }
+    for (const file of agentFiles.filter((name) => name.endsWith('.md')).sort()) {
+        const id = file.replace(/\.md$/, '');
+        if (!RETIRED_AGENT_IDS.has(id))
+            continue;
+        const canonical = canonicalAgentId(id);
+        const content = await safeRead(join(root, '.agentos/agents', file));
+        const generated = legacyAgentCardShapes(id).includes(content);
+        const canonicalInstalled = await exists(join(root, '.agentos/agents', `${canonical}.md`));
+        const eligibility = generated ? (canonicalInstalled ? 'already-canonical' : 'prunable') : 'customized';
+        entries.push({
+            kind: 'agent',
+            id,
+            canonical,
+            path: `.agentos/agents/${file}`,
+            eligibility,
+            canonicalInstalled,
+            next: eligibility === 'customized'
+                ? `review by hand, then replace with \`agentos templates copy agent:${canonical}\` and delete this card`
+                : `run \`agentos doctor --fix\` to migrate this clearly-generated card`,
+        });
+    }
+    const localSkills = await listLocalSkillFiles(root);
+    const localSkillIds = new Set(localSkills.map((entry) => entry.id));
+    for (const entry of localSkills.slice().sort((a, b) => a.id.localeCompare(b.id))) {
+        if (!RETIRED_SKILL_IDS.has(entry.id))
+            continue;
+        const canonical = SKILL_ALIASES[entry.id];
+        entries.push({
+            kind: 'skill',
+            id: entry.id,
+            canonical,
+            path: entry.relPath,
+            eligibility: 'manual-review',
+            canonicalInstalled: localSkillIds.has(canonical),
+            next: `confirm whether this is a local fork, then run \`agentos skills remove ${entry.id}\` and \`agentos skills add ${canonical}\``,
+        });
+    }
+    const skillsMd = await safeRead(join(root, '.agentos/skills.md'));
+    for (const id of [...RETIRED_SKILL_IDS].sort()) {
+        if (localSkillIds.has(id))
+            continue;
+        if (!skillsMdReferencesRetiredId(skillsMd, id))
+            continue;
+        const canonical = SKILL_ALIASES[id];
+        entries.push({
+            kind: 'skill',
+            id,
+            canonical,
+            path: null,
+            eligibility: 'index-only',
+            canonicalInstalled: localSkillIds.has(canonical),
+            next: `stale index entry: run \`agentos skills add ${canonical}\` to refresh .agentos/skills.md`,
+        });
+    }
+    return entries.sort((a, b) => `${a.kind}:${a.id}`.localeCompare(`${b.kind}:${b.id}`));
+}
+// Marker-structure analysis for one file. Used by `adapters explain` and as
+// the fallback when no canonical section is available (for example a workspace
+// whose project.yaml fails validation, so adapter targets cannot be derived):
+// the owner still gets a real diagnosis instead of nothing.
+function classifyAdapterFileStructure(content, trimmed) {
+    const located = locateManagedBlock(content);
+    if (located.kind === 'conflict') {
+        return { classification: 'conflict', reason: located.reason, managed: { status: 'conflict', reason: located.reason } };
+    }
+    if (located.kind === 'valid') {
+        return { classification: 'managed-block', reason: null, managed: { status: 'valid', bytes: [located.startIdx, located.endIdx + MANAGED_BLOCK_END.length] } };
+    }
+    // An empty file matches no legacy shape but `classifyUnmarkedAdapterContent`
+    // would report a legacy whole-file match for it; the planner treats a missing
+    // or empty adapter as `create`, so mirror that instead of saying "migrate".
+    if (!trimmed)
+        return { classification: 'create', reason: null, managed: { status: 'none' } };
+    const section = classifyUnmarkedAdapterContent(content, trimmed, '');
+    if (section.kind === 'conflict')
+        return { classification: 'conflict', reason: section.reason, managed: { status: 'none' } };
+    if (section.kind === 'legacy-whole' || section.kind === 'legacy-bounded')
+        return { classification: 'migrate', reason: null, managed: { status: 'none' } };
+    return { classification: 'append', reason: null, managed: { status: 'none' } };
+}
+function renderManagedBlockLine(managed) {
+    if (managed.status === 'valid')
+        return `Managed block: valid (bytes ${managed.bytes[0]}-${managed.bytes[1]})`;
+    if (managed.status === 'conflict')
+        return `Managed block: conflict — ${managed.reason}`;
+    return 'Managed block: none';
+}
+async function explainAdapterAgentOS(fileRaw, options = {}) {
+    const cwd = resolve(options.cwd ?? process.cwd());
+    const root = await findAgentOSRoot(cwd);
+    if (!root)
+        return { ok: false, text: 'AgentOS adapters explain: FAIL\nNo .agentos directory found here or in parent directories.' };
+    const target = resolve(cwd, String(fileRaw || ''));
+    const rel = relativePosix(root, target);
+    if (!rel || rel.startsWith('..') || isAbsolute(rel)) {
+        return { ok: false, text: `AgentOS adapters explain: FAIL\n${fileRaw} is not inside the workspace root ${root}.` };
+    }
+    let configError = null;
+    try {
+        await assertProjectYamlWellFormed(join(root, '.agentos/project.yaml'));
+    }
+    catch (error) {
+        if (error instanceof ProjectConfigError)
+            configError = error;
+        else
+            throw error;
+    }
+    let match = null;
+    if (!configError) {
+        const project = await safeRead(join(root, '.agentos/project.yaml'));
+        const policy = adapterPolicy(project);
+        const repos = parseReposFromProjectYaml(project, { includeRoot: true });
+        const workspaceKind = firstYamlValue(project, 'workspace_kind') ?? 'unknown';
+        const targets = [
+            ...rootAdapterTargets(root, workspaceKind, repos),
+            ...childAdapterTargets(root, policy.pointers ? repos.filter((repo) => repo.path !== '.') : []),
+        ];
+        match = targets.find((candidate) => resolve(candidate.path) === target) || null;
+        if (!match) {
+            return {
+                ok: false,
+                text: [
+                    'AgentOS adapters explain: FAIL',
+                    `Root: ${root}`,
+                    `File: ${rel}`,
+                    '',
+                    'not an AgentOS adapter target; known targets:',
+                    ...targets.map((candidate) => `- ${relativePosix(root, candidate.path)}`),
+                ].join('\n'),
+            };
+        }
+    }
+    const info = await stat(target).catch(() => null);
+    if (info?.isDirectory()) {
+        return { ok: false, text: `AgentOS adapters explain: FAIL\n${rel} is a directory, not an adapter file.` };
+    }
+    let raw;
+    try {
+        raw = await readFile(target);
+    }
+    catch {
+        return { ok: false, text: `AgentOS adapters explain: FAIL\n${rel} does not exist or is not a readable file in the workspace.` };
+    }
+    let content = null;
+    try {
+        content = new TextDecoder('utf-8', { fatal: true }).decode(raw);
+    }
+    catch { }
+    const lines = [
+        'AgentOS adapters explain',
+        `Root: ${root}`,
+        `File: ${rel} (${match ? (rel.includes('/') ? 'child adapter' : 'root adapter') : 'not an AgentOS adapter target'})`,
+        `Bytes: ${raw.length} total`,
+    ];
+    if (content === null) {
+        lines.push('Classification: conflict', 'Reason: file is not valid UTF-8; refusing to decode and rewrite arbitrary bytes', `Next: ${MIGRATION_NEXT.conflict}`);
+        return { ok: true, text: lines.join('\n') };
+    }
+    const structure = classifyAdapterFileStructure(content, content.trim());
+    lines.push(renderManagedBlockLine(structure.managed));
+    if (match) {
+        const plan = await planAdapterReconciliation(match.path, match.section);
+        lines.push(`Classification: ${plan.action}`);
+        if (plan.action === 'conflict')
+            lines.push(`Reason: ${plan.reason}`);
+        lines.push(`Next: ${MIGRATION_NEXT[plan.action] ?? 'review manually'}`);
+        return { ok: true, text: lines.join('\n') };
+    }
+    lines.push(`Classification: ${structure.classification}`);
+    if (structure.reason)
+        lines.push(`Reason: ${structure.reason}`);
+    lines.push('Canonical section unavailable (.agentos/project.yaml did not pass validation), so this path is not an AgentOS adapter target right now.');
+    lines.push(`Next: ${MIGRATION_NEXT[structure.classification] ?? 'review manually'}`);
+    return { ok: true, text: lines.join('\n') };
 }
 const CHILD_REPO_GITIGNORE_BLOCK = `# AgentOS parent-workspace pointer files
 /AGENTS.md
@@ -3430,6 +3741,13 @@ export async function initAgentOS(options = {}) {
     const root = resolve(options.cwd ?? process.cwd());
     const action = () => initAgentOSUnlocked(options);
     return root && (!options.dryRun) ? withWorkspaceWriter(root, action) : action();
+}
+// Read-only: `agentos adapters explain <file>` never writes, so it runs without
+// the workspace writer lock (matching doctor/status).
+export async function adaptersAgentOS(options = {}) {
+    if (!options.explain)
+        return { ok: false, text: 'Usage: agentos adapters explain <file>' };
+    return explainAdapterAgentOS(options.explain, options);
 }
 export async function compactAgentOS(options = {}) {
     const root = await findAgentOSRoot(options.cwd ?? process.cwd());
