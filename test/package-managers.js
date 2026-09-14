@@ -95,7 +95,7 @@ for (const manager of managers) {
   assert.equal(references, 9);
   invoke(['skills', 'remove', 'code-review']);
   await assert.rejects(() => lstat(join(cwd, '.agentos/skills/core/code-review')), { code: 'ENOENT' });
-  invoke(['templates', 'copy', 'agent:data-engineer']);
+  invoke(['templates', 'copy', 'agent:planner']);
   invoke(['run', 'handoff', '--reason', 'packaged-smoke']);
   invoke(['compact']);
   invoke(['doctor']);

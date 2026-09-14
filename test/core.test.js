@@ -80,19 +80,21 @@ test('init --existing uses detected agent profile with core delivery team, detec
   const projectYaml = await readFile(join(root, '.agentos/project.yaml'), 'utf8');
   assert.match(projectYaml, /profile: detected/);
   assert.match(projectYaml, /capabilities:/);
-  assert.match(projectYaml, /implementation: implementation/);
-  assert.match(projectYaml, /frontend: frontend-engineer/);
-  assert.match(projectYaml, /backend: backend-engineer/);
-  assert.match(projectYaml, /qa: qa/);
+  assert.match(projectYaml, /implementation: developer/);
+  assert.match(projectYaml, /frontend: developer/);
+  assert.match(projectYaml, /backend: developer/);
+  assert.match(projectYaml, /qa: tester/);
   assert.match(projectYaml, /enabled:/);
-  for (const id of ['implementation', 'frontend-engineer', 'backend-engineer', 'qa', 'code-reviewer', 'release-manager']) {
+  for (const id of ['developer', 'tester', 'reviewer', 'release-manager']) {
     assert.equal(await exists(join(root, '.agentos/agents', `${id}.md`)), true, `${id} agent file should exist`);
     assert.match(projectYaml, new RegExp(`- ${id}`));
   }
-  assert.equal(await exists(join(root, '.agentos/agents/qa-engineer.md')), false);
+  assert.equal(await exists(join(root, '.agentos/agents/implementation.md')), false);
+  assert.equal(await exists(join(root, '.agentos/agents/frontend-engineer.md')), false);
+  assert.equal(await exists(join(root, '.agentos/agents/backend-engineer.md')), false);
   const skills = await readFile(join(root, '.agentos/skills.md'), 'utf8');
   assert.match(skills, /Policy: on-demand/);
-  assert.match(skills, /frontend-engineer/);
+  assert.match(skills, /developer/);
   assert.match(skills, /backend-testing/);
 });
 
@@ -102,24 +104,24 @@ test('init supports minimal and custom agent profiles', async () => {
   await initAgentOS({ cwd: minimalRoot, mode: 'new', yes: true, agents: 'minimal' });
   const minimalYaml = await readFile(join(minimalRoot, '.agentos/project.yaml'), 'utf8');
   assert.match(minimalYaml, /profile: minimal/);
-  assert.match(minimalYaml, /- implementation/);
-  assert.match(minimalYaml, /- qa/);
-  assert.doesNotMatch(minimalYaml, /frontend-engineer/);
-  assert.equal(await exists(join(minimalRoot, '.agentos/agents/frontend-engineer.md')), false);
+  assert.match(minimalYaml, /- developer/);
+  assert.match(minimalYaml, /- tester/);
+  assert.doesNotMatch(minimalYaml, /planner/);
+  assert.equal(await exists(join(minimalRoot, '.agentos/agents/planner.md')), false);
 
   const customRoot = await tempProject();
-  await initAgentOS({ cwd: customRoot, mode: 'new', yes: true, agents: 'frontend,qa,release' });
+  await initAgentOS({ cwd: customRoot, mode: 'new', yes: true, agents: 'developer,tester,release' });
   const customYaml = await readFile(join(customRoot, '.agentos/project.yaml'), 'utf8');
   assert.match(customYaml, /profile: custom/);
-  for (const id of ['frontend-engineer', 'qa', 'release-manager']) assert.match(customYaml, new RegExp(`- ${id}`));
-  assert.doesNotMatch(customYaml, /backend-engineer/);
+  for (const id of ['developer', 'tester', 'release-manager']) assert.match(customYaml, new RegExp(`- ${id}`));
+  assert.doesNotMatch(customYaml, /reviewer/);
 });
 
 
 test('init rejects unknown custom agent aliases', async () => {
   const root = await tempProject();
   await assert.rejects(
-    () => initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'fronted,qa' }),
+    () => initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'fronted,tester' }),
     /Unknown agent alias\(es\): fronted/,
   );
 });
@@ -130,15 +132,15 @@ test('doctor warns when agent capabilities or skills index are inconsistent', as
   await initAgentOS({ cwd: root, mode: 'new', yes: true });
   const { rm } = await import('node:fs/promises');
   await rm(join(root, '.agentos/skills.md'), { force: true });
-  await rm(join(root, '.agentos/agents/qa.md'), { force: true });
-  await writeFile(join(root, '.agentos/agents/qa-engineer.md'), '# Old QA Engineer\n');
+  await rm(join(root, '.agentos/agents/tester.md'), { force: true });
+  await writeFile(join(root, '.agentos/agents/frontend-engineer.md'), '# Old Frontend Engineer\n');
 
   const doctor = await doctorAgentOS({ cwd: root });
 
   assert.equal(doctor.ok, true);
   assert.match(doctor.text, /skills index missing: \.agentos\/skills\.md/);
-  assert.match(doctor.text, /agents\.capabilities\.qa points to qa, but \.agentos\/agents\/qa\.md is missing/);
-  assert.match(doctor.text, /\.agentos\/agents\/qa-engineer\.md is not listed in agents\.enabled/);
+  assert.match(doctor.text, /agents\.capabilities\.qa points to tester, but \.agentos\/agents\/tester\.md is missing/);
+  assert.match(doctor.text, /\.agentos\/agents\/frontend-engineer\.md is not listed in agents\.enabled/);
 });
 
 
@@ -217,27 +219,27 @@ test('link-obsidian creates a basename --link note inside --dest', async () => {
   assert.match(projectYaml, /- Projects\/KargaX\/AgentOS\/KargaX AgentOS Index\.md/);
 });
 
-test('project-manager is an optional built-in planning-only role, not enabled by default', async () => {
+test('planner is an optional built-in planning-only role, not enabled by default', async () => {
   const detectedRoot = await tempProject();
   await initAgentOS({ cwd: detectedRoot, mode: 'new', yes: true });
-  assert.equal(await exists(join(detectedRoot, '.agentos/agents/project-manager.md')), false);
+  assert.equal(await exists(join(detectedRoot, '.agentos/agents/planner.md')), false);
   const detectedYaml = await readFile(join(detectedRoot, '.agentos/project.yaml'), 'utf8');
-  assert.doesNotMatch(detectedYaml, /project-manager/);
+  assert.doesNotMatch(detectedYaml, /planner/);
 
   const planningRoot = await tempProject();
-  await initAgentOS({ cwd: planningRoot, mode: 'new', yes: true, agents: 'planning,implementation,qa' });
+  await initAgentOS({ cwd: planningRoot, mode: 'new', yes: true, agents: 'planning,developer,tester' });
   const projectYaml = await readFile(join(planningRoot, '.agentos/project.yaml'), 'utf8');
-  assert.match(projectYaml, /- project-manager/);
-  assert.match(projectYaml, /planning: project-manager/);
-  const agentMdContent = await readFile(join(planningRoot, '.agentos/agents/project-manager.md'), 'utf8');
+  assert.match(projectYaml, /- planner/);
+  assert.match(projectYaml, /planning: planner/);
+  const agentMdContent = await readFile(join(planningRoot, '.agentos/agents/planner.md'), 'utf8');
   assert.match(agentMdContent, /does not implement, commit, or push/);
   assert.match(agentMdContent, /repo scope/i);
   assert.match(agentMdContent, /protected paths/i);
 
   const pmAliasRoot = await tempProject();
-  await initAgentOS({ cwd: pmAliasRoot, mode: 'new', yes: true, agents: 'pm,qa' });
+  await initAgentOS({ cwd: pmAliasRoot, mode: 'new', yes: true, agents: 'pm,tester' });
   const pmYaml = await readFile(join(pmAliasRoot, '.agentos/project.yaml'), 'utf8');
-  assert.match(pmYaml, /- project-manager/);
+  assert.match(pmYaml, /- planner/);
 });
 
 
@@ -1064,7 +1066,7 @@ test('CLI skills remove supports dry-run for an installed local skill', async ()
 });
 
 test('template library files are present for agents, skills, schemas, and examples', async () => {
-  assert.equal(await exists(join(process.cwd(), 'templates/agents/project-manager.md')), true);
+  assert.equal(await exists(join(process.cwd(), 'templates/agents/planner.md')), true);
   assert.equal(await exists(join(process.cwd(), 'templates/agents/security-reviewer.md')), true);
   assert.equal(await exists(join(process.cwd(), 'templates/skills/frontend/frontend-design.md')), true);
   assert.equal(await exists(join(process.cwd(), 'templates/skills/github/commit-messages.md')), true);
@@ -1082,19 +1084,19 @@ test('skills list and agents list expose built-in reusable templates', async () 
   assert.match(skills.text, /commit-messages/);
   const agents = await agentsAgentOS({ cwd: root, list: true });
   assert.equal(agents.ok, true);
-  assert.match(agents.text, /project-manager/);
+  assert.match(agents.text, /planner/);
   assert.match(agents.text, /Canonical source templates: templates\/agents/);
 });
 
 test('agents add copies an agent template and registers it in project.yaml', async () => {
   const root = await tempProject();
   await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
-  const result = await agentsAgentOS({ cwd: root, add: 'project-manager' });
+  const result = await agentsAgentOS({ cwd: root, add: 'planner' });
   assert.equal(result.ok, true);
-  assert.equal(await exists(join(root, '.agentos/agents/project-manager.md')), true);
+  assert.equal(await exists(join(root, '.agentos/agents/planner.md')), true);
   const project = await readFile(join(root, '.agentos/project.yaml'), 'utf8');
-  assert.match(project, /planning: project-manager/);
-  assert.match(project, /- project-manager/);
+  assert.match(project, /planning: planner/);
+  assert.match(project, /- planner/);
   const doctor = await doctorAgentOS({ cwd: root });
   assert.equal(doctor.ok, true);
 });
@@ -1139,14 +1141,14 @@ test('templates list and show expose repository template registry entries', asyn
   const list = await templatesAgentOS({ cwd: root, command: 'list' });
   assert.equal(list.ok, true);
   assert.match(list.text, /AgentOS template registry/);
-  assert.match(list.text, /agent:project-manager/);
+  assert.match(list.text, /agent:planner/);
   assert.match(list.text, /skill:frontend\/frontend-design/);
   assert.match(list.text, /skill:github\/commit-messages/);
 
-  const shown = await templatesAgentOS({ cwd: root, command: 'show', id: 'agent:project-manager' });
+  const shown = await templatesAgentOS({ cwd: root, command: 'show', id: 'agent:planner' });
   assert.equal(shown.ok, true);
-  assert.match(shown.text, /Template: agent:project-manager/);
-  assert.match(shown.text, /# Project Manager/);
+  assert.match(shown.text, /Template: agent:planner/);
+  assert.match(shown.text, /# Planner/);
 });
 
 test('templates copy materializes repository agent and skill templates', async () => {
@@ -1173,7 +1175,7 @@ test('templates copy materializes repository agent and skill templates', async (
 test('templates validate accepts good templates and rejects missing sections', async () => {
   const root = await tempProject();
   await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
-  const good = await templatesAgentOS({ cwd: root, command: 'validate', source: join(process.cwd(), 'templates/agents/project-manager.md'), type: 'agent' });
+  const good = await templatesAgentOS({ cwd: root, command: 'validate', source: join(process.cwd(), 'templates/agents/planner.md'), type: 'agent' });
   assert.equal(good.ok, true);
   assert.match(good.text, /Validation: OK/);
 
@@ -1187,13 +1189,13 @@ test('templates validate accepts good templates and rejects missing sections', a
 test('templates copy and import refuse to overwrite existing files unless replace is explicit', async () => {
   const root = await tempProject();
   await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
-  const firstCopy = await templatesAgentOS({ cwd: root, command: 'copy', id: 'agent:project-manager' });
+  const firstCopy = await templatesAgentOS({ cwd: root, command: 'copy', id: 'agent:planner' });
   assert.equal(firstCopy.ok, true);
-  const blockedCopy = await templatesAgentOS({ cwd: root, command: 'copy', id: 'agent:project-manager' });
+  const blockedCopy = await templatesAgentOS({ cwd: root, command: 'copy', id: 'agent:planner' });
   assert.equal(blockedCopy.ok, false);
   assert.match(blockedCopy.text, /already exists/);
   assert.match(blockedCopy.text, /--replace/);
-  const replacedCopy = await templatesAgentOS({ cwd: root, command: 'copy', id: 'agent:project-manager', replace: true });
+  const replacedCopy = await templatesAgentOS({ cwd: root, command: 'copy', id: 'agent:planner', replace: true });
   assert.equal(replacedCopy.ok, true);
   assert.match(replacedCopy.text, /Replaced:/);
 
@@ -1263,7 +1265,7 @@ test('doctor --fix fails closed and makes zero adapter/config mutations when pro
     '.hermes.md',
     '.agentos/skills.md',
     '.agentos/knowledge.md',
-    '.agentos/agents/implementation.md',
+    '.agentos/agents/developer.md',
   ];
   const before = {};
   for (const rel of snapshotPaths) before[rel] = await readFile(join(root, rel), 'utf8');
@@ -1317,13 +1319,13 @@ test('agents add fails closed without corrupting a malformed project.yaml', asyn
   await writeFile(projectPath, MALFORMED_PROJECT_YAML);
 
   await assert.rejects(
-    () => agentsAgentOS({ cwd: root, add: 'project-manager' }),
+    () => agentsAgentOS({ cwd: root, add: 'planner' }),
     /project\.yaml.*(malformed|not valid YAML)/i,
   );
 
   const stillMalformed = await readFile(projectPath, 'utf8');
   assert.equal(stillMalformed, MALFORMED_PROJECT_YAML);
-  assert.equal(await exists(join(root, '.agentos/agents/project-manager.md')), false);
+  assert.equal(await exists(join(root, '.agentos/agents/planner.md')), false);
 });
 
 test('link-obsidian fails closed without corrupting a malformed project.yaml', async () => {
@@ -1360,7 +1362,7 @@ test('doctor --fix fails closed and makes zero adapter/config mutations when pro
     '.hermes.md',
     '.agentos/skills.md',
     '.agentos/knowledge.md',
-    '.agentos/agents/implementation.md',
+    '.agentos/agents/developer.md',
   ];
   const before = {};
   for (const rel of snapshotPaths) before[rel] = await readFile(join(root, rel), 'utf8');
@@ -1403,13 +1405,13 @@ test('agents add fails closed without corrupting an existing empty project.yaml'
   await writeFile(projectPath, EMPTY_PROJECT_YAML);
 
   await assert.rejects(
-    () => agentsAgentOS({ cwd: root, add: 'project-manager' }),
+    () => agentsAgentOS({ cwd: root, add: 'planner' }),
     /\.agentos\/project\.yaml (is malformed|exists but is empty)/i,
   );
 
   const stillEmpty = await readFile(projectPath, 'utf8');
   assert.equal(stillEmpty, EMPTY_PROJECT_YAML);
-  assert.equal(await exists(join(root, '.agentos/agents/project-manager.md')), false);
+  assert.equal(await exists(join(root, '.agentos/agents/planner.md')), false);
 });
 
 test('templates copy of an agent fails closed before writing the target agent file when project.yaml is malformed', async () => {
@@ -1455,7 +1457,7 @@ test('doctor --fix fails closed and makes zero adapter/config mutations when pro
     '.hermes.md',
     '.agentos/skills.md',
     '.agentos/knowledge.md',
-    '.agentos/agents/implementation.md',
+    '.agentos/agents/developer.md',
   ];
 
   for (const nullYaml of ['null\n', '~\n']) {

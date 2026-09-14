@@ -48,8 +48,8 @@ test('automatic empty init selects new and previews the full scaffold without wr
   for (const file of ['.agentos/product.md', '.agentos/skills.md', '.hermes.md']) assert.ok(dry.planned.includes(file)); assert.deepEqual(await readdir(root), []);
 });
 test('reinit retains configured topology/profile and preview detects conflicts', async t => {
-  const root = await fixture(t); await config(root, d => { d.agents.enabled = ['qa']; d.agents.profile = 'custom'; }); const before = await readFile(join(root, '.agentos/project.yaml'), 'utf8');
-  await packageAt(root, 'new-app', { react: '*' }); const result = await initAgentOS({ cwd: root }); assert.equal(await readFile(join(root, '.agentos/project.yaml'), 'utf8'), before); assert.deepEqual(result.agents.enabled, ['qa']); assert.doesNotMatch(await readFile(join(root, 'AGENTS.md'), 'utf8'), /new-app/);
+  const root = await fixture(t); await config(root, d => { d.agents.enabled = ['tester']; d.agents.profile = 'custom'; }); const before = await readFile(join(root, '.agentos/project.yaml'), 'utf8');
+  await packageAt(root, 'new-app', { react: '*' }); const result = await initAgentOS({ cwd: root }); assert.equal(await readFile(join(root, '.agentos/project.yaml'), 'utf8'), before); assert.deepEqual(result.agents.enabled, ['tester']); assert.doesNotMatch(await readFile(join(root, 'AGENTS.md'), 'utf8'), /new-app/);
   await writeFile(join(root, 'CLAUDE.md'), '<!-- agentos:managed:start -->\n'); await assert.rejects(initAgentOS({ cwd: root, dryRun: true }), /ambiguous/);
 });
 test('nested pointers use actual depth and disabled adapter policy prevents child writes', async t => {
@@ -76,7 +76,7 @@ test('agent imports register and add requires explicit replacement for customize
   const root = await fixture(t), source = join(root, 'source.md'); await writeFile(source, '# Agent\nLicense: MIT\nUse evidence.'); await templatesAgentOS({ cwd: root, command: 'import', type: 'agent', name: 'custom-auditor', source, yes: true });
   assert.ok(parse(await readFile(join(root, '.agentos/project.yaml'), 'utf8')).agents.enabled.includes('custom-auditor'));
   await skillsAgentOS({ cwd: root, add: 'debugging' }); const path = join(root, '.agentos/skills/core/debugging/SKILL.md'); await writeFile(path, 'customized'); await assert.rejects(skillsAgentOS({ cwd: root, add: 'debugging' }), /replace/i); assert.equal(await readFile(path, 'utf8'), 'customized'); await skillsAgentOS({ cwd: root, add: 'debugging', replace: true }); assert.notEqual(await readFile(path, 'utf8'), 'customized');
-  await writeFile(join(root, '.agentos/agents/qa.md'), 'customized'); await assert.rejects(agentsAgentOS({ cwd: root, add: 'qa' }), /replace/i);
+  await writeFile(join(root, '.agentos/agents/tester.md'), 'customized'); await assert.rejects(agentsAgentOS({ cwd: root, add: 'tester' }), /replace/i);
 });
 test('CLI rejects typos/invalid flags and boolean flags do not consume IDs', async t => {
   const root = await fixture(t);
@@ -117,7 +117,7 @@ test('Git evidence excludes sensitive/renamed content and handles spaces/newline
   git(root, ['restore', '--', '.env']); git(root, ['mv', '.env', 'ordinary.txt']); const renamed = await runHandoffAgentOS({ cwd: root }); assert.ok(renamed.git.omittedFiles.includes('ordinary.txt')); assert.doesNotMatch(await readFile(renamed.handoffPath, 'utf8'), /SYNTHETIC_PRIVATE_FIXTURE/);
 });
 test('installed inventory reports customization/activation and validates every registry card', async t => {
-  const root = await fixture(t); await skillsAgentOS({ cwd: root, add: 'debugging' }); assert.equal((await skillsAgentOS({ cwd: root, list: true, installed: true })).entries[0].state, 'source-match'); await writeFile(join(root, '.agentos/skills/core/debugging/SKILL.md'), '# Custom'); assert.equal((await skillsAgentOS({ cwd: root, list: true, installed: true })).entries[0].state, 'custom-or-imported'); assert.equal((await agentsAgentOS({ cwd: root, list: true, installed: true })).entries.find(e => e.id === 'qa').enabled, true);
+  const root = await fixture(t); await skillsAgentOS({ cwd: root, add: 'debugging' }); assert.equal((await skillsAgentOS({ cwd: root, list: true, installed: true })).entries[0].state, 'source-match'); await writeFile(join(root, '.agentos/skills/core/debugging/SKILL.md'), '# Custom'); assert.equal((await skillsAgentOS({ cwd: root, list: true, installed: true })).entries[0].state, 'custom-or-imported'); assert.equal((await agentsAgentOS({ cwd: root, list: true, installed: true })).entries.find(e => e.id === 'tester').enabled, true);
   for (const entry of (await templatesAgentOS({ cwd: root, command: 'list' })).entries) assert.equal((await templatesAgentOS({ cwd: root, command: 'validate', source: entry.absPath, type: entry.type })).ok, true, entry.id);
 });
 test('refresh adds discovered repos without overwriting configured identity/commands', async t => {

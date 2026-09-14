@@ -105,7 +105,7 @@ agentos templates import ./external-skill.md --type skill --name external-skill 
 The same rule applies to registry copies:
 
 ```bash
-agentos templates copy agent:project-manager --replace
+agentos templates copy agent:planner --replace
 ```
 
 ## Attribution metadata

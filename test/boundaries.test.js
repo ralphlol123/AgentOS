@@ -38,7 +38,7 @@ async function rejectedWithoutChanges(base, action) {
 test('boundary: symlinked managed targets fail before writes or deletions', async t => {
   const cases = [
     ['.agentos/skills', root => skillsAgentOS({ cwd: root, add: 'core-pack' })],
-    ['.agentos/agents', root => agentsAgentOS({ cwd: root, add: 'project-manager' })],
+    ['.agentos/agents', root => agentsAgentOS({ cwd: root, add: 'planner' })],
     ['.agentos/skills.md', root => templatesAgentOS({ cwd: root, command: 'copy', id: 'skill:core/debugging', replace: true })],
     ['.agentos/runs', root => compactAgentOS({ cwd: root })],
     ['AGENTS.md', root => doctorAgentOS({ cwd: root, fix: true })],

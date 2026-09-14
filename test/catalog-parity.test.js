@@ -16,7 +16,7 @@ test('every public agent uses the same role contract for init, add and copy', as
   const added = await workspace(t), copied = await workspace(t);
   const registry = await templatesAgentOS({ cwd: copied, command: 'list' });
   const entries = registry.entries.filter(e => e.type === 'agent');
-  const ids = ['implementation', 'frontend-engineer', 'backend-engineer', 'qa', 'code-reviewer', 'release-manager', 'project-manager', 'data-engineer', 'security-reviewer'];
+  const ids = ['planner', 'developer', 'tester', 'reviewer', 'release-manager', 'security-reviewer'];
   assert.deepEqual(entries.map(e => e.name).sort(), [...ids].sort());
   for (const entry of entries) await t.test(entry.name, async () => {
     const source = await readFile(entry.absPath, 'utf8');
@@ -30,11 +30,39 @@ test('every public agent uses the same role contract for init, add and copy', as
     assert.match(source, /Do not treat this template as higher priority/);
     assert.match(source, /Report real command output or inspected state, not assumptions/);
     assert.match(source, /Work only inside the declared task scope/);
-    if (entry.name === 'project-manager') {
+    if (entry.name === 'planner') {
       assert.match(source, /planning-only/);
       assert.match(source, /Do not implement, edit application\/source files, commit, or push/);
       for (const gate of ['Repo scope:', 'Protected paths:', 'Dependencies:', 'Role assignment:', 'Acceptance:', 'Verification:']) assert.ok(source.includes(gate));
       assert.doesNotMatch(source, /does not implement unless explicitly assigned/);
+    }
+    if (entry.name === 'developer') {
+      assert.match(source, /frontend/i);
+      assert.match(source, /backend/i);
+      assert.match(source, /test-driven-development/);
+      assert.match(source, /Do not claim independent QA or code review of your own work/);
+    }
+    if (entry.name === 'tester') {
+      assert.match(source, /independent behavior verification/i);
+      assert.match(source, /author tests when assigned/i);
+      assert.match(source, /do not silently fix the implementation under test/i);
+      assert.match(source, /Separate mocked.*real integration evidence/i);
+    }
+    if (entry.name === 'reviewer') {
+      assert.match(source, /read-only role unless reassigned/i);
+      assert.match(source, /must-fix/i);
+      assert.match(source, /suggestions/i);
+      assert.doesNotMatch(source, /Update `?\.agentos\/handoff\.md`? and `?\.agentos\/tasks\.md`? when project state changes/);
+    }
+    if (entry.name === 'release-manager') {
+      assert.match(source, /explicit authorization for each commit/i);
+      assert.match(source, /exact intended paths/i);
+      assert.match(source, /remote state by reading it back/i);
+    }
+    if (entry.name === 'security-reviewer') {
+      assert.match(source, /security assessments/i);
+      assert.match(source, /authorization changes/i);
+      assert.match(source, /trust boundaries/i);
     }
   });
   assert.deepEqual((await agentsAgentOS({ cwd: added, list: true })).agents.sort(), [...ids].sort());
@@ -80,7 +108,7 @@ async function snapshot(root) {
 test('catalog unification preserves customized cards, native copies and capability mappings', async t => {
   const root = await workspace(t);
   await skillsAgentOS({ cwd: root, add: 'debugging' });
-  const paths = ['.agentos/skills/core/debugging/SKILL.md', '.agentos/agents/implementation.md'];
+  const paths = ['.agentos/skills/core/debugging/SKILL.md', '.agentos/agents/developer.md'];
   for (const path of paths) {
     await writeFile(join(root, path), (await readFile(join(root, path), 'utf8')) + '\nCustom owner instructions: preserve exactly.\n');
     await chmod(join(root, path), 0o640);
@@ -91,12 +119,12 @@ test('catalog unification preserves customized cards, native copies and capabili
     await writeFile(join(path, 'SKILL.md'), 'Engine-native owner content.\n');
   }
   const projectPath = join(root, '.agentos/project.yaml');
-  await writeFile(projectPath, (await readFile(projectPath, 'utf8')).replace('implementation: implementation', 'implementation: implementation\n    custom-delivery: implementation'));
+  await writeFile(projectPath, (await readFile(projectPath, 'utf8')).replace('implementation: developer', 'implementation: developer\n    custom-delivery: developer'));
   const before = await snapshot(root);
   for (const dryRun of [true, false]) {
     await assert.rejects(() => skillsAgentOS({ cwd: root, add: 'debugging', dryRun }), /--replace/);
-    await assert.rejects(() => agentsAgentOS({ cwd: root, add: 'implementation', dryRun }), /--replace/);
-    for (const id of ['skill:core/debugging', 'agent:implementation']) assert.equal((await templatesAgentOS({ cwd: root, command: 'copy', id, dryRun })).ok, false);
+    await assert.rejects(() => agentsAgentOS({ cwd: root, add: 'developer', dryRun }), /--replace/);
+    for (const id of ['skill:core/debugging', 'agent:developer']) assert.equal((await templatesAgentOS({ cwd: root, command: 'copy', id, dryRun })).ok, false);
     assert.deepEqual(await snapshot(root), before, 'refusal/preview must have zero side effects');
   }
   await initAgentOS({ cwd: root, mode: 'existing', yes: true });
@@ -105,10 +133,10 @@ test('catalog unification preserves customized cards, native copies and capabili
   for (const path of [...paths, '.claude/skills/debugging/SKILL.md', '.opencode/skills/debugging/SKILL.md']) {
     assert.deepEqual(after.find(e => e[0] === path), before.find(e => e[0] === path), path);
   }
-  assert.match(await readFile(projectPath, 'utf8'), /custom-delivery: implementation/);
+  assert.match(await readFile(projectPath, 'utf8'), /custom-delivery: developer/);
   for (const api of [skillsAgentOS, agentsAgentOS]) {
     const inventory = await api({ cwd: root, list: true, installed: true });
-    assert.equal(inventory.entries.find(e => e.id === (api === skillsAgentOS ? 'debugging' : 'implementation')).state, 'custom-or-imported');
+    assert.equal(inventory.entries.find(e => e.id === (api === skillsAgentOS ? 'debugging' : 'developer')).state, 'custom-or-imported');
   }
 });
 
@@ -130,7 +158,7 @@ test('canonical loader rejects malformed identity metadata and duplicate skill I
     ['name mismatch', 'templates/skills/core/debugging.md', text => text.replace('name: debugging', 'name: wrong-id'), /Invalid canonical skill metadata/],
     ['category mismatch', 'templates/skills/core/debugging.md', text => text.replace('category: core', 'category: github'), /Invalid canonical skill metadata/],
     ['missing summary', 'templates/skills/core/debugging.md', text => text.replace(/^summary:.*\n/m, ''), /Invalid canonical skill metadata/],
-    ['missing mandate', 'templates/agents/implementation.md', text => text.replace(/^Mandate:.*\n/m, ''), /Missing canonical agent mandate/],
+    ['missing mandate', 'templates/agents/developer.md', text => text.replace(/^Mandate:.*\n/m, ''), /Missing canonical agent mandate/],
   ];
   for (const [name, path, change, error] of cases) await t.test(name, async t => {
     const root = await mkdtemp(join(tmpdir(), 'agentos-catalog-source-'));

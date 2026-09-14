@@ -82,7 +82,7 @@ AgentOS v0.1 is a TypeScript CLI/package that supports:
 - child repo pointer files for parent-managed multi-repo workspaces;
 - generated `.agentos/project.yaml`, `memory.md`, `handoff.md`, `tasks.md`, `decisions.md`, `status.md`, `skills.md`, `agents/`, `engines/`, `repos/`, and `runs/`;
 - agent selection profiles: `minimal`, `detected`, and custom comma lists;
-- optional planning-only `project-manager` role;
+- optional planning-only `planner` role;
 - local project skills under `.agentos/skills/`;
 - local custom agents under `.agentos/agents/`;
 - reusable repository templates under `templates/`;
@@ -162,7 +162,7 @@ More detail: [docs/quickstart.md](docs/quickstart.md).
 ## Commands
 
 ```bash
-agentos init [--new|--existing] [--agents minimal|detected|frontend,qa,release] [--dry-run]
+agentos init [--new|--existing] [--agents minimal|detected|developer,tester,reviewer,release-manager] [--dry-run]
 agentos status
 agentos handoff
 agentos run handoff [--engine name] [--role role] [--repo repo] [--worktree path] [--phase slug] [--reason reason] [--dry-run]
@@ -211,7 +211,7 @@ Use `agentos run handoff` when an engine is near quota, hit a provider/rate-limi
 ```bash
 agentos run handoff \
   --engine claude-code \
-  --role backend-engineer \
+  --role developer \
   --repo photobooth-be \
   --worktree worktrees/photobooth-be__feat-event-template-system \
   --phase event-template-system \
@@ -232,19 +232,19 @@ Safety rules:
 ```bash
 agentos init --existing --agents minimal
 agentos init --existing --agents detected
-agentos init --existing --agents frontend,backend,qa,review,release
+agentos init --existing --agents developer,tester,reviewer,release-manager
 ```
 
 Profiles:
 
-- `minimal`: `implementation`, `qa`, `code-reviewer`, `release-manager`.
-- `detected`: minimal team plus specialists justified by repo evidence, currently `frontend-engineer` and/or `backend-engineer`.
-- custom comma list: friendly aliases such as `frontend`, `backend`, `qa`, `review`, `release`, `planning`, and `pm`.
+- `minimal`: `developer`, `tester`, `reviewer`, `release-manager`.
+- `detected`: the same core team as minimal; frontend/backend specialists were absorbed into the single `developer` role.
+- custom comma list: friendly aliases such as `review`, `release`, `planning`, and `pm`.
 
-`project-manager` is optional and planning-only. It is not enabled by default detected profile.
+`planner` is optional and planning-only. It is not enabled by the default detected profile.
 
 ```bash
-agentos agents add project-manager
+agentos agents add planner
 ```
 
 ## Local skills
@@ -346,20 +346,20 @@ Use the registry commands to discover and materialize them:
 
 ```bash
 agentos templates list
-agentos templates show agent:project-manager
-agentos templates copy agent:project-manager --dry-run
-agentos templates copy agent:project-manager
+agentos templates show agent:planner
+agentos templates copy agent:planner --dry-run
+agentos templates copy agent:planner
 agentos templates copy skill:frontend/frontend-design
 agentos templates copy skill:github/commit-messages
-agentos templates validate templates/agents/project-manager.md --type agent
+agentos templates validate templates/agents/planner.md --type agent
 ```
 
 Agent convenience commands remain available:
 
 ```bash
 agentos agents list
-agentos agents add project-manager
-agentos agents add ./my-agent.md --name data-engineer --dry-run
+agentos agents add planner
+agentos agents add ./my-agent.md --name custom-auditor --dry-run
 ```
 
 Template docs: [docs/templates.md](docs/templates.md).
@@ -386,7 +386,7 @@ The importer shows source, SHA256, byte size, target path, and safety findings. 
 AgentOS refuses to overwrite existing copied/imported templates by default. Use `--replace` only after reviewing the existing local file and confirming replacement is intended:
 
 ```bash
-agentos templates copy agent:project-manager --replace
+agentos templates copy agent:planner --replace
 agentos templates import ./external-skill.md --type skill --name external-review --yes --replace
 ```
 

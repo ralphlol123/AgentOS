@@ -27,7 +27,7 @@ agentos templates list
 Show a template by ID:
 
 ```bash
-agentos templates show agent:project-manager
+agentos templates show agent:planner
 agentos templates show skill:frontend/frontend-design
 agentos templates show skill:github/commit-messages
 ```
@@ -45,7 +45,7 @@ agentos templates copy skill:github/commit-messages
 Validate a local template file before copying/importing it:
 
 ```bash
-agentos templates validate templates/agents/project-manager.md --type agent
+agentos templates validate templates/agents/planner.md --type agent
 agentos templates validate templates/skills/frontend/frontend-design.md --type skill
 ```
 
@@ -63,15 +63,12 @@ skill:<category>/<skill-name>
 Current built-in agent template files:
 
 ```text
-templates/agents/implementation.md
-templates/agents/frontend-engineer.md
-templates/agents/backend-engineer.md
-templates/agents/qa.md
-templates/agents/code-reviewer.md
+templates/agents/planner.md
+templates/agents/developer.md
+templates/agents/tester.md
+templates/agents/reviewer.md
 templates/agents/release-manager.md
-templates/agents/project-manager.md
 templates/agents/security-reviewer.md
-templates/agents/data-engineer.md
 ```
 
 List available built-in agent templates:
@@ -83,7 +80,7 @@ agentos agents list
 Add a built-in template to the current AgentOS project:
 
 ```bash
-agentos agents add project-manager
+agentos agents add planner
 ```
 
 Dry-run a custom local template:
@@ -228,7 +225,7 @@ templates/examples/imported-skill.example.md
 
 Edit `templates/skills/<category>/<id>.md` or `templates/agents/<id>.md`, not an inline catalog. `src/catalog.ts` loads the package-owned templates once per process and derives catalog entries and installation content. The packaged `templates/` directory is therefore required at runtime.
 
-Skill frontmatter declares `name`, `category`, `mode: full`, and a non-empty `summary`. Name/category must match the existing filename/path; duplicate skill IDs are rejected. Keep the complete workflow in the body. Agent filenames define IDs; their `Mandate:` paragraph supplies listing metadata, and the strict project-manager card declares its planning-only contract. Role defaults and capability routing remain separate policy in the CLI; this slice does not rename or consolidate them.
+Skill frontmatter declares `name`, `category`, `mode: full`, and a non-empty `summary`. Name/category must match the existing filename/path; duplicate skill IDs are rejected. Keep the complete workflow in the body. Agent filenames define IDs; their `Mandate:` paragraph supplies listing metadata, and the strict planner card declares its planning-only contract. The canonical six-agent team is `planner`, `developer`, `tester`, `reviewer`, `release-manager`, plus optional `security-reviewer`; frontend/backend engineer and data-engineer templates are retired (frontend/backend specialization is expressed via repo scope and skills). Role defaults and capability routing are separate CLI policy: `minimal` enables developer/tester/reviewer/release-manager, and capabilities `implementation`/`frontend`/`backend` all route to `developer`.
 
 Run `node --test test/catalog-parity.test.js` after building to check add/copy/init parity, workflow gates, metadata validation, and custom-card preservation. Imported external-source excerpt limits are unchanged; compatibility modes described above apply to built-in skills, not import summarization.
 

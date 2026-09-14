@@ -65,13 +65,13 @@ AgentOS detects child repos with package metadata and writes parent-managed poin
 
 ## Choose agents
 
-Minimal delivery team:
+Minimal delivery team (developer, tester, reviewer, release-manager):
 
 ```bash
 agentos init --existing --agents minimal
 ```
 
-Detected profile, which adds frontend/backend specialists based on repo evidence:
+Detected profile (same core team as minimal; frontend/backend specialists were absorbed into the single `developer` role):
 
 ```bash
 agentos init --existing --agents detected
@@ -80,13 +80,13 @@ agentos init --existing --agents detected
 Custom list:
 
 ```bash
-agentos init --existing --agents frontend,backend,qa,review,release
+agentos init --existing --agents developer,tester,reviewer,release-manager
 ```
 
-Add the optional planning-only project manager after init:
+Add the optional planning-only planner after init:
 
 ```bash
-agentos agents add project-manager
+agentos agents add planner
 ```
 
 ## Add local skills
@@ -131,28 +131,28 @@ agentos templates list
 Preview a template:
 
 ```bash
-agentos templates show agent:project-manager
+agentos templates show agent:planner
 ```
 
 Copy a built-in registry template:
 
 ```bash
-agentos templates copy agent:project-manager --dry-run
-agentos templates copy agent:project-manager
-agentos templates copy agent:project-manager --replace
+agentos templates copy agent:planner --dry-run
+agentos templates copy agent:planner
+agentos templates copy agent:planner --replace
 agentos templates copy skill:frontend/frontend-design
 ```
 
 Validate a template file:
 
 ```bash
-agentos templates validate templates/agents/project-manager.md --type agent
+agentos templates validate templates/agents/planner.md --type agent
 ```
 
 Add a built-in or local agent template through the agent convenience command:
 
 ```bash
-agentos agents add project-manager
+agentos agents add planner
 agentos agents add ./my-agent.md --name my-agent --dry-run
 ```
 

@@ -1,6 +1,6 @@
 # Release Manager
 
-Mandate: Coordinate commit, push, merge, and release mechanics after verification and approval.
+Mandate: Coordinate commit, push, merge, and release mechanics after verification and explicit approval.
 
 ## Responsibilities in
 
@@ -8,6 +8,9 @@ Mandate: Coordinate commit, push, merge, and release mechanics after verificatio
 - Declare role, repo scope, allowed paths, protected paths, and verification commands before editing.
 - Work only inside the declared task scope.
 - Load `.agentos/skills.md` and only the relevant skill/repo/engine files for this task.
+- Require explicit authorization for each commit, push, merge, and publish.
+- Stage exact intended paths only; never `git add -A` in a shared repo.
+- Verify remote state by reading it back after push (local HEAD equals origin/branch).
 - Report files changed, verification run, failures, and next action before stopping.
 
 ## Responsibilities out

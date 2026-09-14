@@ -1378,8 +1378,8 @@ async function agentsAgentOSUnlocked(options = {}) {
     const enabled = new Set(Array.isArray(agents.enabled) ? agents.enabled.map((v) => normalizeAgentAlias(String(v))) : []);
     enabled.add(id);
     const capabilities = agents.capabilities && typeof agents.capabilities === 'object' ? agents.capabilities : {};
-    if (id === 'project-manager' && !capabilities.planning)
-        capabilities.planning = 'project-manager';
+    if (id === 'planner' && !capabilities.planning)
+        capabilities.planning = 'planner';
     project.agents = { profile: 'custom', capabilities, enabled: [...enabled] };
     const lines = [`AgentOS agents add${dryRun ? ' dry run' : ''}`, `Root: ${root}`, `Agent: ${id}`, '', `${dryRun ? 'Would write' : 'Wrote'}: ${relPath}`, `${dryRun ? 'Would patch' : 'Patched'}: .agentos/project.yaml`];
     if (!dryRun) {
@@ -1624,8 +1624,8 @@ async function registerProjectAgent(root, id) {
     const enabled = new Set(Array.isArray(agents.enabled) ? agents.enabled.map((v) => normalizeAgentAlias(String(v))) : []);
     enabled.add(normalizeAgentAlias(id));
     const capabilities = agents.capabilities && typeof agents.capabilities === 'object' ? agents.capabilities : {};
-    if (id === 'project-manager' && !capabilities.planning)
-        capabilities.planning = 'project-manager';
+    if (id === 'planner' && !capabilities.planning)
+        capabilities.planning = 'planner';
     project.agents = { profile: 'custom', capabilities, enabled: [...enabled] };
     await writeFileAtomic(projectPath, dumpProjectYaml(project));
 }
@@ -2738,16 +2738,12 @@ function knowledgeMd(options = {}) {
 function skillsMd(agentSelection) {
     const enabled = new Set(agentSelection.enabled);
     const sections = [];
-    if (enabled.has('implementation'))
-        sections.push(['implementation', ['debugging — use for unclear bugs.', 'test-driven-development — use when adding or changing behavior.']]);
-    if (enabled.has('frontend-engineer'))
-        sections.push(['frontend-engineer', ['frontend-testing — use before declaring frontend work done.', 'frontend-design — use for UI design/review/polish.']]);
-    if (enabled.has('backend-engineer'))
-        sections.push(['backend-engineer', ['backend-development — use when implementing backend features.', 'backend-testing — use before declaring backend work done.', 'authorization — use for auth/permission work.']]);
-    if (enabled.has('qa'))
-        sections.push(['qa', ['frontend-testing — use for browser-driven frontend QA.', 'backend-testing — use for backend smoke/e2e verification.', 'integration-testing — use for cross-component rehearsal.']]);
-    if (enabled.has('code-reviewer'))
-        sections.push(['code-reviewer', ['git-safety — use before reviewing staged or unstaged changes in shared repos.', 'code-review — use for preparing and performing reviews.']]);
+    if (enabled.has('developer'))
+        sections.push(['developer', ['debugging — use for unclear bugs.', 'test-driven-development — use when adding or changing behavior.', 'frontend-design — use for UI design/review/polish.', 'frontend-testing — use before declaring frontend work done.', 'backend-development — use when implementing backend features.', 'backend-testing — use before declaring backend work done.', 'authorization — use for auth/permission work.']]);
+    if (enabled.has('tester'))
+        sections.push(['tester', ['frontend-testing — use for browser-driven frontend QA.', 'backend-testing — use for backend smoke/e2e verification.', 'integration-testing — use for cross-component rehearsal.']]);
+    if (enabled.has('reviewer'))
+        sections.push(['reviewer', ['git-safety — use before reviewing staged or unstaged changes in shared repos.', 'code-review — use for preparing and performing reviews.']]);
     if (enabled.has('release-manager'))
         sections.push(['release-manager', ['git-safety — use before commit/push/merge.', 'pull-request-workflow — use for PR lifecycle work.']]);
     return `# Skills\n\nPolicy: on-demand.\n\nLoad only skills relevant to the current task and assigned agent role. Do not bulk-load all skills.\n\n${sections.map(([role, skills]) => `## ${role}\n\n${skills.map((skill) => `- ${skill}`).join('\n')}`).join('\n\n')}\n`;
@@ -2758,7 +2754,7 @@ function statusMd({ mode, workspaceKind }) { return `# Status\n\nMode: ${mode}\n
 function productMd({ projectName }) { return `# Product\n\nProject: ${projectName}\n\n## Problem\n\nTBD\n\n## Users\n\nTBD\n\n## MVP\n\nTBD\n`; }
 function architectureMd() { return '# Architecture\n\nDefine stack, boundaries, data model, and deployment before scaffolding code.\n'; }
 function runsReadmeMd() { return '# Runs\n\nStore per-task briefs, results, verification logs, and diff summaries here.\n'; }
-const MINIMAL_AGENT_IDS = ['implementation', 'qa', 'code-reviewer', 'release-manager'];
+const MINIMAL_AGENT_IDS = ['developer', 'tester', 'reviewer', 'release-manager'];
 function resolveAgentSelection(requested, repos) {
     const raw = String(requested || 'detected').trim().toLowerCase();
     if (raw === 'minimal')
@@ -2809,48 +2805,38 @@ function buildAgentSelection(profile, ids, options = {}) {
 function customAgentDefinition(id) {
     return { id, mandate: `Custom project-defined agent role. See .agentos/agents/${id}.md for its role definition.`, custom: true };
 }
-function detectedSpecialistIds(repos) {
-    const ids = [];
-    if (repos.some((repo) => repo.type === 'frontend' || ['nuxt', 'nextjs', 'vite/vue', 'react'].includes(repo.framework)))
-        ids.push('frontend-engineer');
-    if (repos.some((repo) => repo.type === 'backend' || ['nestjs', 'express'].includes(repo.framework)))
-        ids.push('backend-engineer');
-    return ids;
+function detectedSpecialistIds(_repos) {
+    // Frontend/backend engineer specialists were absorbed into the single
+    // `developer` role. Per-repo specialization is expressed through repo scope
+    // and the relevant frontend/backend skills, not separate agent identities.
+    return [];
 }
 function normalizeAgentAlias(value) {
     const id = safeId(value);
     const aliases = {
-        frontend: 'frontend-engineer',
-        backend: 'backend-engineer',
-        review: 'code-reviewer',
-        reviewer: 'code-reviewer',
+        review: 'reviewer',
         release: 'release-manager',
-        qa: 'qa',
-        'qa-engineer': 'qa',
-        impl: 'implementation',
-        implementer: 'implementation',
-        planning: 'project-manager',
-        pm: 'project-manager',
+        planning: 'planner',
+        pm: 'planner',
     };
     return aliases[id] || id;
 }
 function agentCapabilities(enabled) {
     const set = new Set(enabled);
     const capabilities = {};
-    if (set.has('implementation'))
-        capabilities.implementation = 'implementation';
-    if (set.has('frontend-engineer'))
-        capabilities.frontend = 'frontend-engineer';
-    if (set.has('backend-engineer'))
-        capabilities.backend = 'backend-engineer';
-    if (set.has('qa'))
-        capabilities.qa = 'qa';
-    if (set.has('code-reviewer'))
-        capabilities.review = 'code-reviewer';
+    if (set.has('developer')) {
+        capabilities.implementation = 'developer';
+        capabilities.frontend = 'developer';
+        capabilities.backend = 'developer';
+    }
+    if (set.has('tester'))
+        capabilities.qa = 'tester';
+    if (set.has('reviewer'))
+        capabilities.review = 'reviewer';
     if (set.has('release-manager'))
         capabilities.release = 'release-manager';
-    if (set.has('project-manager'))
-        capabilities.planning = 'project-manager';
+    if (set.has('planner'))
+        capabilities.planning = 'planner';
     return capabilities;
 }
 function agentConfigObject(agentSelection) {

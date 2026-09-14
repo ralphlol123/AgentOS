@@ -73,14 +73,14 @@ test('agents add rolls back project.yaml patch and the new agent file when the p
   const root = await tempProject();
   await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
   const projectPath = join(root, '.agentos/project.yaml');
-  const agentPath = join(root, '.agentos/agents/project-manager.md');
+  const agentPath = join(root, '.agentos/agents/planner.md');
   const beforeProject = await readFile(projectPath, 'utf8');
-  assert.equal(await exists(agentPath), false, 'precondition: project-manager agent must not exist yet');
+  assert.equal(await exists(agentPath), false, 'precondition: planner agent must not exist yet');
 
   __setAtomicWriteFaultForTests(projectPath, 'before-rename');
   t.after(__clearAtomicWriteFaultForTests);
 
-  await assert.rejects(() => agentsAgentOS({ cwd: root, add: 'project-manager' }), /Injected atomic-write test fault/);
+  await assert.rejects(() => agentsAgentOS({ cwd: root, add: 'planner' }), /Injected atomic-write test fault/);
 
   assert.equal(await readFile(projectPath, 'utf8'), beforeProject, 'project.yaml must be unchanged (it was the failing write)');
   assert.equal(await exists(agentPath), false, 'the new agent file must not be left behind when project.yaml fails to update');
@@ -321,7 +321,7 @@ test('successful multi-file commands leave no atomic-write temp artifacts behind
 
   await compactAgentOS({ cwd: root });
   await runHandoffAgentOS({ cwd: root, engine: 'claude-code', reason: 'manual-pause' });
-  await agentsAgentOS({ cwd: root, add: 'project-manager' });
+  await agentsAgentOS({ cwd: root, add: 'planner' });
   await skillsAgentOS({ cwd: root, add: 'test-driven-development' });
   await skillsAgentOS({ cwd: root, remove: 'test-driven-development' });
   await templatesAgentOS({ cwd: root, command: 'copy', id: 'agent:security-reviewer' });
