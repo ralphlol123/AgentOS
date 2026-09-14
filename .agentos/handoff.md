@@ -2,7 +2,7 @@
 
 ## Current objective
 
-**Version-upgrade migration UX — all five slices implemented.** Slices 1–2 are on `main`; slices 3–5 are committed on branch `feat/upgrade-migration-ux` (pushed), with the pull request into `main` pending a branch-wide independent review. Version is `0.5.0`. Plan: `.agentos/plans/2026-09-14-upgrade-migration-ux.md`.
+**Version-upgrade migration UX — complete and merged.** All five slices are on `main` (slices 1–2 as `5a3ab0e` / `5bd0e3a`, PR #22 merged as `20a4179` for slices 3–5). Version is `0.5.0`, not yet published to npm. `main` CI is green (Node 20/22/24/26 on Linux, Node 24 on macOS, npm/pnpm/Bun packaged job). Plan: `.agentos/plans/2026-09-14-upgrade-migration-ux.md`.
 
 - Slice 1: `doctor`/`doctor --json` report `migration.{adapters,repoIds,retiredCards,summary}`; `agentos adapters explain <file>` classifies one adapter path.
 - Slice 2: a normalizable repo ID (`frontend_client`) is now a reported, fixable `doctor` problem instead of a parse-time brick, and `agentos doctor --fix --normalize-repo-ids [--dry-run]` renames the key plus its `.agentos/repos/<id>.md` note byte-preservingly in one transaction, leaving an audit note under `.agentos/runs/`.

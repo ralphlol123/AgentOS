@@ -25,7 +25,8 @@ Active scope: post-release. Catalog cleanup (slices 1–5) shipped — merged vi
 ## Next
 
 - [ ] Preserve `project.yaml` formatting on the `doctor --fix` regeneration path when the `repos:` mapping is not line-editable (flow style, comments). Slice 2 made workspaces with a non-canonical repo ID reach `fixAgentOSAdapters` instead of failing validation, and that path re-dumps the whole file (`stringifyYaml`), so comments/flow style are lost where the dedicated `--normalize-repo-ids` path deliberately refuses to edit. Content is preserved and no bytes are lost inside `.agentos/` semantics; this is a formatting-fidelity gap, not data loss. Minimal change: mirror `renameRepoIdKey`'s "refuse when not line-editable" rule in the regeneration path.
-- [ ] Open the `feat/upgrade-migration-ux` pull request into `main` covering slices 3–5 (slices 1–2 are already on `main`), after the branch-wide independent review passes.
+- [x] Pull request #22 merged into `main` (merge commit `20a4179`) covering slices 3–5; slices 1–2 landed earlier as `5a3ab0e` / `5bd0e3a`. `main` CI is green for the first time (Node 20/22/24/26 + macOS + npm/pnpm/Bun packaged job).
+- [ ] Decide on publishing `0.5.0` to npm (owner approval required; `npm publish --dry-run` and the packed-install check already pass, and the CI publish-dry-run guard now skips an already-published version).
 - [ ] Resume `agentos run` Phase 2 after release.
 - [ ] Add richer local skill authoring/import UX.
 
