@@ -2,10 +2,13 @@
 
 ## Current objective
 
-**Version-upgrade migration UX**. Slices 1 and 2 are complete, reviewed, and committed; slice 3 (custom-content adapter migration) is next. Plan: `.agentos/plans/2026-09-14-upgrade-migration-ux.md` (owner-approved; defaults locked — always emit `.agentos.bak`, repo-ID normalization behind a flag, retired cleanup report-only by default, target `0.5.0`).
+**Version-upgrade migration UX — all five slices implemented.** Slices 1–2 are on `main`; slices 3–5 are committed on branch `feat/upgrade-migration-ux` (pushed), with the pull request into `main` pending a branch-wide independent review. Version is `0.5.0`. Plan: `.agentos/plans/2026-09-14-upgrade-migration-ux.md`.
 
 - Slice 1: `doctor`/`doctor --json` report `migration.{adapters,repoIds,retiredCards,summary}`; `agentos adapters explain <file>` classifies one adapter path.
 - Slice 2: a normalizable repo ID (`frontend_client`) is now a reported, fixable `doctor` problem instead of a parse-time brick, and `agentos doctor --fix --normalize-repo-ids [--dry-run]` renames the key plus its `.agentos/repos/<id>.md` note byte-preservingly in one transaction, leaving an audit note under `.agentos/runs/`.
+- Slice 3: an adapter holding custom content with one byte-exact legacy section interleaved in it is classified `adopt`; `agentos doctor --fix --adopt-custom-adapters` replaces only that span (custom bytes preserved, one `.agentos.bak`), and `doctor --fix --dry-run` previews every planned adapter change read-only. A plain `doctor --fix` still refuses and names the flag.
+- Slice 4: retired skill cards carry provable eligibility (`src/legacy-skill-shapes.ts` content hashes, generated from this repository's history for all 19 retired IDs); `agentos doctor --fix --prune-retired` removes only provably-generated cards and rebuilds the local-skills index. Forks are reported, never touched.
+- Slice 5: version `0.5.0` with a CHANGELOG entry, a green `bun run release:check` (including `npm publish --dry-run`), a verified packed install at 0.5.0, and a durable end-to-end rehearsal test over one workspace carrying all three upgrade failure classes.
 
 ## Current state
 
