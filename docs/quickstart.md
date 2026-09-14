@@ -65,13 +65,13 @@ AgentOS detects child repos with package metadata and writes parent-managed poin
 
 ## Choose agents
 
-Minimal delivery team:
+Minimal delivery team (developer, tester, reviewer, release-manager):
 
 ```bash
 agentos init --existing --agents minimal
 ```
 
-Detected profile, which adds frontend/backend specialists based on repo evidence:
+Detected profile (same core team as minimal; frontend/backend specialists were absorbed into the single `developer` role):
 
 ```bash
 agentos init --existing --agents detected
@@ -80,13 +80,13 @@ agentos init --existing --agents detected
 Custom list:
 
 ```bash
-agentos init --existing --agents frontend,backend,qa,review,release
+agentos init --existing --agents developer,tester,reviewer,release-manager
 ```
 
-Add the optional planning-only project manager after init:
+Add the optional planning-only planner after init:
 
 ```bash
-agentos agents add project-manager
+agentos agents add planner
 ```
 
 ## Add local skills
@@ -107,10 +107,12 @@ Add a pack or individual skill:
 
 ```bash
 agentos skills add frontend-pack
-agentos skills add systematic-debugging --mode full
+agentos skills add debugging --mode full
 ```
 
-Local skills are written under `.agentos/skills/` and indexed in `.agentos/skills.md`.
+Local skills and their optional `references/` files are written under `.agentos/skills/<category>/<id>/` and indexed in `.agentos/skills.md`. Both modes preserve the complete procedure. Load references only for the assigned repo's actual stack; project conventions prevail.
+
+Use `agentos skills list --installed` to distinguish installed cards from the available catalog. Merely listing a skill does not install it. Differing local cards/references require reviewed, explicit `--replace`; native engine copies remain untouched. See [the consolidated catalog and compatibility limits](templates.md).
 
 ## Use templates
 
@@ -129,28 +131,28 @@ agentos templates list
 Preview a template:
 
 ```bash
-agentos templates show agent:project-manager
+agentos templates show agent:planner
 ```
 
 Copy a built-in registry template:
 
 ```bash
-agentos templates copy agent:project-manager --dry-run
-agentos templates copy agent:project-manager
-agentos templates copy agent:project-manager --replace
-agentos templates copy skill:frontend/ai-slop-design-review
+agentos templates copy agent:planner --dry-run
+agentos templates copy agent:planner
+agentos templates copy agent:planner --replace
+agentos templates copy skill:frontend/frontend-design
 ```
 
 Validate a template file:
 
 ```bash
-agentos templates validate templates/agents/project-manager.md --type agent
+agentos templates validate templates/agents/planner.md --type agent
 ```
 
 Add a built-in or local agent template through the agent convenience command:
 
 ```bash
-agentos agents add project-manager
+agentos agents add planner
 agentos agents add ./my-agent.md --name my-agent --dry-run
 ```
 

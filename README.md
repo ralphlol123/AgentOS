@@ -82,7 +82,7 @@ AgentOS v0.1 is a TypeScript CLI/package that supports:
 - child repo pointer files for parent-managed multi-repo workspaces;
 - generated `.agentos/project.yaml`, `memory.md`, `handoff.md`, `tasks.md`, `decisions.md`, `status.md`, `skills.md`, `agents/`, `engines/`, `repos/`, and `runs/`;
 - agent selection profiles: `minimal`, `detected`, and custom comma lists;
-- optional planning-only `project-manager` role;
+- optional planning-only `planner` role;
 - local project skills under `.agentos/skills/`;
 - local custom agents under `.agentos/agents/`;
 - reusable repository templates under `templates/`;
@@ -162,7 +162,7 @@ More detail: [docs/quickstart.md](docs/quickstart.md).
 ## Commands
 
 ```bash
-agentos init [--new|--existing] [--agents minimal|detected|frontend,qa,release] [--dry-run]
+agentos init [--new|--existing] [--agents minimal|detected|developer,tester,reviewer,release-manager] [--dry-run]
 agentos status
 agentos handoff
 agentos run handoff [--engine name] [--role role] [--repo repo] [--worktree path] [--phase slug] [--reason reason] [--dry-run]
@@ -211,7 +211,7 @@ Use `agentos run handoff` when an engine is near quota, hit a provider/rate-limi
 ```bash
 agentos run handoff \
   --engine claude-code \
-  --role backend-engineer \
+  --role developer \
   --repo photobooth-be \
   --worktree worktrees/photobooth-be__feat-event-template-system \
   --phase event-template-system \
@@ -232,19 +232,19 @@ Safety rules:
 ```bash
 agentos init --existing --agents minimal
 agentos init --existing --agents detected
-agentos init --existing --agents frontend,backend,qa,review,release
+agentos init --existing --agents developer,tester,reviewer,release-manager
 ```
 
 Profiles:
 
-- `minimal`: `implementation`, `qa`, `code-reviewer`, `release-manager`.
-- `detected`: minimal team plus specialists justified by repo evidence, currently `frontend-engineer` and/or `backend-engineer`.
-- custom comma list: friendly aliases such as `frontend`, `backend`, `qa`, `review`, `release`, `planning`, and `pm`.
+- `minimal`: `developer`, `tester`, `reviewer`, `release-manager`.
+- `detected`: the same core team as minimal; frontend/backend specialists were absorbed into the single `developer` role.
+- custom comma list: friendly aliases such as `review`, `release`, `planning`, and `pm`.
 
-`project-manager` is optional and planning-only. It is not enabled by default detected profile.
+`planner` is optional and planning-only. It is not enabled by the default detected profile.
 
 ```bash
-agentos agents add project-manager
+agentos agents add planner
 ```
 
 ## Local skills
@@ -264,8 +264,8 @@ agentos skills add --detected
 Add specific skills or category packs:
 
 ```bash
-agentos skills add systematic-debugging
-agentos skills add conventional-commit
+agentos skills add debugging
+agentos skills add commit-messages
 agentos skills add frontend-pack
 agentos skills add backend-pack,github-pack --mode full
 ```
@@ -276,13 +276,27 @@ Skills are written project-locally:
 .agentos/skills/<category>/<skill>/SKILL.md
 ```
 
-`.agentos/skills.md` remains an on-demand index. Agents should load only skills relevant to the current role/task.
+The catalog has 15 framework-neutral workflow skills. Both `skills add` modes and
+`templates copy` install the complete card plus its optional `references/` files
+with byte parity, per-file atomic writes, and best-effort command rollback. Load
+only references matching the assigned repo's actual stack; project conventions
+prevail. Existing differing cards or references require reviewed `--replace`, and
+unrelated owner reference files are preserved.
+
+`.agentos/skills.md` remains an on-demand index, not proof of installation. Use
+`agentos skills list --installed` for local inventory. The read-only `commit-messages`
+workflow prefers staged changes, reports untracked files, discovers commit
+conventions, and produces separate messages per independent repo; it never
+formats or stages automatically. See [the complete catalog](docs/templates.md).
+Retired skill IDs are unavailable for new installs in this intermediate slice;
+compatibility aliases and migration diagnostics are deferred, with existing local
+and native cards preserved.
 
 Remove a project-local AgentOS skill with dry-run first:
 
 ```bash
-agentos skills remove conventional-commit --dry-run
-agentos skills remove conventional-commit
+agentos skills remove commit-messages --dry-run
+agentos skills remove commit-messages
 ```
 
 Removal deletes matching `.agentos/skills/**/<skill-id>/` folders and updates `.agentos/skills.md`. It intentionally leaves native engine copies under `.claude/skills/` and `.opencode/skills/` untouched.
@@ -308,7 +322,7 @@ cd ../kargax-be
 claude
 ```
 
-The child pointer tells OpenCode/Codex/Hermes/Claude to resolve the relative AgentOS root (`..` for immediate children, deeper paths for nested repositories), read the root `.agentos/skills.md`, and then load only the specific `../.agentos/skills/**/SKILL.md` cards relevant to the task. Commit-message requests should resolve AgentOS skills such as `conventional-commit` or a project-local `kargax-commit` from the skills index without the user repeating the full path.
+The child pointer tells OpenCode/Codex/Hermes/Claude to resolve the relative AgentOS root (`..` for immediate children, deeper paths for nested repositories), read the root `.agentos/skills.md`, and then load only the specific `../.agentos/skills/**/SKILL.md` cards relevant to the task. Commit-message requests should resolve AgentOS skills such as `commit-messages` or an explicitly indexed project-local workflow from the skills index without the user repeating the full path.
 
 Run this after upgrading an older workspace so stale child pointers are repaired:
 
@@ -332,20 +346,20 @@ Use the registry commands to discover and materialize them:
 
 ```bash
 agentos templates list
-agentos templates show agent:project-manager
-agentos templates copy agent:project-manager --dry-run
-agentos templates copy agent:project-manager
-agentos templates copy skill:frontend/ai-slop-design-review
-agentos templates copy skill:github/conventional-commit
-agentos templates validate templates/agents/project-manager.md --type agent
+agentos templates show agent:planner
+agentos templates copy agent:planner --dry-run
+agentos templates copy agent:planner
+agentos templates copy skill:frontend/frontend-design
+agentos templates copy skill:github/commit-messages
+agentos templates validate templates/agents/planner.md --type agent
 ```
 
 Agent convenience commands remain available:
 
 ```bash
 agentos agents list
-agentos agents add project-manager
-agentos agents add ./my-agent.md --name data-engineer --dry-run
+agentos agents add planner
+agentos agents add ./my-agent.md --name custom-auditor --dry-run
 ```
 
 Template docs: [docs/templates.md](docs/templates.md).
@@ -372,7 +386,7 @@ The importer shows source, SHA256, byte size, target path, and safety findings. 
 AgentOS refuses to overwrite existing copied/imported templates by default. Use `--replace` only after reviewing the existing local file and confirming replacement is intended:
 
 ```bash
-agentos templates copy agent:project-manager --replace
+agentos templates copy agent:planner --replace
 agentos templates import ./external-skill.md --type skill --name external-review --yes --replace
 ```
 

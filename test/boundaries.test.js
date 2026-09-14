@@ -38,8 +38,8 @@ async function rejectedWithoutChanges(base, action) {
 test('boundary: symlinked managed targets fail before writes or deletions', async t => {
   const cases = [
     ['.agentos/skills', root => skillsAgentOS({ cwd: root, add: 'core-pack' })],
-    ['.agentos/agents', root => agentsAgentOS({ cwd: root, add: 'project-manager' })],
-    ['.agentos/skills.md', root => templatesAgentOS({ cwd: root, command: 'copy', id: 'skill:core/systematic-debugging', replace: true })],
+    ['.agentos/agents', root => agentsAgentOS({ cwd: root, add: 'planner' })],
+    ['.agentos/skills.md', root => templatesAgentOS({ cwd: root, command: 'copy', id: 'skill:core/debugging', replace: true })],
     ['.agentos/runs', root => compactAgentOS({ cwd: root })],
     ['AGENTS.md', root => doctorAgentOS({ cwd: root, fix: true })],
   ];
@@ -94,14 +94,14 @@ test('boundary: dangling links, nested repository links, and backup links are re
 test('boundary: imports and skill removal reject linked storage with no changes', async t => {
   for (const mode of ['import', 'remove']) {
     const { base, root, outside } = await fixture(t);
-    await skillsAgentOS({ cwd: root, add: 'systematic-debugging' });
+    await skillsAgentOS({ cwd: root, add: 'debugging' });
     const source = join(base, 'source.md'); await writeFile(source, '# Example\nSafe reusable instructions.\n');
-    const target = mode === 'import' ? '.agentos/imports' : '.agentos/skills/core/systematic-debugging';
+    const target = mode === 'import' ? '.agentos/imports' : '.agentos/skills/core/debugging';
     await rm(join(root, target), { recursive: true, force: true });
     await symlink(outside, join(root, target));
     await rejectedWithoutChanges(base, () => mode === 'import'
       ? templatesAgentOS({ cwd: root, command: 'import', source, type: 'skill', name: 'example', yes: true })
-      : skillsAgentOS({ cwd: root, remove: 'systematic-debugging' }));
+      : skillsAgentOS({ cwd: root, remove: 'debugging' }));
   }
 });
 

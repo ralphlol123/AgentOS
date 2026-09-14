@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
-import { mkdtemp, writeFile, readFile } from 'node:fs/promises';
+import assert from 'node:assert/strict';
+import { mkdtemp, writeFile, readFile, readdir, lstat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -70,12 +71,35 @@ for (const manager of managers) {
   const installedCli = join(cwd, 'node_modules/agentos-for-projects/dist/cli.js');
   const invoke = args => run(process.execPath, [installedCli, ...args], { cwd });
   invoke(['init', '--new']);
-  invoke(['skills', 'add', 'systematic-debugging']);
-  invoke(['templates', 'copy', 'agent:data-engineer']);
+  invoke(['skills', 'add', 'core-pack,frontend-pack,backend-pack,fullstack-pack,github-pack']);
+  invoke(['templates', 'copy', 'skill:core/code-review', '--replace']);
+  let references = 0, cards = 0;
+  const packageRoot = join(cwd, 'node_modules/agentos-for-projects');
+  for (const category of ['core', 'frontend', 'backend', 'fullstack', 'github']) {
+    const sourceDir = join(packageRoot, 'templates/skills', category);
+    for (const file of await readdir(sourceDir)) {
+      if (!file.endsWith('.md')) continue;
+      const id = file.slice(0, -3);
+      const installedDir = join(cwd, '.agentos/skills', category, id);
+      const card = await readFile(join(installedDir, 'SKILL.md'), 'utf8');
+      assert.equal(card.replace(/^mode: summary$/m, 'mode: full'), await readFile(join(sourceDir, file), 'utf8'));
+      cards++;
+      const refDir = join(sourceDir, id, 'references');
+      for (const name of await readdir(refDir).catch(error => { if (error.code === 'ENOENT') return []; throw error; })) {
+        assert.deepEqual(await readFile(join(installedDir, 'references', name)), await readFile(join(refDir, name)));
+        references++;
+      }
+    }
+  }
+  assert.equal(cards, 15);
+  assert.equal(references, 9);
+  invoke(['skills', 'remove', 'code-review']);
+  await assert.rejects(() => lstat(join(cwd, '.agentos/skills/core/code-review')), { code: 'ENOENT' });
+  invoke(['templates', 'copy', 'agent:planner']);
   invoke(['run', 'handoff', '--reason', 'packaged-smoke']);
   invoke(['compact']);
   invoke(['doctor']);
   const handoff = await readFile(join(cwd, '.agentos/handoff.md'), 'utf8');
   if (!handoff.includes('packaged-smoke')) throw new Error('Packaged handoff did not retain its pause record.');
-  console.log(`PASS ${manager.name}: installed bin, init, skill, registry role, handoff, checkpoint, doctor`);
+  console.log(`PASS ${manager.name}: installed bin, init, 15 cards/9 references byte parity, copy, removal, registry role, handoff, checkpoint, doctor`);
 }

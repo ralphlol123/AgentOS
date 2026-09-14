@@ -1,13 +1,14 @@
+import { SKILL_CATALOG, SKILL_BY_ID, SKILL_CATEGORIES, TEMPLATE_ENTRIES, AGENT_DEFINITIONS, renderSkillTemplate, type SkillCategory, type SkillDefinition } from './catalog.js';
 import { withWorkspaceWriter } from './workspace-lock.js';
 import { readImportSource } from './import-source.js';
 import { appendContextRecord, literalMarkdown, markdownHeadings, markdownSection } from './markdown.js';
 import { collectRunHandoffGitState } from './git-evidence.js';
+import { canonicalAgentId, resolveAgentAlias, resolveSkillAlias, RETIRED_AGENT_IDS, RETIRED_SKILL_IDS, SKILL_ALIASES, agentDeprecationNotice, skillDeprecationNotice } from './aliases.js';
 import { access, chmod, link, mkdir, open, readFile, readdir, rename, rm, stat, lstat, realpath, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomBytes } from 'node:crypto';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
@@ -772,7 +773,7 @@ async function initAgentOSUnlocked(options: any = {}) {
     const adapter = adapterPlans.find(entry => relative(cwd, entry.target.path) === path);
     plan.push({ path, action: adapter?.plan.action ?? (await exists(join(cwd, path)) ? (path.endsWith('.gitignore') || (options.refresh && path === '.agentos/project.yaml') ? 'reconcile' : 'preserve') : 'create') });
   }
-  if (options.dryRun) return { mode, workspaceKind, repos, planned, plan, agents: agentSelection, text: renderDryRun({ cwd, mode, workspaceKind, repos, agentSelection }) + '\n' + plan.map(item => `- ${item.action}: ${item.path}`).join('\n') };
+  if (options.dryRun) return { mode, workspaceKind, repos, planned, plan, agents: agentSelection, text: renderDryRun({ cwd, mode, workspaceKind, repos, agentSelection }) + '\n' + plan.map(item => `- ${item.action}: ${item.path}`).join('\n') + (existing ? '' : '\n' + collectAgentDeprecationNotices(options.agents).map((n) => `Note: ${n}`).join('\n')) };
 
   // Every filesystem mutation init makes - the .agentos scaffold directories
   // and files, per-agent/engine/repo files, root/child adapters, their
@@ -817,7 +818,8 @@ async function initAgentOSUnlocked(options: any = {}) {
     if (policy.gitignore === 'ignore') for (const repo of childRepos) await ensureChildRepoGitignore(join(cwd, repo.path));
   });
 
-  return { mode, workspaceKind, repos, agents: agentSelection, text: `AgentOS initialized (${mode}, ${workspaceKind}, agents: ${agentSelection.profile}) at ${cwd}` };
+  const deprecationNotes = existing ? [] : collectAgentDeprecationNotices(options.agents).map((n) => `Note: ${n}`);
+  return { mode, workspaceKind, repos, agents: agentSelection, text: [`AgentOS initialized (${mode}, ${workspaceKind}, agents: ${agentSelection.profile}) at ${cwd}`, ...deprecationNotes].join('\n') };
 }
 
 export async function statusAgentOS(options: any = {}) {
@@ -1194,24 +1196,21 @@ async function skillsAgentOSUnlocked(options: any = {}) {
 
   const repos = parseReposFromProjectYaml(await safeRead(join(root, '.agentos/project.yaml')), { includeRoot: true });
   const hasGit = await exists(join(root, '.git'));
-  const ids = resolveRequestedSkillIds(options, repos, hasGit);
+  const { ids, deprecations } = resolveRequestedSkillIds(options, repos, hasGit);
   const unknown = ids.filter((id) => !SKILL_BY_ID[id]);
   if (unknown.length) throw new Error(`Unknown skill(s): ${unknown.join(', ')}. Run \`agentos skills list\` to see available skills and category packs.`);
 
   const skills = ids.map((id) => SKILL_BY_ID[id]);
-  for (const skill of skills) await assertCardReplacement(join(root, skillRelPath(skill)), renderSkillTemplate(skill, mode), options.replace);
-  const lines = [`AgentOS skills add${dryRun ? ' dry run' : ''}`, `Root: ${root}`, `Mode: ${mode}`, ''];
-  for (const skill of skills) {
-    const relPath = skillRelPath(skill);
-    lines.push(`${dryRun ? 'Would write' : 'Wrote'}: ${relPath}`);
-  }
+  const files = skills.flatMap(skill => skillInstallFiles(skill, mode));
+  await preflightSkillFiles(root, files, options.replace);
+  const lines = [`AgentOS skills add${dryRun ? ' dry run' : ''}`, `Root: ${root}`, `Mode: ${mode}`, ...deprecations.map((note) => `Note: ${note}`), ''];
+  for (const file of files) lines.push(`${dryRun ? 'Would write' : 'Wrote'}: ${file.relPath}`);
 
   if (!dryRun) {
     await withMutationTransaction(async () => {
-      for (const skill of skills) {
-        const relPath = skillRelPath(skill);
-        await mkdirTracked(dirname(join(root, relPath)));
-        await writeFileAtomic(join(root, relPath), renderSkillTemplate(skill, mode));
+      for (const file of files) {
+        await mkdirTracked(dirname(join(root, file.relPath)));
+        await writeFileAtomic(join(root, file.relPath), file.content);
       }
       const skillsMdPath = join(root, '.agentos/skills.md');
       const existing = await safeRead(skillsMdPath);
@@ -1232,10 +1231,17 @@ async function installedCards(root: string, type: 'agent' | 'skill') {
     .filter(name => name.endsWith('.md')).map(name => ({ id: basename(name, '.md'), abs: join(root, '.agentos/agents', name), relPath: `.agentos/agents/${name}` }));
   const entries = [];
   for (const item of local) {
-    const content = await safeRead(item.abs), builtin = type === 'skill' ? SKILL_BY_ID[item.id] : AGENT_DEFINITIONS[item.id];
-    const candidates = builtin ? (type === 'skill' ? [renderSkillTemplate(builtin, 'summary'), renderSkillTemplate(builtin, 'full')] : [agentMd(builtin)]) : [];
+    const content = await safeRead(item.abs);
+    const skill = type === 'skill' ? SKILL_BY_ID[item.id] : undefined;
+    const agent = type === 'agent' ? AGENT_DEFINITIONS[item.id] : undefined;
+    const candidates = skill ? [renderSkillTemplate(skill, 'summary'), renderSkillTemplate(skill, 'full')] : agent ? [agentMd(agent)] : [];
     for (const template of registry.filter(entry => entry.type === type && entry.name === item.id)) candidates.push(await safeRead(template.absPath));
-    entries.push({ id: item.id, path: item.relPath, state: candidates.includes(content) ? 'source-match' : 'custom-or-imported', ...(type === 'agent' ? { enabled: enabled.has(item.id) } : {}) });
+    let referencesMatch = true;
+    for (const ref of skill?.references ?? []) {
+      const bytes = await readFile(join(dirname(item.abs), ref.path)).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
+      if (!bytes?.equals(ref.content)) referencesMatch = false;
+    }
+    entries.push({ id: item.id, path: item.relPath, state: candidates.includes(content) && referencesMatch ? 'source-match' : 'custom-or-imported', ...(type === 'agent' ? { enabled: enabled.has(item.id) } : {}) });
   }
   return { ok: true, entries, text: [`AgentOS installed ${type} cards`, ...entries.map(entry => `- ${entry.id}: ${entry.path} (${entry.state}${type === 'agent' ? `; ${entry.enabled ? 'enabled' : 'not enabled'}` : ''})`), ...(entries.length ? [] : ['No local cards installed.'])].join('\n') };
 }
@@ -1243,7 +1249,7 @@ async function installedCards(root: string, type: 'agent' | 'skill') {
 function listSkillTemplates(root) {
   const lines = ['AgentOS skill templates', `Root: ${root}`, '', 'Built-in packs:', ...SKILL_CATEGORIES.map((category) => `- ${category}-pack`), '', 'Built-in skills:'];
   for (const skill of SKILL_CATALOG) lines.push(`- ${skill.id} (${skill.category}) — ${skill.summary}`);
-  lines.push('', 'Separate file registry: agentos templates list (portable source cards; not the generated catalog).', 'Installed cards: agentos skills list --installed', 'Use: agentos skills add <skill-id|category-pack> [--mode summary|full]', 'Remove: agentos skills remove <skill-id> [--dry-run]');
+  lines.push('', 'Canonical source templates: agentos templates list (same complete workflows).', 'Installed cards: agentos skills list --installed', 'Use: agentos skills add <skill-id|category-pack> [--mode summary|full]', 'Remove: agentos skills remove <skill-id> [--dry-run]');
   return { ok: true, root, skills: SKILL_CATALOG.map((s) => s.id), text: lines.join('\n') };
 }
 
@@ -1333,9 +1339,14 @@ async function agentsAgentOSUnlocked(options: any = {}) {
   const enabled = new Set(Array.isArray(agents.enabled) ? agents.enabled.map((v) => normalizeAgentAlias(String(v))) : []);
   enabled.add(id);
   const capabilities = agents.capabilities && typeof agents.capabilities === 'object' ? agents.capabilities : {};
-  if (id === 'project-manager' && !capabilities.planning) capabilities.planning = 'project-manager';
+  if (id === 'planner' && !capabilities.planning) capabilities.planning = 'planner';
   project.agents = { profile: 'custom', capabilities, enabled: [...enabled] };
-  const lines = [`AgentOS agents add${dryRun ? ' dry run' : ''}`, `Root: ${root}`, `Agent: ${id}`, '', `${dryRun ? 'Would write' : 'Wrote'}: ${relPath}`, `${dryRun ? 'Would patch' : 'Patched'}: .agentos/project.yaml`];
+  const deprecation = (!isPathLike(raw) && !options.name) ? resolveAgentAlias(raw) : { id, deprecated: false };
+  const lines = [
+    `AgentOS agents add${dryRun ? ' dry run' : ''}`, `Root: ${root}`, `Agent: ${id}`,
+    ...(deprecation.deprecated ? [`Note: ${agentDeprecationNotice(deprecation.from!, id)}`] : []),
+    '', `${dryRun ? 'Would write' : 'Wrote'}: ${relPath}`, `${dryRun ? 'Would patch' : 'Patched'}: .agentos/project.yaml`,
+  ];
   if (!dryRun) {
     await withMutationTransaction(async () => {
       await mkdirTracked(dirname(join(root, relPath)));
@@ -1349,7 +1360,7 @@ async function agentsAgentOSUnlocked(options: any = {}) {
 function listAgentTemplates(root) {
   const lines = ['AgentOS agent templates', `Root: ${root}`, '', 'Built-in agents:'];
   for (const agent of Object.values(AGENT_DEFINITIONS) as any[]) lines.push(`- ${agent.id}${agent.planningOnly ? ' (planning-only)' : ''} — ${agent.mandate}`);
-  lines.push('', 'Repo templates: templates/agents/ — separate file registry via agentos templates list (also includes data/security roles).', 'Installed cards: agentos agents list --installed', 'Use: agentos agents add <agent-id|template-file> [--name id] [--dry-run]');
+  lines.push('', 'Canonical source templates: templates/agents/ — same role contracts via agentos templates list.', 'Installed cards: agentos agents list --installed', 'Use: agentos agents add <agent-id|template-file> [--name id] [--dry-run]');
   return { ok: true, root, agents: Object.keys(AGENT_DEFINITIONS), text: lines.join('\n') };
 }
 
@@ -1434,15 +1445,20 @@ async function templatesListAgentOS(root) {
 }
 
 async function templatesShowAgentOS(root, id) {
-  const entry = await findTemplateRegistryEntry(id);
-  if (!entry) return { ok: false, root, text: `AgentOS templates show: FAIL\nUnknown template id: ${id}. Run \`agentos templates list\`.` };
+  const resolved = await findTemplateRegistryEntry(id);
+  if (!resolved) return { ok: false, root, text: `AgentOS templates show: FAIL\nUnknown template id: ${id}. Run \`agentos templates list\`.` };
+  const entry = resolved.entry;
   const content = await readFile(entry.absPath, 'utf8');
-  return { ok: true, root, entry, text: [`Template: ${entry.id}`, `Path: ${entry.relPath}`, '', content].join('\n') };
+  const note = resolved.deprecated
+    ? `\nNote: ${entry.type === 'skill' ? skillDeprecationNotice(resolved.from!, resolved.canonical!) : agentDeprecationNotice(resolved.from!, resolved.canonical!)}`
+    : '';
+  return { ok: true, root, entry, text: [`Template: ${entry.id}`, `Path: ${entry.relPath}`, '', content].join('\n') + note };
 }
 
 async function templatesCopyAgentOS(root, options: any = {}) {
-  const entry = await findTemplateRegistryEntry(options.id);
-  if (!entry) return { ok: false, root, text: `AgentOS templates copy: FAIL\nUnknown template id: ${options.id}. Run \`agentos templates list\`.` };
+  const resolved = await findTemplateRegistryEntry(options.id);
+  if (!resolved) return { ok: false, root, text: `AgentOS templates copy: FAIL\nUnknown template id: ${options.id}. Run \`agentos templates list\`.` };
+  const entry = resolved.entry;
   const dryRun = Boolean(options.dryRun);
   const replace = Boolean(options.replace);
   const content = await readFile(entry.absPath, 'utf8');
@@ -1450,16 +1466,31 @@ async function templatesCopyAgentOS(root, options: any = {}) {
   if (!validation.ok) return { ok: false, root, dryRun, text: [`AgentOS templates copy: FAIL`, `Template: ${entry.id}`, ...validation.messages.map((m) => `- ${m}`)].join('\n') };
   const relPath = entry.type === 'agent' ? `.agentos/agents/${entry.name}.md` : `.agentos/skills/${entry.category}/${entry.name}/SKILL.md`;
   const targetPath = join(root, relPath);
-  if (await exists(targetPath) && !replace) {
+  const existsTarget = await exists(targetPath);
+  // A retired alias may resolve to a canonical card the standard profile
+  // already installed (e.g. `qa` -> `tester`, present in the minimal team).
+  // When the on-disk card is byte-identical to the canonical template, the
+  // copy is already satisfied: proceed idempotently with the deprecation
+  // notice instead of a spurious overwrite refusal. Customized cards
+  // (differing bytes) and direct copies remain protected by the refusal below.
+  const alreadyCanonical = !replace && existsTarget && resolved.deprecated && (await safeRead(targetPath)) === content;
+  if (existsTarget && !replace && !alreadyCanonical) {
     return { ok: false, root, dryRun, entry, text: [`AgentOS templates copy: FAIL`, `Root: ${root}`, `Template: ${entry.id}`, '', `Target already exists: ${relPath}`, 'Refusing to overwrite local project context by default.', 'Use --replace only after reviewing the existing file and confirming replacement is intended.'].join('\n') };
   }
-  const action = dryRun ? (replace ? 'Would replace' : 'Would copy') : (replace ? 'Replaced' : 'Copied');
-  const lines = [`AgentOS templates copy${dryRun ? ' dry run' : ''}`, `Root: ${root}`, `Template: ${entry.id}`, '', `${action}: ${entry.relPath} -> ${relPath}`];
+  const files = entry.type === 'skill' ? skillInstallFiles(SKILL_BY_ID[entry.name], 'full') : [{ relPath, content }];
+  await preflightSkillFiles(root, files, replace);
+  const action = alreadyCanonical ? 'Already installed' : dryRun ? (replace ? 'Would replace' : 'Would copy') : (replace ? 'Replaced' : 'Copied');
+  const note = resolved.deprecated
+    ? `Note: ${entry.type === 'skill' ? skillDeprecationNotice(resolved.from!, resolved.canonical!) : agentDeprecationNotice(resolved.from!, resolved.canonical!)}`
+    : null;
+  const lines = [`AgentOS templates copy${dryRun ? ' dry run' : ''}`, `Root: ${root}`, `Template: ${entry.id}`, ...(note ? [note] : []), '', `${action}: ${entry.relPath} -> ${relPath}`, ...files.slice(1).map(file => `${action}: ${file.relPath}`)];
   if (!dryRun) {
     if (entry.type === 'agent') await assertProjectYamlWellFormed(join(root, '.agentos/project.yaml'));
     await withMutationTransaction(async () => {
-      await mkdirTracked(dirname(targetPath));
-      await writeFileAtomic(targetPath, content);
+      for (const file of files) {
+        await mkdirTracked(dirname(join(root, file.relPath)));
+        await writeFileAtomic(join(root, file.relPath), file.content);
+      }
       if (entry.type === 'agent') await registerProjectAgent(root, entry.name);
       else await writeFileAtomic(join(root, '.agentos/skills.md'), await ensureLocalSkillsSection(root, await safeRead(join(root, '.agentos/skills.md'))));
     });
@@ -1482,46 +1513,28 @@ function isPathLike(value) {
   return /[\\/.]/.test(String(value));
 }
 
-function packageRootDir() {
-  return dirname(dirname(fileURLToPath(import.meta.url)));
-}
-
-function templatesRootDir() {
-  return join(packageRootDir(), 'templates');
-}
-
 async function templateRegistryEntries() {
-  const root = templatesRootDir();
-  const entries: any[] = [];
-  const agentsDir = join(root, 'agents');
-  if (await exists(agentsDir)) {
-    for (const entry of await readdir(agentsDir, { withFileTypes: true })) {
-      if (entry.isFile() && entry.name.endsWith('.md')) {
-        const name = basename(entry.name, '.md');
-        entries.push({ id: `agent:${name}`, type: 'agent', name, relPath: `templates/agents/${entry.name}`, absPath: join(agentsDir, entry.name) });
-      }
-    }
-  }
-  const skillsDir = join(root, 'skills');
-  if (await exists(skillsDir)) {
-    for (const categoryEntry of await readdir(skillsDir, { withFileTypes: true })) {
-      if (!categoryEntry.isDirectory()) continue;
-      const category = categoryEntry.name;
-      const categoryDir = join(skillsDir, category);
-      for (const skillEntry of await readdir(categoryDir, { withFileTypes: true })) {
-        if (skillEntry.isFile() && skillEntry.name.endsWith('.md')) {
-          const name = basename(skillEntry.name, '.md');
-          entries.push({ id: `skill:${category}/${name}`, type: 'skill', category, name, relPath: `templates/skills/${category}/${skillEntry.name}`, absPath: join(categoryDir, skillEntry.name) });
-        }
-      }
-    }
-  }
-  return entries.sort((a, b) => a.id.localeCompare(b.id));
+  return TEMPLATE_ENTRIES;
 }
 
 async function findTemplateRegistryEntry(id) {
   const wanted = String(id || '').trim();
-  return (await templateRegistryEntries()).find((entry) => entry.id === wanted || entry.id.endsWith(`:${wanted}`));
+  const entries = await templateRegistryEntries();
+  const direct = entries.find((entry) => entry.id === wanted || entry.id.endsWith(`:${wanted}`));
+  if (direct) return { entry: direct, deprecated: false };
+  // Resolve retired agent/skill IDs to their canonical template so
+  // `templates show`/`templates copy` keep working for old workspaces.
+  const skill = resolveSkillAlias(wanted);
+  if (skill.deprecated) {
+    const entry = entries.find((e) => e.type === 'skill' && e.name === skill.id);
+    if (entry) return { entry, deprecated: true, from: skill.from, canonical: skill.id };
+  }
+  const agent = resolveAgentAlias(wanted);
+  if (agent.deprecated) {
+    const entry = entries.find((e) => e.type === 'agent' && e.name === agent.id);
+    if (entry) return { entry, deprecated: true, from: agent.from, canonical: agent.id };
+  }
+  return null;
 }
 
 async function quarantineImportedTemplate(root, name, type, fetched, review) {
@@ -1583,322 +1596,38 @@ async function registerProjectAgent(root, id) {
   const enabled = new Set(Array.isArray(agents.enabled) ? agents.enabled.map((v) => normalizeAgentAlias(String(v))) : []);
   enabled.add(normalizeAgentAlias(id));
   const capabilities = agents.capabilities && typeof agents.capabilities === 'object' ? agents.capabilities : {};
-  if (id === 'project-manager' && !capabilities.planning) capabilities.planning = 'project-manager';
+  if (id === 'planner' && !capabilities.planning) capabilities.planning = 'planner';
   project.agents = { profile: 'custom', capabilities, enabled: [...enabled] };
   await writeFileAtomic(projectPath, dumpProjectYaml(project));
 }
 
-type SkillCategory = 'core' | 'frontend' | 'backend' | 'fullstack' | 'github';
-
-interface SkillDefinition {
-  id: string;
-  category: SkillCategory;
-  title: string;
-  summary: string;
-  trigger: string;
-  procedure: string[];
-  verification: string[];
-  fullNotes: string[];
+function skillInstallFiles(skill: SkillDefinition, mode: 'summary' | 'full') {
+  const card = skillRelPath(skill);
+  return [{ relPath: card, content: Buffer.from(renderSkillTemplate(skill, mode)) },
+    ...skill.references.map(ref => ({ relPath: `${dirname(card)}/${ref.path}`, content: ref.content }))];
 }
 
-const SKILL_CATALOG: SkillDefinition[] = [
-  {
-    id: 'systematic-debugging', category: 'core', title: 'Systematic Debugging',
-    summary: 'use for unclear bugs or inconsistent reproduction.',
-    trigger: "a bug's root cause is unclear or reproduction is inconsistent.",
-    procedure: [
-      'Reproduce the failure with the smallest possible input before changing any code.',
-      'Form a specific hypothesis about the cause; do not guess-and-check broadly.',
-      'Add logging/assertions or use a debugger to confirm or reject the hypothesis with real evidence.',
-      'Fix the confirmed root cause, not just the symptom.',
-      'Remove temporary debugging instrumentation before finishing.',
-    ],
-    verification: ['Re-run the original failing case and confirm it now passes.', 'Run the existing test suite to check for regressions.'],
-    fullNotes: ['Prefer binary search (bisecting commits/inputs) over linear scanning when the failure is intermittent.', 'Write down the hypothesis and the evidence that confirmed/rejected it so the fix can be reviewed.'],
-  },
-  {
-    id: 'test-driven-development', category: 'core', title: 'Test-Driven Development',
-    summary: 'use when adding or changing behavior.',
-    trigger: 'adding or changing behavior that can be exercised by an automated test.',
-    procedure: [
-      'Write a failing test that encodes the new/changed behavior before writing implementation code.',
-      'Run the test and confirm it fails for the expected reason (RED).',
-      'Write the minimum implementation needed to make the test pass (GREEN).',
-      'Refactor with the test suite green, without changing behavior.',
-    ],
-    verification: ['Run the test suite and confirm the new test passes along with all existing tests.'],
-    fullNotes: ['A RED test that fails for the wrong reason (e.g. a typo) is not a valid RED step — fix the test itself first.', 'Keep each RED/GREEN cycle small; commit-sized increments make review easier.'],
-  },
-  {
-    id: 'shared-repo-git-safety', category: 'core', title: 'Shared-Repo Git Safety',
-    summary: 'use before commit/push/merge in shared repos.',
-    trigger: 'running any git command that rewrites history or touches files you did not author this session, especially in shared/team repos.',
-    procedure: [
-      'Run `git status` before any destructive operation (checkout/reset/clean/restore) to see what would be affected.',
-      'Never force-push to a shared branch without explicit approval.',
-      'Stash or commit unrelated in-progress work before switching branches or rebasing.',
-      'Review a broad `git add` with `git status`/`git diff --staged` before committing to avoid pulling in unrelated or secret files.',
-    ],
-    verification: ['`git status --short --branch` shows only the intended changes before commit/push.'],
-    fullNotes: ['Prefer `git revert` over `git reset --hard`/force-push once a commit is shared with others.', 'Treat `--no-verify` and `--no-gpg-sign` as last resorts; investigate hook failures instead of bypassing them.'],
-  },
-  {
-    id: 'agent-output-verification', category: 'core', title: 'Agent Output Verification',
-    summary: 'use before trusting another agent\'s "done" report.',
-    trigger: 'another agent, subagent, or automated report claims work is done.',
-    procedure: [
-      'Do not trust a "done"/"tests pass" claim at face value; re-run the actual command yourself.',
-      'Check the real file/git/terminal state (diff, file contents, test output) rather than the summary text.',
-      'Confirm the change addresses the original request, not just that something changed.',
-    ],
-    verification: ['Independently reproduce the reported test/build result and confirm the diff matches the claimed change.'],
-    fullNotes: ['Subagent summaries describe intent, not guaranteed outcome — verify before reporting up the chain.'],
-  },
-  {
-    id: 'requesting-code-review', category: 'core', title: 'Requesting Code Review',
-    summary: 'use for pre-commit/pre-merge review.',
-    trigger: 'asking a human or another agent to review a change.',
-    procedure: [
-      'Run the full local verification suite (build/lint/test) and fix failures before requesting review.',
-      'Write a summary of what changed and why, not just what the diff shows.',
-      'Call out any known trade-offs, skipped edge cases, or follow-up work explicitly.',
-      'Keep the diff scoped to the stated task; split out unrelated cleanup into a separate change.',
-    ],
-    verification: ['Review checklist: verification commands run and passing; summary written; scope matches the request.'],
-    fullNotes: ['A reviewer without your context should be able to understand the "why" from the summary alone.'],
-  },
-  {
-    id: 'secret-scanner-safe-edits', category: 'core', title: 'Secret-Scanner-Safe Edits',
-    summary: 'use before touching config/env/credential files.',
-    trigger: 'a change touches config, env, or credential-adjacent files, or before staging a broad `git add`.',
-    procedure: [
-      'Never read, edit, or commit `.env` files or credential files without explicit approval.',
-      'Before staging with a broad `git add`, inspect `git status` for unexpected files (keys, tokens, dumps).',
-      'If a secret-looking value must be referenced, use a placeholder/env-var name in code, never the literal value.',
-      'If a secret is discovered already committed, flag it to the user instead of silently rewriting history.',
-    ],
-    verification: ['`git diff --staged` contains no literal credentials, tokens, or private keys.'],
-    fullNotes: ['Rotating a leaked secret is a security decision for the user/owner to make, not something to do unilaterally.'],
-  },
-  {
-    id: 'grounded-codebase-docs', category: 'core', title: 'Grounded Codebase Docs',
-    summary: 'use when writing/updating docs about code behavior.',
-    trigger: 'writing or updating documentation (README, CLAUDE.md, comments) about how the code behaves.',
-    procedure: [
-      'Read the actual current implementation before describing behavior; do not describe intended/legacy behavior from memory.',
-      'Prefer linking to file:line over duplicating logic in prose that can drift out of sync.',
-      'Verify commands/examples in the doc by actually running them.',
-    ],
-    verification: ['Every command and code reference in the doc has been executed/checked against the current codebase.'],
-    fullNotes: ['Docs that describe aspirational behavior instead of real behavior are worse than no docs — they actively mislead.'],
-  },
-  {
-    id: 'frontend-build-verification', category: 'frontend', title: 'Frontend Build Verification',
-    summary: 'use before declaring frontend work done.',
-    trigger: 'declaring frontend work done.',
-    procedure: [
-      'Run the project build command and confirm it exits cleanly.',
-      'Run type-checking/linting if configured.',
-      'Load the affected route/component in a real browser and check the console for errors.',
-    ],
-    verification: ['Build command exits 0; no new console errors on the affected pages.'],
-    fullNotes: ['A green build does not guarantee a working UI — always do a real browser pass for user-facing changes.'],
-  },
-  {
-    id: 'nuxt-e2e-testing', category: 'frontend', title: 'Nuxt E2E Testing',
-    summary: 'use for Nuxt route/browser behavior.',
-    trigger: 'Nuxt route/browser behavior changes.',
-    procedure: [
-      'Start the Nuxt dev/preview server.',
-      'Exercise the changed route/component through real navigation and interaction, not just unit tests.',
-      'Check network requests and console for errors during the flow.',
-      'Run the project e2e test command if one is configured.',
-    ],
-    verification: ['Manual or automated e2e pass on the changed route with no console/network errors.'],
-    fullNotes: ['Prefer testing the golden path plus at least one edge case (empty state, error state) over the golden path alone.'],
-  },
-  {
-    id: 'ai-slop-design-review', category: 'frontend', title: 'AI-Slop Design Review',
-    summary: 'use for UI polish/design review.',
-    trigger: 'UI polish/design review, especially on AI-generated or AI-assisted UI changes.',
-    procedure: [
-      'Compare against the existing design system/spacing/typography scale instead of introducing new ad hoc values.',
-      'Check responsive behavior at common breakpoints, not just the default viewport.',
-      'Remove generic placeholder copy, redundant wrapper elements, and unused CSS introduced during generation.',
-      'Verify interactive states: hover, focus, disabled, loading, and error.',
-    ],
-    verification: ['UI matches existing design language; all interactive states are visibly implemented, not just the default state.'],
-    fullNotes: ['Watch for tells of ungrounded generation: inconsistent spacing units, unnecessary nested divs, and copy that does not match the product voice.'],
-  },
-  {
-    id: 'interface-feel-polish', category: 'frontend', title: 'Interface Feel Polish',
-    summary: 'use for interaction/motion/feedback polish.',
-    trigger: 'refining interaction/motion/feedback quality on an already-functional UI.',
-    procedure: [
-      'Check perceived responsiveness: interactive elements should give immediate visual feedback on click/tap.',
-      'Verify loading and empty states are handled, not just the happy path with data.',
-      'Confirm animations/transitions are subtle and consistent with the rest of the app, not one-off.',
-    ],
-    verification: ['Interact with the feature end-to-end in a browser and confirm feedback/timing feels consistent with the rest of the app.'],
-    fullNotes: ['Prefer removing an animation that feels off over leaving an inconsistent one in.'],
-  },
-  {
-    id: 'backend-service-verification', category: 'backend', title: 'Backend Service Verification',
-    summary: 'use for local backend service verification.',
-    trigger: 'declaring backend work done.',
-    procedure: [
-      'Start the service locally and confirm it boots without errors.',
-      'Exercise the changed endpoint(s) with a real request (curl/HTTP client), not just unit tests.',
-      'Check logs for unexpected errors/warnings during the request.',
-    ],
-    verification: ['Real request to the changed endpoint returns the expected response with no unexpected errors in logs.'],
-    fullNotes: ['Unit tests can pass while the service fails to boot due to config/DI issues — always do a real boot check.'],
-  },
-  {
-    id: 'nestjs-feature-implementation', category: 'backend', title: 'NestJS Feature Implementation',
-    summary: 'use when implementing a new NestJS feature.',
-    trigger: 'implementing a new NestJS feature (module/controller/service).',
-    procedure: [
-      'Follow the existing module boundary conventions (module/controller/service/DTO) instead of inventing a new structure.',
-      'Validate input DTOs explicitly; do not trust unvalidated request bodies.',
-      'Keep controllers thin; put business logic in services.',
-      'Wire the new provider into its module and confirm Nest resolves the dependency graph at boot.',
-    ],
-    verification: ['Application boots with the new module wired in; the new endpoint/service behaves as specified for valid and invalid input.'],
-    fullNotes: ['A missing provider/module import surfaces as a boot-time DI error, not a test failure — always boot-check after wiring changes.'],
-  },
-  {
-    id: 'nestjs-auth-guards', category: 'backend', title: 'NestJS Auth Guards',
-    summary: 'use for NestJS auth/permission/guard work.',
-    trigger: 'NestJS auth/permission/guard work.',
-    procedure: [
-      'Identify exactly which routes/resources the change affects and what identity/role model applies.',
-      'Implement authorization checks in guards/decorators, not scattered inline checks in controllers.',
-      'Fail closed: default to denying access when a check cannot be evaluated.',
-      'Add a test for both an authorized and an unauthorized request.',
-    ],
-    verification: ['An authorized request succeeds and an unauthorized request is rejected with the correct status code.'],
-    fullNotes: ['Treat auth/permission code as security-sensitive: prefer explicit allow-lists over implicit deny-by-omission.'],
-  },
-  {
-    id: 'backend-pr-review', category: 'backend', title: 'Backend PR Review',
-    summary: 'use for reviewing backend pull requests.',
-    trigger: 'reviewing backend pull requests.',
-    procedure: [
-      'Check for missing input validation and unhandled error paths.',
-      'Check for N+1 queries or unbounded loops over external calls/DB rows.',
-      'Confirm migrations (if any) are backward compatible with the currently deployed code.',
-      'Confirm secrets/config are read from environment/config service, not hardcoded.',
-    ],
-    verification: ['Review comments cover validation, error handling, performance, and migration safety, or explicitly note none apply.'],
-    fullNotes: ['A backward-incompatible migration deployed before the code that needs it is a common source of production incidents.'],
-  },
-  {
-    id: 'full-system-rehearsal', category: 'fullstack', title: 'Full System Rehearsal',
-    summary: 'use before declaring cross-repo work done.',
-    trigger: 'declaring a cross-repo/full-stack change done.',
-    procedure: [
-      'Start both frontend and backend locally against each other, not against a mocked API.',
-      'Exercise the full user-facing flow end-to-end through the real UI.',
-      'Check both frontend console/network and backend logs during the flow for errors.',
-    ],
-    verification: ['End-to-end flow completes successfully with both services running live, no unexpected errors in either log.'],
-    fullNotes: ['Passing frontend and backend test suites independently does not guarantee they integrate correctly — always rehearse the full flow together.'],
-  },
-  {
-    id: 'github-pr-workflow', category: 'github', title: 'GitHub PR Workflow',
-    summary: 'use for PR lifecycle work.',
-    trigger: 'creating, updating, or merging pull requests.',
-    procedure: [
-      'Confirm the branch is up to date with its base before opening/updating a PR.',
-      'Write a PR description explaining why the change was made, with a test plan.',
-      'Do not merge your own PR unless explicitly instructed; wait for required review/checks.',
-    ],
-    verification: ['PR description includes a test plan; required CI checks are green before merge.'],
-    fullNotes: ['Keep PRs scoped to one logical change — large mixed-purpose PRs are harder to review and revert.'],
-  },
-  {
-    id: 'github-code-review', category: 'github', title: 'GitHub Code Review',
-    summary: 'use when reviewing a GitHub pull request.',
-    trigger: 'reviewing a GitHub pull request.',
-    procedure: [
-      'Read the PR description and linked issue for intent before reading the diff.',
-      'Review every changed file, not just the ones with the largest diff.',
-      'Distinguish must-fix comments from optional suggestions explicitly.',
-    ],
-    verification: ['Every must-fix comment is either resolved or explicitly acknowledged before approval.'],
-    fullNotes: ['A review that only checks style misses correctness/security issues — prioritize correctness and security first.'],
-  },
-  {
-    id: 'conventional-commit', category: 'github', title: 'Conventional Commit',
-    summary: 'use when generating or reviewing commit messages from Git changes.',
-    trigger: 'generating, reviewing, or preparing a commit message from current Git changes.',
-    procedure: [
-      'Capture a fresh baseline with `git status --short --branch`; inspect staged changes first, then unstaged changes only if nothing is staged.',
-      'Never stage, commit, push, reset, checkout, or run destructive Git commands unless the user explicitly requested that action.',
-      'Run configured project quality checks when safe and available; if formatting/checks change files, re-inspect the diff before writing the message.',
-      'Stop and warn if the diff includes secrets, `.env` files, private keys, production config, migrations, or unrelated concerns that should be split.',
-      'Choose the Conventional Commit type and scope from the actual diff; prefer business/product scopes over technical scopes.',
-      'Write an imperative subject under 72 characters and body bullets in past tense, describing outcomes rather than filenames.',
-    ],
-    verification: ['Git diff/status were inspected immediately before the message; the message describes only actual diff content and calls out secrets/unrelated work instead of hiding it.'],
-    fullNotes: ['Prefer staged changes when any are staged. If only unstaged changes exist, say that nothing is staged.', 'Generated artifacts should not dominate the message; summarize the source change that caused them.', 'If the user asks for the exact commit command, prefer explicit paths over `git add .` when possible.'],
-  },
-  {
-    id: 'github-actions-verification', category: 'github', title: 'GitHub Actions Verification',
-    summary: 'use when adding/changing GitHub Actions workflows.',
-    trigger: 'adding or changing GitHub Actions workflows.',
-    procedure: [
-      'Confirm the workflow triggers (on:) match the intended events; overly broad triggers waste CI minutes and can create races.',
-      'Pin third-party actions to a commit SHA or trusted version tag, not a mutable branch ref.',
-      'Verify secrets used in the workflow are scoped to what the job actually needs.',
-    ],
-    verification: ['Workflow run succeeds on the intended trigger and does not expose secrets in logs.'],
-    fullNotes: ['Never disable a security-relevant CI check (e.g. a required status check) to unblock a merge without explicit approval.'],
-  },
-];
-
-const SKILL_BY_ID: Record<string, SkillDefinition> = Object.fromEntries(SKILL_CATALOG.map((s) => [s.id, s]));
-const SKILL_CATEGORIES: SkillCategory[] = ['core', 'frontend', 'backend', 'fullstack', 'github'];
+async function preflightSkillFiles(root: string, files: { relPath: string; content: string | Buffer }[], replace = false) {
+  for (const file of files) {
+    await assertBoundaryTarget(root, file.relPath);
+    const path = join(root, file.relPath);
+    if (!replace && await exists(path) && !(await readFile(path)).equals(Buffer.from(file.content))) {
+      throw new Error(`Existing card or reference differs: ${path}. Review it and use --replace to overwrite local content.`);
+    }
+  }
+}
 
 function skillRelPath(skill: SkillDefinition) {
   return `.agentos/skills/${skill.category}/${skill.id}/SKILL.md`;
 }
 
-function renderSkillTemplate(skill: SkillDefinition, mode: 'summary' | 'full') {
-  const procedure = mode === 'full' ? skill.procedure : skill.procedure.slice(0, 3);
-  const lines = [
-    '---',
-    `name: ${skill.id}`,
-    `category: ${skill.category}`,
-    `mode: ${mode}`,
-    '---',
-    '',
-    `# ${skill.title}`,
-    '',
-    `Trigger: Use when ${skill.trigger}`,
-    '',
-    '## Procedure',
-    '',
-    ...procedure.map((step, i) => `${i + 1}. ${step}`),
-    '',
-    '## Verification',
-    '',
-    ...skill.verification.map((v) => `- ${v}`),
-  ];
-  if (mode === 'full' && skill.fullNotes.length) {
-    lines.push('', '## Notes', '', ...skill.fullNotes.map((n) => `- ${n}`));
-  }
-  lines.push('');
-  return lines.join('\n');
-}
-
 function resolveRequestedSkillIds(options, repos, hasGit) {
-  if (options.detected) return detectedSkillIds(repos, hasGit);
+  if (options.detected) return { ids: detectedSkillIds(repos, hasGit), deprecations: [] };
   const raw = options.add;
   if (!raw) throw new Error('agentos skills add requires --detected or at least one skill id/category-pack.');
   const items = (Array.isArray(raw) ? raw : String(raw).split(',')).map((s) => String(s).trim()).filter(Boolean);
   const ids: string[] = [];
+  const deprecations: string[] = [];
   const seen = new Set<string>();
   for (const item of items) {
     if (item.endsWith('-pack')) {
@@ -1909,9 +1638,11 @@ function resolveRequestedSkillIds(options, repos, hasGit) {
         continue;
       }
     }
-    if (!seen.has(item)) { seen.add(item); ids.push(item); }
+    const { id, deprecated, from } = resolveSkillAlias(item);
+    if (deprecated) deprecations.push(skillDeprecationNotice(from!, id));
+    if (!seen.has(id)) { seen.add(id); ids.push(id); }
   }
-  return ids;
+  return { ids, deprecations };
 }
 
 function detectedSkillIds(repos, hasGit) {
@@ -2214,9 +1945,13 @@ async function doctorAgentOSUnlocked(options: any = {}) {
 
   const projectPath = join(root, '.agentos/project.yaml');
   let projectConfigError: any = null;
+  const migrationNotes: string[] = [];
   if (options.fix) {
     try {
-      await withMutationTransaction(() => fixAgentOSAdapters(root));
+      await withMutationTransaction(async () => {
+        await fixAgentOSAdapters(root);
+        migrationNotes.push(...(await fixLegacyCatalogState(root)));
+      });
     } catch (error) {
       if (error instanceof ProjectConfigError) projectConfigError = error;
       else if (!(error instanceof AdapterConflictError)) throw error;
@@ -2268,6 +2003,7 @@ async function doctorAgentOSUnlocked(options: any = {}) {
     if (!/^workspace_kind:/m.test(project)) warnings.push('.agentos/project.yaml missing workspace_kind');
     if (!project.includes('- opencode')) warnings.push('.agentos/project.yaml engines.allowed does not list opencode');
     await checkAgentAndSkillConfig(root, project, warnings);
+    await checkLegacyCatalogState(root, project, warnings);
   }
 
   for (const repo of repos.filter(repo => repo.path !== '.' && policy.pointers)) {
@@ -2316,6 +2052,7 @@ async function doctorAgentOSUnlocked(options: any = {}) {
   }
 
   const diagnostics = [];
+  for (const note of migrationNotes) diagnostics.push(`migrated: ${note}`);
   await checkTasksAndHandoff(root, problems, warnings, diagnostics);
   await checkRepoCommands(repos, warnings, diagnostics);
   await checkGitState(root, repos, warnings, diagnostics);
@@ -2615,6 +2352,126 @@ async function fixAgentOSAdapters(root) {
   if (policy.gitignore === 'ignore') for (const repo of childRepos) await ensureChildRepoGitignore(join(root, repo.path));
 }
 
+// --- Retired agent card shapes (slice 4 safe migration) ---
+// A retired agent card is safe to migrate (i.e. clearly-generated rather than
+// customized) only when its content byte-matches one of the closed set of
+// historical generated shapes below, reconstructed from the agentMd/template
+// generators that actually produced them. Anything else is treated as a
+// customized card and left untouched by doctor --fix.
+
+const RETIRED_AGENT_MANDATES = {
+  'project-manager': 'Break down coding/product requests into scoped, dependency-aware implementation plans before specialist agents edit files.',
+  implementation: 'Own implementation work inside the declared repo/file scope.',
+  qa: 'Verify changed behavior with real commands and browser checks when UI is touched.',
+  'code-reviewer': 'Review diffs for correctness, security, scope, and project consistency.',
+  'frontend-engineer': 'Own frontend implementation within declared frontend repo scope.',
+  'backend-engineer': 'Own backend implementation within declared backend repo scope.',
+  'data-engineer': 'Own data pipeline, analytics, migration-readiness, and data-quality tasks inside declared scope.',
+};
+
+function legacyAgentCardShapes(id: string): string[] {
+  const name = title(id);
+  const mandate = RETIRED_AGENT_MANDATES[id];
+  if (!mandate) return [];
+  return [
+    // 1. Original MVP shape (agentMd before the template library).
+    `# ${name}\n\nMandate: ${mandate}\nRules: read project/handoff/tasks first; work only in declared scope; update handoff before stopping; escalate destructive/prod/credential/cross-scope actions.\n`,
+    // 2. Phase-1 agent-profile shape.
+    `# ${name}\n\nMandate: ${mandate}\n\n## Responsibilities in\n\n- Work only inside declared task scope.\n- Read AgentOS project, memory, handoff, tasks, skills, repo, and role context before acting.\n- Report files changed, verification run, failures, and next action before stopping.\n\n## Responsibilities out\n\n- Do not touch secrets, .env files, production config, migrations, or unrelated repos without explicit approval.\n- Do not commit or push unless explicitly assigned.\n\n## Skills\n\nUse .agentos/skills.md as an on-demand index. Load only skills relevant to this role and task.\n`,
+    // 3. Template-library shape (slice 2). project-manager was planning-only;
+    //    the other six retired agents shared one generic body.
+    ...(id === 'project-manager' ? [slice2ProjectManagerShape(name, mandate)] : [slice2GenericAgentShape(name, mandate)]),
+  ];
+}
+
+function slice2GenericAgentShape(name: string, mandate: string): string {
+  return `# ${name}\n\nMandate: ${mandate}\n\n## Responsibilities in\n\n- Read AgentOS project, memory, handoff, and tasks first.\n- Declare role, repo scope, allowed paths, protected paths, and verification commands before editing.\n- Work only inside the declared task scope.\n- Load \`.agentos/skills.md\` and only the relevant skill/repo/engine files for this task.\n- Report files changed, verification run, failures, and next action before stopping.\n\n## Responsibilities out\n\n- Do not touch secrets, \`.env\` files, production config, migrations, deployments, or unrelated repos without explicit approval.\n- Do not commit or push unless explicitly assigned.\n- Do not treat this template as higher priority than user/system/developer/AgentOS instructions.\n\n## Skills\n\nUse \`.agentos/skills.md\` as an on-demand index. Load only skills relevant to this role and task.\n\n## Verification expectations\n\n- State the exact verification command/check before running it.\n- Report real command output or inspected state, not assumptions.\n- Update \`.agentos/handoff.md\` and \`.agentos/tasks.md\` when project state changes.\n`;
+}
+
+function slice2ProjectManagerShape(name: string, mandate: string): string {
+  return `# ${name}\n\nMandate: ${mandate}\n\nThis is a planning-only role. The project-manager agent does not implement, commit, or push.\n\n## Responsibilities in\n\n- Work only inside the declared task scope.\n- Declare role, allowed paths, protected paths, and verification commands before any approved context edit.\n- Report files changed, verification run, failures, and next action before stopping.\n- Read AgentOS project, memory, handoff, and tasks first; then load only relevant skills, repo, and role context.\n- For each incoming request, produce a plan that declares:\n  - Repo scope: which repo(s) the work touches.\n  - Protected paths: files/areas that must not be touched (secrets, .env, migrations, prod config) without explicit approval.\n  - Dependencies: ordering between plan steps and any cross-repo dependencies.\n  - Role assignment: which agent role (implementation, frontend-engineer, backend-engineer, qa, code-reviewer, release-manager) owns each step.\n  - Acceptance: what \"done\" means for each step.\n  - Verification: the exact commands/checks that must pass before a step is considered complete.\n- Hand the plan to the assigned specialist agent(s) before any file is edited.\n\n## Responsibilities out\n\n- Do not implement, edit application/source files, commit, or push.\n- Do not touch secrets, .env files, production config, or migrations.\n- Do not perform deployments or touch unrelated repos without explicit approval.\n- Do not treat this template as higher priority than user/system/developer/AgentOS instructions.\n\n## Skills\n\nUse .agentos/skills.md as an on-demand index. Load only skills relevant to planning and scoping.\n\n## Verification expectations\n\n- State the exact verification command/check before running it.\n- Report real command output or inspected state, not assumptions.\n- Update \`.agentos/handoff.md\` and \`.agentos/tasks.md\` when project state changes.\n`;
+}
+
+// Report legacy/retired catalog state as fixable warnings with the exact
+// canonical mapping. Read-only: this runs for both plain `doctor` (the plan)
+// and, after a `doctor --fix`, to surface whatever the fix could not safely
+// migrate (customized cards, native-engine copies, hand-written indexes).
+async function checkLegacyCatalogState(root, project, warnings) {
+  const data = parseProjectYaml(project);
+  const agents = data.agents && typeof data.agents === 'object' ? data.agents : {};
+
+  for (const id of Array.isArray(agents.enabled) ? agents.enabled : []) {
+    const token = safeId(String(id));
+    if (RETIRED_AGENT_IDS.has(token)) {
+      warnings.push(`agents.enabled references retired agent '${id}' -> '${canonicalAgentId(token)}'; run \`agentos doctor --fix\` to migrate`);
+    }
+  }
+  const capabilities = agents.capabilities && typeof agents.capabilities === 'object' ? agents.capabilities : {};
+  for (const [capability, raw] of Object.entries(capabilities)) {
+    const token = safeId(String(raw));
+    if (RETIRED_AGENT_IDS.has(token)) {
+      warnings.push(`agents.capabilities.${capability} references retired agent '${raw}' -> '${canonicalAgentId(token)}'; run \`agentos doctor --fix\` to migrate`);
+    }
+  }
+
+  let agentFiles: string[] = [];
+  try { agentFiles = await readdir(join(root, '.agentos/agents')); } catch {}
+  for (const file of agentFiles.filter((name) => name.endsWith('.md'))) {
+    const id = file.replace(/\.md$/, '');
+    if (RETIRED_AGENT_IDS.has(id)) {
+      warnings.push(`.agentos/agents/${file} is a retired agent card -> '${canonicalAgentId(id)}'; run \`agentos doctor --fix\` to migrate clearly-generated cards`);
+    }
+  }
+
+  for (const entry of await listLocalSkillFiles(root)) {
+    if (RETIRED_SKILL_IDS.has(entry.id)) {
+      warnings.push(`.agentos/skills/${entry.category}/${entry.id}/SKILL.md is a retired skill card -> '${SKILL_ALIASES[entry.id]}'; reinstall the canonical skill and remove this card`);
+    }
+  }
+
+  const skillsMdText = await safeRead(join(root, '.agentos/skills.md'));
+  if (skillsMdText) {
+    for (const id of RETIRED_SKILL_IDS) {
+      const bullet = new RegExp(`^-\\s+${escapeRegExp(id)}(?:\\s|$|[—:])`, 'm');
+      const details = new RegExp(`Details:\\s+\\.agentos/skills/[^/]+/${escapeRegExp(id)}/SKILL\\.md`, 'm');
+      if (bullet.test(skillsMdText) || details.test(skillsMdText)) {
+        warnings.push(`.agentos/skills.md still lists retired skill '${id}' -> '${SKILL_ALIASES[id]}'`);
+      }
+    }
+  }
+}
+
+// Safe migration of clearly-generated retired agent cards (slice 4). Runs
+// inside doctor --fix's mutation transaction. Never deletes or overwrites a
+// customized card, and never touches native engine copies (.claude/.opencode).
+async function fixLegacyCatalogState(root) {
+  const actions: string[] = [];
+  let agentFiles: string[] = [];
+  try { agentFiles = await readdir(join(root, '.agentos/agents')); } catch {}
+  for (const file of agentFiles.filter((name) => name.endsWith('.md')).sort()) {
+    const id = file.replace(/\.md$/, '');
+    if (!RETIRED_AGENT_IDS.has(id)) continue;
+    const canonical = canonicalAgentId(id);
+    const source = join(root, '.agentos/agents', file);
+    const content = await safeRead(source);
+    if (!legacyAgentCardShapes(id).includes(content)) {
+      actions.push(`left customized retired agent card ${file} untouched (manual migration to '${canonical}' needed)`);
+      continue;
+    }
+    const target = join(root, '.agentos/agents', `${canonical}.md`);
+    if (await exists(target)) {
+      await removeTracked(source);
+      actions.push(`removed stale generated agent card ${file} ('${canonical}.md' already present)`);
+    } else {
+      await writeFileAtomic(target, agentMd(AGENT_DEFINITIONS[canonical]));
+      await removeTracked(source);
+      actions.push(`migrated generated agent card ${file} -> ${canonical}.md`);
+    }
+  }
+  return actions;
+}
+
+
 const CHILD_REPO_GITIGNORE_BLOCK = `# AgentOS parent-workspace pointer files
 /AGENTS.md
 /CLAUDE.md
@@ -2853,7 +2710,7 @@ function subrepoAgentsPointer(repo) {
     '- `../.agentos/engines/codex.md` when using Codex',
     '- load only when relevant: the specific `../.agentos/skills/**/SKILL.md` files for the requested role/task',
     '',
-    'If the user asks for a commit message or mentions a project skill such as `conventional-commit`, use `../.agentos/skills.md` to locate that AgentOS skill and load its `SKILL.md`; do not require the user to repeat the AgentOS skill path every time.',
+    'If the user asks for a commit message or mentions a project skill such as `commit-messages`, use `../.agentos/skills.md` to locate that AgentOS skill and load its `SKILL.md`; do not require the user to repeat the AgentOS skill path every time.',
     '',
     'Rules: do not treat this repo as the whole product; declare scope; edit only in scope; no commit/push unless asked; update parent handoff/tasks.',
     '',
@@ -2880,7 +2737,7 @@ function subrepoClaudePointer(repo) {
     '- `../.agentos/engines/claude-code.md`',
     '- load only when relevant: the specific `../.agentos/skills/**/SKILL.md` files for the requested role/task',
     '',
-    'If the user asks for a commit message or mentions a project skill such as `conventional-commit`, use `../.agentos/skills.md` to locate that AgentOS skill and load its `SKILL.md`; do not require the user to repeat the AgentOS skill path every time.',
+    'If the user asks for a commit message or mentions a project skill such as `commit-messages`, use `../.agentos/skills.md` to locate that AgentOS skill and load its `SKILL.md`; do not require the user to repeat the AgentOS skill path every time.',
     '',
     'Declare scope; edit only in scope; no commit/push unless asked; update parent handoff/tasks.',
     '',
@@ -2927,12 +2784,10 @@ function knowledgeMd(options: any = {}) {
 function skillsMd(agentSelection) {
   const enabled = new Set(agentSelection.enabled);
   const sections = [];
-  if (enabled.has('implementation')) sections.push(['implementation', ['systematic-debugging — use for unclear bugs.', 'test-driven-development — use when adding or changing behavior.']]);
-  if (enabled.has('frontend-engineer')) sections.push(['frontend-engineer', ['frontend-build-verification — use before declaring frontend work done.', 'nuxt-e2e-testing — use for Nuxt route/browser behavior.', 'ai-slop-design-review — use for UI polish/design review.']]);
-  if (enabled.has('backend-engineer')) sections.push(['backend-engineer', ['backend-service-verification — use for local backend service verification.', 'nestjs-auth-guards — use for NestJS auth/permission work.']]);
-  if (enabled.has('qa')) sections.push(['qa', ['nuxt-e2e-testing — use for browser-driven frontend QA.', 'backend-service-verification — use for backend smoke/e2e verification.']]);
-  if (enabled.has('code-reviewer')) sections.push(['code-reviewer', ['shared-repo-git-safety — use before reviewing staged or unstaged changes in shared repos.', 'requesting-code-review — use for pre-commit review.']]);
-  if (enabled.has('release-manager')) sections.push(['release-manager', ['shared-repo-git-safety — use before commit/push/merge.', 'github-pr-workflow — use for PR lifecycle work.']]);
+  if (enabled.has('developer')) sections.push(['developer', ['debugging — use for unclear bugs.', 'test-driven-development — use when adding or changing behavior.', 'frontend-design — use for UI design/review/polish.', 'frontend-testing — use before declaring frontend work done.', 'backend-development — use when implementing backend features.', 'backend-testing — use before declaring backend work done.', 'authorization — use for auth/permission work.']]);
+  if (enabled.has('tester')) sections.push(['tester', ['frontend-testing — use for browser-driven frontend QA.', 'backend-testing — use for backend smoke/e2e verification.', 'integration-testing — use for cross-component rehearsal.']]);
+  if (enabled.has('reviewer')) sections.push(['reviewer', ['git-safety — use before reviewing staged or unstaged changes in shared repos.', 'code-review — use for preparing and performing reviews.']]);
+  if (enabled.has('release-manager')) sections.push(['release-manager', ['git-safety — use before commit/push/merge.', 'pull-request-workflow — use for PR lifecycle work.']]);
   return `# Skills\n\nPolicy: on-demand.\n\nLoad only skills relevant to the current task and assigned agent role. Do not bulk-load all skills.\n\n${sections.map(([role, skills]) => `## ${role}\n\n${skills.map((skill) => `- ${skill}`).join('\n')}`).join('\n\n')}\n`;
 }
 function decisionsMd() { return '# Decisions\n\nDurable decisions go here with date, reason, alternatives, and status.\n'; }
@@ -2942,17 +2797,19 @@ function productMd({ projectName }) { return `# Product\n\nProject: ${projectNam
 function architectureMd() { return '# Architecture\n\nDefine stack, boundaries, data model, and deployment before scaffolding code.\n'; }
 function runsReadmeMd() { return '# Runs\n\nStore per-task briefs, results, verification logs, and diff summaries here.\n'; }
 
-const AGENT_DEFINITIONS = {
-  implementation: { id: 'implementation', mandate: 'Own implementation work inside the declared repo/file scope.' },
-  'frontend-engineer': { id: 'frontend-engineer', mandate: 'Own frontend implementation within declared frontend repo scope.' },
-  'backend-engineer': { id: 'backend-engineer', mandate: 'Own backend implementation within declared backend repo scope.' },
-  qa: { id: 'qa', mandate: 'Verify changed behavior with real commands and browser checks when UI is touched.' },
-  'code-reviewer': { id: 'code-reviewer', mandate: 'Review diffs for correctness, security, scope, and project consistency.' },
-  'release-manager': { id: 'release-manager', mandate: 'Coordinate commit, push, merge, and release mechanics after verification and approval.' },
-  'project-manager': { id: 'project-manager', mandate: 'Break down coding/product requests into scoped, dependency-aware implementation plans before specialist agents edit files.', planningOnly: true },
-};
 
-const MINIMAL_AGENT_IDS = ['implementation', 'qa', 'code-reviewer', 'release-manager'];
+const MINIMAL_AGENT_IDS = ['developer', 'tester', 'reviewer', 'release-manager'];
+
+function collectAgentDeprecationNotices(requested) {
+  const raw = String(requested || '').trim().toLowerCase();
+  if (!raw || raw === 'minimal' || raw === 'detected') return [];
+  const notices = [];
+  for (const item of raw.split(',').map((s) => s.trim()).filter(Boolean)) {
+    const { id, deprecated, from } = resolveAgentAlias(item);
+    if (deprecated) notices.push(agentDeprecationNotice(from!, id));
+  }
+  return notices;
+}
 
 function resolveAgentSelection(requested, repos) {
   const raw = String(requested || 'detected').trim().toLowerCase();
@@ -3003,41 +2860,26 @@ function customAgentDefinition(id) {
   return { id, mandate: `Custom project-defined agent role. See .agentos/agents/${id}.md for its role definition.`, custom: true };
 }
 
-function detectedSpecialistIds(repos) {
-  const ids = [];
-  if (repos.some((repo) => repo.type === 'frontend' || ['nuxt','nextjs','vite/vue','react'].includes(repo.framework))) ids.push('frontend-engineer');
-  if (repos.some((repo) => repo.type === 'backend' || ['nestjs','express'].includes(repo.framework))) ids.push('backend-engineer');
-  return ids;
+function detectedSpecialistIds(_repos) {
+  // Frontend/backend engineer specialists were absorbed into the single
+  // `developer` role. Per-repo specialization is expressed through repo scope
+  // and the relevant frontend/backend skills, not separate agent identities.
+  return [];
 }
 
 function normalizeAgentAlias(value) {
-  const id = safeId(value);
-  const aliases = {
-    frontend: 'frontend-engineer',
-    backend: 'backend-engineer',
-    review: 'code-reviewer',
-    reviewer: 'code-reviewer',
-    release: 'release-manager',
-    qa: 'qa',
-    'qa-engineer': 'qa',
-    impl: 'implementation',
-    implementer: 'implementation',
-    planning: 'project-manager',
-    pm: 'project-manager',
-  };
-  return aliases[id] || id;
+  return canonicalAgentId(value);
 }
 
 function agentCapabilities(enabled) {
   const set = new Set(enabled);
   const capabilities: Record<string, string> = {};
-  if (set.has('implementation')) capabilities.implementation = 'implementation';
-  if (set.has('frontend-engineer')) capabilities.frontend = 'frontend-engineer';
-  if (set.has('backend-engineer')) capabilities.backend = 'backend-engineer';
-  if (set.has('qa')) capabilities.qa = 'qa';
-  if (set.has('code-reviewer')) capabilities.review = 'code-reviewer';
+  if (set.has('developer')) { capabilities.implementation = 'developer'; capabilities.frontend = 'developer'; capabilities.backend = 'developer'; }
+  if (set.has('tester')) capabilities.qa = 'tester';
+  if (set.has('reviewer')) capabilities.review = 'reviewer';
   if (set.has('release-manager')) capabilities.release = 'release-manager';
-  if (set.has('project-manager')) capabilities.planning = 'project-manager';
+  if (set.has('planner')) capabilities.planning = 'planner';
+  if (set.has('security-reviewer')) capabilities.security = 'security-reviewer';
   return capabilities;
 }
 
@@ -3050,13 +2892,10 @@ function agentConfigObject(agentSelection) {
 }
 
 function agentMd(agent) {
-  if (agent.id === 'project-manager') return projectManagerAgentMd();
+  if (agent.content) return agent.content;
   return `# ${title(agent.id)}\n\nMandate: ${agent.mandate}\n\n## Responsibilities in\n\n- Work only inside declared task scope.\n- Read AgentOS project, memory, handoff, and tasks first; then load only relevant skills, repo, role, and engine context.\n- Report files changed, verification run, failures, and next action before stopping.\n\n## Responsibilities out\n\n- Do not touch secrets, .env files, production config, migrations, or unrelated repos without explicit approval.\n- Do not commit or push unless explicitly assigned.\n\n## Skills\n\nUse .agentos/skills.md as an on-demand index. Load only skills relevant to this role and task.\n`;
 }
 
-function projectManagerAgentMd() {
-  return `# Project Manager\n\nMandate: Break down coding/product requests into scoped, dependency-aware implementation plans before specialist agents edit files.\n\nThis is a planning-only role. The project-manager agent does not implement, commit, or push.\n\n## Responsibilities in\n\n- Read AgentOS project, memory, handoff, and tasks first; then load only relevant skills, repo, and role context.\n- For each incoming request, produce a plan that declares:\n  - Repo scope: which repo(s) the work touches.\n  - Protected paths: files/areas that must not be touched (secrets, .env, migrations, prod config) without explicit approval.\n  - Dependencies: ordering between plan steps and any cross-repo dependencies.\n  - Role assignment: which agent role (implementation, frontend-engineer, backend-engineer, qa, code-reviewer, release-manager) owns each step.\n  - Acceptance: what "done" means for each step.\n  - Verification: the exact commands/checks that must pass before a step is considered complete.\n- Hand the plan to the assigned specialist agent(s) before any file is edited.\n\n## Responsibilities out\n\n- Do not implement, edit application/source files, commit, or push.\n- Do not touch secrets, .env files, production config, or migrations.\n\n## Skills\n\nUse .agentos/skills.md as an on-demand index. Load only skills relevant to planning and scoping.\n`;
-}
 function defaultEngines() { return ['claude-code', 'codex', 'opencode', 'hermes', 'chatgpt'].map((id) => ({ id })); }
 function engineMd(engine) { return `# ${title(engine.id)} Adapter\n\nRead AGENTS.md + .agentos context first. Before stopping: handoff current state, files changed, tests, failures, next action.\n`; }
 function repoMd(repo) { return `# ${title(repo.name)} Repo\n\nPath: \`${repo.path}\`; type: ${repo.type}; framework: ${repo.framework}; package manager: ${repo.packageManager}.\nCommands: dev=\`${repo.devCommand || repo.commands?.dev_command || 'unknown'}\`; build=\`${repo.buildCommand || repo.commands?.build_command || 'unknown'}\`; test=\`${repo.testCommand || repo.commands?.test_command || 'unknown'}\`${repo.testE2eCommand ? `; e2e=\`${repo.testE2eCommand}\`` : ''}${repo.generateCommand ? `; generate=\`${repo.generateCommand}\`` : ''}${repo.previewCommand ? `; preview=\`${repo.previewCommand}\`` : ''}.\nScope: edit only when task includes \`${repo.name}\`.\n`; }

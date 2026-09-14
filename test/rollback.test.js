@@ -73,14 +73,14 @@ test('agents add rolls back project.yaml patch and the new agent file when the p
   const root = await tempProject();
   await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
   const projectPath = join(root, '.agentos/project.yaml');
-  const agentPath = join(root, '.agentos/agents/project-manager.md');
+  const agentPath = join(root, '.agentos/agents/planner.md');
   const beforeProject = await readFile(projectPath, 'utf8');
-  assert.equal(await exists(agentPath), false, 'precondition: project-manager agent must not exist yet');
+  assert.equal(await exists(agentPath), false, 'precondition: planner agent must not exist yet');
 
   __setAtomicWriteFaultForTests(projectPath, 'before-rename');
   t.after(__clearAtomicWriteFaultForTests);
 
-  await assert.rejects(() => agentsAgentOS({ cwd: root, add: 'project-manager' }), /Injected atomic-write test fault/);
+  await assert.rejects(() => agentsAgentOS({ cwd: root, add: 'planner' }), /Injected atomic-write test fault/);
 
   assert.equal(await readFile(projectPath, 'utf8'), beforeProject, 'project.yaml must be unchanged (it was the failing write)');
   assert.equal(await exists(agentPath), false, 'the new agent file must not be left behind when project.yaml fails to update');
@@ -93,7 +93,7 @@ test('skills add rolls back newly written skill files when the skills.md index w
   const root = await tempProject();
   await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
   const skillsMdPath = join(root, '.agentos/skills.md');
-  const skillPathA = join(root, '.agentos/skills/core/systematic-debugging/SKILL.md');
+  const skillPathA = join(root, '.agentos/skills/core/debugging/SKILL.md');
   const skillPathB = join(root, '.agentos/skills/core/test-driven-development/SKILL.md');
   const beforeSkillsMd = await readFile(skillsMdPath, 'utf8');
   assert.equal(await exists(skillPathA), false);
@@ -102,12 +102,12 @@ test('skills add rolls back newly written skill files when the skills.md index w
   __setAtomicWriteFaultForTests(skillsMdPath, 'before-rename');
   t.after(__clearAtomicWriteFaultForTests);
 
-  await assert.rejects(() => skillsAgentOS({ cwd: root, add: 'systematic-debugging,test-driven-development' }), /Injected atomic-write test fault/);
+  await assert.rejects(() => skillsAgentOS({ cwd: root, add: 'debugging,test-driven-development' }), /Injected atomic-write test fault/);
 
   assert.equal(await readFile(skillsMdPath, 'utf8'), beforeSkillsMd, 'skills.md must be unchanged (it was the failing write)');
-  assert.equal(await exists(skillPathA), false, 'systematic-debugging skill file must not be left behind');
+  assert.equal(await exists(skillPathA), false, 'debugging skill file must not be left behind');
   assert.equal(await exists(skillPathB), false, 'test-driven-development skill file must not be left behind');
-  assert.equal(await exists(join(root, '.agentos/skills/core/systematic-debugging')), false, 'the new skill directory must not be left behind either');
+  assert.equal(await exists(join(root, '.agentos/skills/core/debugging')), false, 'the new skill directory must not be left behind either');
 
   const leftoverTmp = (await readdir(join(root, '.agentos'))).filter((name) => name.includes('.agentos-tmp-'));
   assert.deepEqual(leftoverTmp, [], 'no atomic-write temp artifacts should remain in .agentos/');
@@ -116,17 +116,17 @@ test('skills add rolls back newly written skill files when the skills.md index w
 test('skills remove restores the removed skill directory when the skills.md index write fails', async (t) => {
   const root = await tempProject();
   await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
-  await skillsAgentOS({ cwd: root, add: 'systematic-debugging' });
+  await skillsAgentOS({ cwd: root, add: 'debugging' });
   const skillsMdPath = join(root, '.agentos/skills.md');
-  const skillPath = join(root, '.agentos/skills/core/systematic-debugging/SKILL.md');
-  const skillDir = join(root, '.agentos/skills/core/systematic-debugging');
+  const skillPath = join(root, '.agentos/skills/core/debugging/SKILL.md');
+  const skillDir = join(root, '.agentos/skills/core/debugging');
   const beforeSkillsMd = await readFile(skillsMdPath, 'utf8');
   const beforeSkillContent = await readFile(skillPath, 'utf8');
 
   __setAtomicWriteFaultForTests(skillsMdPath, 'before-rename');
   t.after(__clearAtomicWriteFaultForTests);
 
-  await assert.rejects(() => skillsAgentOS({ cwd: root, remove: 'systematic-debugging' }), /Injected atomic-write test fault/);
+  await assert.rejects(() => skillsAgentOS({ cwd: root, remove: 'debugging' }), /Injected atomic-write test fault/);
 
   assert.equal(await readFile(skillsMdPath, 'utf8'), beforeSkillsMd, 'skills.md must be unchanged (it was the failing write)');
   assert.equal(await exists(skillDir), true, 'the removed skill directory must be restored');
@@ -301,13 +301,13 @@ test('skills add is idempotent when re-adding an already-installed skill and lea
   const root = await tempProject();
   await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
 
-  const first = await skillsAgentOS({ cwd: root, add: 'systematic-debugging' });
+  const first = await skillsAgentOS({ cwd: root, add: 'debugging' });
   assert.equal(first.ok, true);
-  const skillPath = join(root, '.agentos/skills/core/systematic-debugging/SKILL.md');
+  const skillPath = join(root, '.agentos/skills/core/debugging/SKILL.md');
   const contentAfterFirst = await readFile(skillPath, 'utf8');
   const skillsMdAfterFirst = await readFile(join(root, '.agentos/skills.md'), 'utf8');
 
-  const second = await skillsAgentOS({ cwd: root, add: 'systematic-debugging' });
+  const second = await skillsAgentOS({ cwd: root, add: 'debugging' });
   assert.equal(second.ok, true);
   assert.equal(await readFile(skillPath, 'utf8'), contentAfterFirst, 'skill content must be stable across a repeated add');
   assert.equal(await readFile(join(root, '.agentos/skills.md'), 'utf8'), skillsMdAfterFirst, 'skills.md must be stable across a repeated add');
@@ -321,7 +321,7 @@ test('successful multi-file commands leave no atomic-write temp artifacts behind
 
   await compactAgentOS({ cwd: root });
   await runHandoffAgentOS({ cwd: root, engine: 'claude-code', reason: 'manual-pause' });
-  await agentsAgentOS({ cwd: root, add: 'project-manager' });
+  await agentsAgentOS({ cwd: root, add: 'planner' });
   await skillsAgentOS({ cwd: root, add: 'test-driven-development' });
   await skillsAgentOS({ cwd: root, remove: 'test-driven-development' });
   await templatesAgentOS({ cwd: root, command: 'copy', id: 'agent:security-reviewer' });
