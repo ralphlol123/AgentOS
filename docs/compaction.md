@@ -43,9 +43,14 @@ agentos compact --rewrite --objective <id> --expect-state <sha256>
   code blocks, and links. A checked parent with an unchecked descendant keeps the whole
   block live.
 - Every section the planner could not classify, verbatim, under `## Preserved context`.
-- Constraint-looking lines found inside archived history (`do not`, `never`,
+- Standing constraints found inside archived history (`do not`, `never`,
   `must not`, `requires approval`, `before merging`, …), carried forward verbatim with a
-  `## Preserved context` block that names their origin.
+  `## Preserved context` block that names their origin. A line qualifies only when it is a
+  short directive (≤ 200 characters) or opens with the directive itself (≤ 600 characters):
+  narrative paragraphs that merely mention a keyword are history, not constraints, and stay
+  in the archive. The generated block is re-evaluated on every rewrite — lines that no longer
+  qualify are dropped from live context (their originals remain in the archive), and an
+  emptied block is removed.
 - The existing `## Preserved context` and `## History` containers, re-emitted as-is
   (the rewrite never re-wraps its own output, so repeated runs are byte-stable).
 
