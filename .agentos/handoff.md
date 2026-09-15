@@ -2,7 +2,7 @@
 
 ## Current objective
 
-**Compaction rewrite shipped; `0.5.0` published to npm.** `agentos compact --rewrite` (opt-in structural compaction with a byte-exact archive) and heading-aware `doctor` diagnostics merged via PR #23 (merge commit `21ff1a4`), on top of the completed migration UX (PR #22 merged as `20a4179`; slices 1–2 as `5a3ab0e` / `5bd0e3a`). Version `0.5.0` went live on 2026-09-15: dist-tag `latest`, shasum `25999ee8e6db6af4647543a8cba475e371e1999d`, `dist.integrity` matched against the local pack, and verified by installing the registry build with Bun and driving blocked → preview → apply → no-op end to end. `main` CI green. Plan: `.agentos/plans/2026-09-14-upgrade-migration-ux.md`.
+**Compaction shipped and hardened; `0.5.1` published to npm.** `agentos compact --rewrite` (opt-in structural compaction with a byte-exact archive) and heading-aware `doctor` diagnostics merged via PR #23 (merge commit `21ff1a4`), on top of the completed migration UX (PR #22 merged as `20a4179`; slices 1–2 as `5a3ab0e` / `5bd0e3a`). Version `0.5.0` went live on 2026-09-15: dist-tag `latest`, shasum `25999ee8e6db6af4647543a8cba475e371e1999d`, `dist.integrity` matched against the local pack, and verified by installing the registry build with Bun and driving blocked → preview → apply → no-op end to end. `0.5.1` followed the same day (PR #24, merge `27dd519`): the carried-constraint rule now requires a short directive instead of matching keywords inside narrative, qualified `## Previous objective (superseded) — …` headings classify as history, and the machine-generated constraints block is re-filtered on every run. Published as `latest` on 2026-09-15 (shasum `6546f602461bae8cb8b30ac3911cfeb9714a3872`); the registry build was verified end to end before rollout. `main` CI green. Plan: `.agentos/plans/2026-09-14-upgrade-migration-ux.md`.
 
 - Slice 1: `doctor`/`doctor --json` report `migration.{adapters,repoIds,retiredCards,summary}`; `agentos adapters explain <file>` classifies one adapter path.
 - Slice 2: a normalizable repo ID (`frontend_client`) is now a reported, fixable `doctor` problem instead of a parse-time brick, and `agentos doctor --fix --normalize-repo-ids [--dry-run]` renames the key plus its `.agentos/repos/<id>.md` note byte-preservingly in one transaction, leaving an audit note under `.agentos/runs/`.
@@ -20,9 +20,10 @@
 ## Current state
 
 - Repo: `agentos-for-projects` (single-repo workspace), branch `main`.
-- `main` == `origin/main` at `21ff1a4f49d1eb5972d101f510951a3e08554cc7` (merge of PR #23, `feat/compact-rewrite`).
-- Package version: `0.5.0`, documented in `CHANGELOG.md` (`## [0.5.0] - 2026-09-14`), published to npm on 2026-09-15 as `latest`; registry versions are `0.3.0`, `0.4.0`, `0.5.0`.
-- Shipped and merged: PR #20 (`feat/catalog-cleanup`, slices 1–5), PR #21 (`chore/v0.4.0-release`), PR #22 (`feat/upgrade-migration-ux`, slices 3–5) and PR #23 (`feat/compact-rewrite`).
+- `main` == `origin/main` at `27dd519` (merge of PR #24, `fix/compaction-carry-and-history-headings`).
+- Package version: `0.5.1`, documented in `CHANGELOG.md` (`## [0.5.1] - 2026-09-15`), published to npm on 2026-09-15 as `latest`; registry versions are `0.3.0`, `0.4.0`, `0.5.0`, `0.5.1`.
+- First production use of the rewrite: `/home/app/www/kargax/new` (KargaX) applied `0.5.0` with objective `obj-6af9f9c9f1`, which exposed the two 0.5.1 defects. With `0.5.1` the same workspace goes `215,932 → 117,078` chars (45.8%) with all originals archived under `.agentos/runs/compact-rewrite-38423ba…/`.
+- Shipped and merged: PR #20 (`feat/catalog-cleanup`, slices 1–5), PR #21 (`chore/v0.4.0-release`), PR #22 (`feat/upgrade-migration-ux`, slices 3–5), PR #23 (`feat/compact-rewrite`) and PR #24 (compaction carry/history fixes, released as 0.5.1).
 - Rolled out to real workspaces: Labahub (`/home/app/www/laundry-pos`) and KargaX (`/home/app/www/kargax/new`), both on the six-agent + 15-skill catalog via `doctor --fix` + `skills add` + manual adapter resolution.
 - Reconciliation (commit `c32b077`, pushed) changed state files only: `.agentos/tasks.md` (post-release rewrite) and this file.
 - Worktree cleanup (this run): `/home/hermes/agentos-catalog-cleanup`, `/home/hermes/agentos-v0.4.0-release`, and `.agentos-for-projects/.worktrees/reliability` were each confirmed clean (0 dirty, 0 staged, 0 untracked) and confirmed merged into `origin/main` before removal. Registry pruned; only the primary checkout remains.

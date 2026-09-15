@@ -1,6 +1,6 @@
 # Tasks
 
-Active scope: post-release 0.5.0. Catalog cleanup (slices 1–5) shipped as 0.4.0 (PR #20) and rolled out to Labahub and KargaX. Migration UX (PR #22) and the opt-in compaction rewrite (PR #23) shipped as **0.5.0, published to npm 2026-09-15**. Next priority: `agentos run` Phase 2, plus the recorded `project.yaml` formatting-fidelity fix.
+Active scope: post-release 0.5.1. Catalog cleanup (slices 1–5) shipped as 0.4.0 (PR #20) and rolled out to Labahub and KargaX. Migration UX (PR #22), the opt-in compaction rewrite (PR #23) and its carry-rule/history-heading fixes (PR #24) shipped as **0.5.0 then 0.5.1, both published to npm 2026-09-15**. Next priority: `agentos run` Phase 2, plus the recorded `project.yaml` formatting-fidelity fix.
 
 ## Done
 
@@ -11,6 +11,7 @@ Active scope: post-release 0.5.0. Catalog cleanup (slices 1–5) shipped as 0.4.
 - [x] Slice 5 (final): rebuild + pack + packed-install dogfood (npm/pnpm/Bun).
 - [x] PR #20 merged; 0.4.0 released (PR #21: version bump + CHANGELOG).
 - [x] Rolled out to Labahub (`/home/app/www/laundry-pos`) and KargaX (`/home/app/www/kargax/new`) via `doctor --fix` + `skills add` + manual adapter resolution.
+- [x] Compaction carry-rule fixes (PR #24 merged as `27dd519`, released as `0.5.1`): carried lines must be short directives rather than prose containing a keyword, qualified `## Previous objective (superseded) — …` headings classify as history, and the generated constraints block is re-filtered per run with stacked bullets normalized. Real-workspace evidence (KargaX): the first pass pulled ~21 KB of narrative back into live context; with 0.5.1 the same workspace lands at 215,932 → 117,078 chars.
 - [x] Compaction rewrite (branch `feat/compact-rewrite`, PR #23 merged as `21ff1a4`): `agentos compact --rewrite [--objective <id>] [--expect-state <sha256>]` archives the originals byte-for-byte before replacing live state, blocks on ambiguous/malformed state with zero writes, and `doctor` recognizes dated objective heading variants (missing vs empty vs duplicate, with line numbers). 28 new tests, suite 355/355; smoke and the npm/pnpm/Bun packaged checks cover blocked → preview → apply → no-op; docs in `docs/compaction.md`.
 
 ## Now
