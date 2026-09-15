@@ -3,6 +3,7 @@ import { withWorkspaceWriter } from './workspace-lock.js';
 import { readImportSource } from './import-source.js';
 import { appendContextRecord, literalMarkdown, markdownHeadings, markdownSection } from './markdown.js';
 import { HANDOFF_ROLES, recognizeSections, sectionText } from './context-sections.js';
+import { planCompactRewrite } from './compact-rewrite.js';
 import { collectRunHandoffGitState } from './git-evidence.js';
 import { canonicalAgentId, resolveAgentAlias, resolveSkillAlias, RETIRED_AGENT_IDS, RETIRED_SKILL_IDS, SKILL_ALIASES, agentDeprecationNotice, skillDeprecationNotice } from './aliases.js';
 import { LEGACY_SKILL_CARD_HASHES } from './legacy-skill-shapes.js';
@@ -968,6 +969,7 @@ export async function promptAgentOS(options: any = {}) {
 }
 
 async function compactAgentOSUnlocked(options: any = {}) {
+  if (options.rewrite) return compactRewriteUnlocked(options);
   const root = await findAgentOSRoot(options.cwd ?? process.cwd());
   if (!root) return { ok: false, text: 'AgentOS compact: FAIL\nNo .agentos directory found.' };
   await assertWorkspaceBoundaries(root);
@@ -1030,6 +1032,254 @@ async function compactAgentOSUnlocked(options: any = {}) {
   }
   return { ok: true, dryRun: Boolean(options.dryRun), changed, archivePath, before, after,
     proposed: { handoff: compactHandoff, tasks: compactTasks }, text: lines.join('\n') };
+}
+
+interface RewriteSource {
+  path: string;
+  rel: string;
+  exists: boolean;
+  mode: number;
+  bytes: Buffer;
+  text: string;
+}
+
+function sha256Hex(content: Buffer | string) {
+  return createHash('sha256').update(content).digest('hex');
+}
+
+/** Lenient JSON read for archive inspection: a damaged manifest must not crash the command. */
+async function readJsonSafe(path: string): Promise<any> {
+  try { return JSON.parse(await readFile(path, 'utf8')); } catch { return undefined; }
+}
+
+async function readRewriteSource(path: string, rel: string): Promise<RewriteSource> {
+  try {
+    if ((await lstat(path)).isSymbolicLink()) throw new Error(`${rel} is a symlink; --rewrite refuses to replace a link whose target is outside this workspace.`);
+    const info = await stat(path);
+    if (!info.isFile()) throw new Error(`${rel} is not a regular file; --rewrite refuses to replace it.`);
+    const bytes = await readFile(path);
+    const text = bytes.toString('utf8');
+    if (!Buffer.from(text, 'utf8').equals(bytes)) throw new Error(`${rel} is not valid UTF-8; --rewrite left the original state unchanged.`);
+    return { path, rel, exists: true, mode: info.mode, bytes, text };
+  } catch (error) {
+    if (error.code === 'ENOENT') return { path, rel, exists: false, mode: 0, bytes: Buffer.alloc(0), text: '' };
+    throw error;
+  }
+}
+
+function renderRewriteManifest({ root, bundleRel, stateHash, sources, sourceHashes, plan, candidates }) {
+  const selected = candidates.find((candidate) => candidate.id === plan.selectedObjectiveId);
+  return `${JSON.stringify({
+    format: 'agentos-compact-rewrite',
+    version: 1,
+    created: new Date().toISOString(),
+    workspace: root,
+    archive: bundleRel,
+    sourceStateHash: stateHash,
+    source: {
+      'handoff.md': { bytes: sources.handoff.bytes.length, sha256: sourceHashes.handoff, mode: sources.handoff.mode, existed: sources.handoff.exists },
+      'tasks.md': { bytes: sources.tasks.bytes.length, sha256: sourceHashes.tasks, mode: sources.tasks.mode, existed: sources.tasks.exists },
+    },
+    output: {
+      'handoff.md': { bytes: Buffer.byteLength(plan.handoff, 'utf8'), sha256: sha256Hex(plan.handoff) },
+      'tasks.md': { bytes: Buffer.byteLength(plan.tasks, 'utf8'), sha256: sha256Hex(plan.tasks) },
+    },
+    objective: { id: plan.selectedObjectiveId, heading: selected?.heading, line: selected?.line },
+    sizes: plan.sizes,
+    classification: plan.classification,
+    carriedForward: plan.carriedForward,
+    missing: plan.missing,
+  }, null, 2)}\n`;
+}
+
+function renderRewriteReadme({ stateHash, sources, sourceHashes, created }) {
+  return [
+    '# AgentOS compact rewrite archive',
+    '',
+    `Source state hash: ${stateHash}`,
+    `Created: ${created}`,
+    '',
+    'These files are the exact bytes of `.agentos/handoff.md` and `.agentos/tasks.md` immediately',
+    'before `agentos compact --rewrite` replaced them. Nothing was summarized or truncated.',
+    '',
+    `- \`handoff.md\`: ${sources.handoff.bytes.length} bytes, sha256 ${sourceHashes.handoff}`,
+    `- \`tasks.md\`: ${sources.tasks.bytes.length} bytes, sha256 ${sourceHashes.tasks}`,
+    '',
+    '`manifest.json` records the per-section classification, the selected objective, and the',
+    'constraint lines that were carried forward into live context.',
+    '',
+  ].join('\n');
+}
+
+function rewriteBlockedResult(root: string, reasons: string[], candidates: any[], dryRun: boolean) {
+  const lines = [
+    `AgentOS compact rewrite${dryRun ? ' dry run' : ''}: blocked`,
+    `Root: ${root}`,
+    '',
+    'No files were changed. The rewrite was refused because:',
+    ...reasons.map((reason) => `- ${reason}`),
+  ];
+  if (candidates.length) lines.push('', 'Objective candidates:', ...candidates.map((candidate) => `- ${candidate.id} (line ${candidate.line}): ${candidate.heading}`));
+  lines.push('', 'Resolve the selection explicitly, for example:', '  agentos compact --rewrite --objective <id> --dry-run');
+  return { ok: false, rewrite: true, dryRun: Boolean(dryRun), blockedReasons: reasons, objectiveCandidates: candidates, text: lines.join('\n') };
+}
+
+/**
+ * `agentos compact --rewrite`: archive live handoff/tasks byte-for-byte, then
+ * replace them with the planner's canonical form. Opt-in only: the conservative
+ * checkpoint behaviour of plain `agentos compact` is unchanged.
+ */
+async function compactRewriteUnlocked(options: any = {}) {
+  const root = await findAgentOSRoot(options.cwd ?? process.cwd());
+  if (!root) return { ok: false, rewrite: true, text: 'AgentOS compact rewrite: FAIL\nNo .agentos directory found.' };
+  await assertWorkspaceBoundaries(root);
+
+  const readProblems: string[] = [];
+  const sources: Record<string, RewriteSource> = {};
+  for (const [file, rel] of [['handoff', '.agentos/handoff.md'], ['tasks', '.agentos/tasks.md']] as const) {
+    try {
+      sources[file] = await readRewriteSource(join(root, rel), rel);
+    } catch (error) {
+      readProblems.push(error instanceof Error ? error.message : String(error));
+      sources[file] = { path: join(root, rel), rel, exists: false, mode: 0, bytes: Buffer.alloc(0), text: '' };
+    }
+  }
+  if (readProblems.length) return rewriteBlockedResult(root, readProblems, [], options.dryRun);
+
+  const stateHash = compactStateHash(sources.handoff.text, sources.tasks.text);
+  if (options.expectState && String(options.expectState) !== stateHash) {
+    return rewriteBlockedResult(root, [
+      `.agentos/handoff.md and tasks.md changed after this preview: --expect-state ${options.expectState} is stale (current state ${stateHash}).`,
+      'Re-run the dry run to review a proposal for the current state.',
+    ], [], options.dryRun);
+  }
+
+  const plan = planCompactRewrite({ handoff: sources.handoff.text, tasks: sources.tasks.text, objectiveId: options.objective });
+  if (!plan.ok) return rewriteBlockedResult(root, plan.blockedReasons, plan.objectiveCandidates, options.dryRun);
+
+  const changed = plan.handoff !== sources.handoff.text || plan.tasks !== sources.tasks.text;
+  const sourceHashes = { handoff: sha256Hex(sources.handoff.bytes), tasks: sha256Hex(sources.tasks.bytes) };
+  const runsDir = join(root, '.agentos/runs');
+  const stem = `compact-rewrite-${stateHash}`;
+  let bundleName = stem;
+  let reuseArchive = false;
+  if (await exists(join(runsDir, bundleName))) {
+    const manifest = await readJsonSafe(join(runsDir, bundleName, 'manifest.json'));
+    reuseArchive = Boolean(manifest
+      && manifest.source?.['handoff.md']?.sha256 === sourceHashes.handoff
+      && manifest.source?.['tasks.md']?.sha256 === sourceHashes.tasks
+      && await exists(join(runsDir, bundleName, 'handoff.md'))
+      && await exists(join(runsDir, bundleName, 'tasks.md')));
+    if (!reuseArchive) {
+      for (let suffix = 1; await exists(join(runsDir, `${stem}-${suffix}`)); suffix++) bundleName = `${stem}-${suffix}`;
+    }
+  }
+  const bundleRel = `.agentos/runs/${bundleName}`;
+  const bundlePath = join(root, bundleRel);
+
+  const counted = (file: string) => {
+    const list = plan.classification[file];
+    const count = (decision: string) => list.filter((section) => section.decision === decision).length;
+    return `${count('archived')} archived, ${count('live')} live, ${count('preserved')} preserved`;
+  };
+  const delta = plan.sizes.delta;
+  const deltaText = delta === 0 ? '0 chars' : delta < 0 ? `${-delta} chars removed` : `${delta} chars added`;
+  const selected = plan.objectiveCandidates.find((candidate) => candidate.id === plan.selectedObjectiveId);
+  const archivedTotal = plan.classification.handoff.filter((section) => section.decision === 'archived').length
+    + plan.classification.tasks.filter((section) => section.decision === 'archived').length;
+
+  const lines = [
+    `AgentOS compact rewrite${options.dryRun ? ' dry run' : ''}`,
+    `Root: ${root}`,
+    '',
+    'Live context:',
+    `- handoff.md: ${plan.sizes.handoffBefore} chars -> ${plan.sizes.handoffAfter} chars`,
+    `- tasks.md: ${plan.sizes.tasksBefore} chars -> ${plan.sizes.tasksAfter} chars`,
+    `- total: ${plan.sizes.before} chars -> ${plan.sizes.after} chars (${deltaText})`,
+    'Mode: structural rewrite; superseded history moves to the archive (original bytes retained verbatim).',
+    `Selected objective: ${plan.selectedObjectiveId}${selected ? ` (line ${selected.line}): ${selected.heading}` : ''}`,
+  ];
+  if (plan.objectiveCandidates.length > 1) {
+    lines.push('Objective candidates:',
+      ...plan.objectiveCandidates.map((candidate) => `- ${candidate.id} (line ${candidate.line}): ${candidate.heading}`));
+  }
+  lines.push(`Source state: ${stateHash}`,
+    `  bind an apply to this preview with --expect-state ${stateHash}`,
+    '',
+    'Classification:',
+    `- handoff.md: ${counted('handoff')}`,
+    `- tasks.md: ${counted('tasks')}`);
+  if (plan.carriedForward.length) {
+    lines.push(`Carried forward verbatim (constraints found in archived history): ${plan.carriedForward.length} line(s)`,
+      ...plan.carriedForward.map((line) => `  - ${line}`));
+  }
+  if (plan.missing.length) lines.push(`No live source section for: ${plan.missing.join(', ')}`);
+  if (!changed) {
+    lines.push('', 'No changes: live state already matches the canonical rewrite form; nothing was archived or rewritten.');
+  } else {
+    if (!archivedTotal) lines.push('', 'No sections qualified for archival; this rewrite is a structural normalization only.');
+    lines.push('', `${options.dryRun ? 'Would archive' : 'Archived'}: ${bundleRel}/ (handoff.md, tasks.md, manifest.json, README.md)`);
+  }
+
+  if (!options.dryRun && changed) {
+    const created = new Date().toISOString();
+    const manifest = renderRewriteManifest({ root, bundleRel, stateHash, sources, sourceHashes, plan, candidates: plan.objectiveCandidates });
+    const readme = renderRewriteReadme({ stateHash, sources, sourceHashes, created });
+    await withMutationTransaction(async () => {
+      if (!reuseArchive) {
+        await mkdirTracked(bundlePath);
+        for (const [file, name] of [['handoff', 'handoff.md'], ['tasks', 'tasks.md']] as const) {
+          const result = await writeFileExclusiveAtomic(join(bundlePath, name), sources[file].bytes, sources[file].mode || undefined);
+          if (!result.created) throw new Error(`Rewrite archive appeared after planning: ${bundleRel}/${name}; retry without concurrent writers.`);
+        }
+        await writeFileAtomic(join(bundlePath, 'manifest.json'), manifest);
+        await writeFileAtomic(join(bundlePath, 'README.md'), readme);
+        // Verify the archived originals before any live file is replaced.
+        for (const [file, name] of [['handoff', 'handoff.md'], ['tasks', 'tasks.md']] as const) {
+          const archived = await readFile(join(bundlePath, name));
+          if (sha256Hex(archived) !== sourceHashes[file]) {
+            throw new Error(`Rewrite archive verification failed for ${bundleRel}/${name}; live state left unchanged.`);
+          }
+        }
+      }
+      for (const file of ['handoff', 'tasks'] as const) {
+        const current = await readFile(sources[file].path).catch(() => Buffer.alloc(0));
+        if (!current.equals(sources[file].bytes)) throw new Error(`${sources[file].rel} changed during the rewrite; original state restored.`);
+      }
+      await writeFileAtomic(sources.handoff.path, plan.handoff);
+      await writeFileAtomic(sources.tasks.path, plan.tasks);
+      if (await readFile(sources.handoff.path, 'utf8') !== plan.handoff || await readFile(sources.tasks.path, 'utf8') !== plan.tasks) {
+        throw new Error('Rewrite verification failed for live state; restoring the original files.');
+      }
+    });
+    const doctor = await doctorAgentOS({ cwd: root });
+    lines.push('', doctor.text);
+  }
+
+  if (options.dryRun) {
+    lines.push('', '--- Proposed .agentos/handoff.md ---', plan.handoff,
+      '--- Proposed .agentos/tasks.md ---', plan.tasks, '--- End proposed live files ---');
+  }
+
+  return {
+    ok: true,
+    rewrite: true,
+    dryRun: Boolean(options.dryRun),
+    changed,
+    archivePath: bundlePath,
+    archiveRelPath: `${bundleRel}/`,
+    stateHash,
+    sourceHashes,
+    objective: plan.selectedObjectiveId,
+    objectiveCandidates: plan.objectiveCandidates,
+    classification: plan.classification,
+    carriedForward: plan.carriedForward,
+    missing: plan.missing,
+    before: plan.sizes.before,
+    after: plan.sizes.after,
+    proposed: { handoff: plan.handoff, tasks: plan.tasks },
+    text: lines.join('\n'),
+  };
 }
 
 async function linkObsidianAgentOSUnlocked(options: any = {}) {
