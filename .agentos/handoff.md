@@ -2,7 +2,7 @@
 
 ## Current objective
 
-**Version-upgrade migration UX — complete and merged.** All five slices are on `main` (slices 1–2 as `5a3ab0e` / `5bd0e3a`, PR #22 merged as `20a4179` for slices 3–5). Version is `0.5.0`, not yet published to npm. `main` CI is green (Node 20/22/24/26 on Linux, Node 24 on macOS, npm/pnpm/Bun packaged job). Plan: `.agentos/plans/2026-09-14-upgrade-migration-ux.md`.
+**Compaction rewrite shipped; `0.5.0` published to npm.** `agentos compact --rewrite` (opt-in structural compaction with a byte-exact archive) and heading-aware `doctor` diagnostics merged via PR #23 (merge commit `21ff1a4`), on top of the completed migration UX (PR #22 merged as `20a4179`; slices 1–2 as `5a3ab0e` / `5bd0e3a`). Version `0.5.0` went live on 2026-09-15: dist-tag `latest`, shasum `25999ee8e6db6af4647543a8cba475e371e1999d`, `dist.integrity` matched against the local pack, and verified by installing the registry build with Bun and driving blocked → preview → apply → no-op end to end. `main` CI green. Plan: `.agentos/plans/2026-09-14-upgrade-migration-ux.md`.
 
 - Slice 1: `doctor`/`doctor --json` report `migration.{adapters,repoIds,retiredCards,summary}`; `agentos adapters explain <file>` classifies one adapter path.
 - Slice 2: a normalizable repo ID (`frontend_client`) is now a reported, fixable `doctor` problem instead of a parse-time brick, and `agentos doctor --fix --normalize-repo-ids [--dry-run]` renames the key plus its `.agentos/repos/<id>.md` note byte-preservingly in one transaction, leaving an audit note under `.agentos/runs/`.
@@ -10,12 +10,19 @@
 - Slice 4: retired skill cards carry provable eligibility (`src/legacy-skill-shapes.ts` content hashes, generated from this repository's history for all 19 retired IDs); `agentos doctor --fix --prune-retired` removes only provably-generated cards and rebuilds the local-skills index. Forks are reported, never touched.
 - Slice 5: version `0.5.0` with a CHANGELOG entry, a green `bun run release:check` (including `npm publish --dry-run`), a verified packed install at 0.5.0, and a durable end-to-end rehearsal test over one workspace carrying all three upgrade failure classes.
 
+- Compaction (`feat/compact-rewrite`, PR #23): `39b121b` heading recognition + doctor diagnostics, `e0db091` pure rewrite planner, `6de9475` archive-backed apply and CLI, `393569f` docs plus rehearsal and packaged dogfood.
+  - `src/context-sections.ts` recognizes documented heading variants (`## Current objective — 2026-09-15 (latest): …`) through a bounded matcher that refuses prefix over-matching; `doctor` now separates missing, empty and duplicate objectives and prints every duplicate's line.
+  - `src/compact-rewrite.ts` is a pure planner over `live` / `preserved` / `archived`. It keeps the selected objective's original heading, every unfinished task with nested details, unclassified sections verbatim, and carries standing constraints out of archived history. Superseded objectives and explicit history sections are archivable only when they hold no unchecked task block.
+  - `agentos compact --rewrite [--objective <id>] [--expect-state <sha256>]` archives the originals byte-for-byte under `.agentos/runs/compact-rewrite-<sha256>/` (raw files + `manifest.json` + `README.md`), hash-verifies the archive, rechecks the sources, then replaces them inside one mutation transaction. Ambiguity blocks with exit 1 and zero writes.
+  - Verification: 28 new tests (suite 355/355), `bun run smoke` and the npm/pnpm/Bun packaged checks drive blocked → preview → apply → no-op, fault injection proves archive and live-write rollback, and a history-heavy rehearsal shrinks 30,988 → 7,135 chars with every unchecked obligation and constraint still live.
+  - `docs/compaction.md` documents both modes, the retention policy, blocking rules, archive layout and rollback limits.
+
 ## Current state
 
 - Repo: `agentos-for-projects` (single-repo workspace), branch `main`.
-- `main` == `origin/main` at `866e43f49081ce7381544e6feb1294c74da3ad81` (merge of PR #21, `chore/v0.4.0-release`).
-- Package version: `0.4.0`, documented in `CHANGELOG.md` (`## [0.4.0] - 2026-09-14`).
-- Shipped and merged: PR #20 (`feat/catalog-cleanup`, slices 1–5) and PR #21 (`chore/v0.4.0-release`, version bump + CHANGELOG).
+- `main` == `origin/main` at `21ff1a4f49d1eb5972d101f510951a3e08554cc7` (merge of PR #23, `feat/compact-rewrite`).
+- Package version: `0.5.0`, documented in `CHANGELOG.md` (`## [0.5.0] - 2026-09-14`), published to npm on 2026-09-15 as `latest`; registry versions are `0.3.0`, `0.4.0`, `0.5.0`.
+- Shipped and merged: PR #20 (`feat/catalog-cleanup`, slices 1–5), PR #21 (`chore/v0.4.0-release`), PR #22 (`feat/upgrade-migration-ux`, slices 3–5) and PR #23 (`feat/compact-rewrite`).
 - Rolled out to real workspaces: Labahub (`/home/app/www/laundry-pos`) and KargaX (`/home/app/www/kargax/new`), both on the six-agent + 15-skill catalog via `doctor --fix` + `skills add` + manual adapter resolution.
 - Reconciliation (commit `c32b077`, pushed) changed state files only: `.agentos/tasks.md` (post-release rewrite) and this file.
 - Worktree cleanup (this run): `/home/hermes/agentos-catalog-cleanup`, `/home/hermes/agentos-v0.4.0-release`, and `.agentos-for-projects/.worktrees/reliability` were each confirmed clean (0 dirty, 0 staged, 0 untracked) and confirmed merged into `origin/main` before removal. Registry pruned; only the primary checkout remains.
@@ -80,14 +87,14 @@ Branch-wide review of slices 3–5 (independent, read-only) returned **FAIL with
 
 ## Next exact action
 
-Independent review of the slice 1 diff (adapter/CLI/test/README + regenerated `dist/`). If it passes, commit exactly those paths as one scoped commit, then start slice 2 (repo-ID normalization). Do not commit before the review verdict; do not push without asking.
+No release action is pending: `0.5.0` is published and `main` is green. Next is the recorded roadmap work in `.agentos/tasks.md` → `## Next`, starting with the `project.yaml` formatting-fidelity fix on the `doctor --fix` regeneration path (mirror `renameRepoIdKey`'s "refuse when not line-editable" rule). Do not run `compact --rewrite` against a product workspace without an explicit owner request; `agentos compact --rewrite --dry-run` first, always.
 
 ## Open decisions
 
 - ~~Backup sidecar policy~~ — decided (owner, 2026-09-14): always emit the `.agentos.bak` sidecar.
 - ~~Repo-ID normalization default~~ — decided: behind an explicit flag, not automatic in `doctor --fix`.
 - ~~Retired-card cleanup default~~ — decided: report-only by default; pruning is opt-in.
-- ~~Target version~~ — decided: `0.5.0` at slice 5 (new commands/flags, non-breaking).
+- ~~Target version~~ — decided and **shipped**: `0.5.0` (new commands/flags, non-breaking), published 2026-09-15. A `0.6.0` renumber commit exists only on the merged `feat/compact-rewrite` branch (`534f155`) and was not adopted; `main` and the registry both say `0.5.0`.
 - Whether to add stronger OpenCode-native `.opencode` integration later; current fix uses repo-visible `AGENTS.md` pointers.
 - Whether to add proactive quota/risk detection later.
 
