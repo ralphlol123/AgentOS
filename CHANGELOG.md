@@ -2,6 +2,14 @@
 
 All notable changes to AgentOS for Projects are documented here.
 
+## [0.5.1] - 2026-09-15
+
+### Fixed
+
+- **Carried constraints are directives, not prose.** `compact --rewrite` used to carry any archived-history line that merely contained a keyword such as `never` or `protected` anywhere in it, which re-injected long narrative paragraphs into live context (a real workspace pulled ~21 KB of history back in). A line is now carried only when it is short (≤ 200 characters), or when it opens with the directive itself (≤ 600 characters), and bullets are normalized to plain text. Instructions buried inside long narrative lines are no longer carried — they remain in the archive and are listed in the manifest.
+- **Qualified history headings are recognized.** `## Previous objective (superseded) — 2026-09-13: …` and `## Previous (superseded) objective — …` were treated as unclassified and stayed live forever because the parenthetical broke the noun match. They are now history like any other `Previous …` section.
+- **The machine-generated constraints block is re-evaluated on every rewrite.** `## Preserved context` → `### Constraints carried forward from archived history` is re-filtered against the current rule (originals stay in the archive), an emptied block is removed, and stacked bullet markers (`- - text`) written by an earlier version are collapsed to a single bullet. Hand-written content in the same container is never filtered.
+
 ## [0.5.0] - 2026-09-14
 
 ### Compaction
