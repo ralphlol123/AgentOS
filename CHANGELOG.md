@@ -4,6 +4,14 @@ All notable changes to AgentOS for Projects are documented here.
 
 ## [0.5.0] - 2026-09-14
 
+### Compaction
+
+- **Opt-in structural rewrite.** `agentos compact --rewrite` is the first mode that reduces live context. It archives `.agentos/handoff.md` and `.agentos/tasks.md` byte-for-byte under `.agentos/runs/compact-rewrite-<sha256>/` (raw files, `manifest.json`, `README.md`), verifies the archive hashes, rechecks the sources, and only then replaces live state inside the existing mutation transaction. Plain `agentos compact` keeps its conservative checkpoint behaviour.
+- **Nothing active is guessed away.** The selected objective keeps its original heading, every unfinished task keeps its nested details, unclassified sections are re-emitted verbatim under `## Preserved context`, and constraint lines found inside archived history (`do not`, `never`, `requires approval`, `before merging`) are carried forward verbatim. Only superseded objectives and explicit history sections (`Previous …`, `Superseded …`, `Done`) move to the archive, and only when they hold no unchecked task block.
+- **Ambiguity blocks instead of choosing.** With more than one `## Current objective` heading the command lists every candidate with a content-bound id, exits 1, and writes nothing until `--objective <id>` names one. Missing, empty, fenced-broken, non-UTF-8, non-regular, or symlinked live state also refuses with zero writes. `--expect-state <sha256>` binds an apply to the reviewed preview so a context update in between cannot be silently overwritten.
+- **Honest reporting.** Before/after per file, archived/live/preserved counts, carried-forward constraints, and missing canonical sections are printed; growth is reported as growth (`… chars added`) instead of negative savings, and an apply with nothing to archive says it is a structural normalization only. A repeat rewrite of unchanged state is a write-free no-op.
+
+
 ### Migration UX (upgrading an older workspace)
 
 - `doctor` / `doctor --json` report a read-only **migration inventory** — `migration.adapters`, `migration.repoIds`, `migration.retiredCards`, `migration.summary` — so an owner can see everything an older workspace still needs migrated before approving anything. It is report-only: no writes, and no change to doctor's exit status.
@@ -18,6 +26,7 @@ All notable changes to AgentOS for Projects are documented here.
 
 ### Fixed
 
+- `doctor` recognizes documented objective heading variants such as `## Current objective — 2026-09-15 (latest): …` instead of warning that the section is missing. It now distinguishes a missing objective from a present-but-empty one, and reports duplicate objective headings with every source line, without rewriting state from a diagnostic.
 - Repository IDs are written into file paths (`.agentos/repos/<id>.md`) and into generated cards, so they are validated as safe workspace-relative path fragments with a conservative character set; a key like `../../../victim` can no longer create or delete a file outside the workspace.
 - `doctor --fix --normalize-repo-ids` now runs the workspace boundary preflight like every other mutating command, so a symlinked `.agentos/repos` cannot redirect the rename out of the workspace.
 

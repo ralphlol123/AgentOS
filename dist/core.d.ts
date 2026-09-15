@@ -92,6 +92,58 @@ export declare function compactAgentOS(options?: any): Promise<{
         tasks: string;
     };
     text: string;
+} | {
+    ok: boolean;
+    rewrite: boolean;
+    dryRun: boolean;
+    blockedReasons: string[];
+    objectiveCandidates: any[];
+    text: string;
+} | {
+    ok: boolean;
+    rewrite: boolean;
+    text: string;
+    dryRun?: undefined;
+    changed?: undefined;
+    archivePath?: undefined;
+    archiveRelPath?: undefined;
+    stateHash?: undefined;
+    sourceHashes?: undefined;
+    objective?: undefined;
+    objectiveCandidates?: undefined;
+    classification?: undefined;
+    carriedForward?: undefined;
+    missing?: undefined;
+    before?: undefined;
+    after?: undefined;
+    proposed?: undefined;
+} | {
+    ok: boolean;
+    rewrite: boolean;
+    dryRun: boolean;
+    changed: boolean;
+    archivePath: string;
+    archiveRelPath: string;
+    stateHash: string;
+    sourceHashes: {
+        handoff: string;
+        tasks: string;
+    };
+    objective: string;
+    objectiveCandidates: import("./compact-rewrite.js").ObjectiveCandidate[];
+    classification: {
+        handoff: import("./compact-rewrite.js").SectionPlan[];
+        tasks: import("./compact-rewrite.js").SectionPlan[];
+    };
+    carriedForward: string[];
+    missing: string[];
+    before: number;
+    after: number;
+    proposed: {
+        handoff: string;
+        tasks: string;
+    };
+    text: string;
 }>;
 export declare function linkObsidianAgentOS(options?: any): Promise<{
     ok: boolean;

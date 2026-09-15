@@ -6,5 +6,7 @@ export declare function markdownHeadings(text: string): Array<{
     start: number;
     end: number;
 }>;
+/** True when a fence opener is never closed; such sources cannot be split reliably. */
+export declare function hasUnclosedFence(text: string): boolean;
 export declare function markdownSection(text: string, title: string): string | undefined;
 export declare function appendContextRecord(original: string, title: string, body: string): string;

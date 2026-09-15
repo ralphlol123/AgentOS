@@ -244,6 +244,7 @@ agentos doctor --fix [--dry-run] [--adopt-custom-adapters] [--prune-retired]
 agentos doctor --fix --normalize-repo-ids [--dry-run]
 agentos adapters explain <file>
 agentos compact [--dry-run]
+agentos compact --rewrite [--objective <id>] [--expect-state <sha256>] [--dry-run]
 agentos link-obsidian [--vault <path> --dest <folder> --link <note> --create]
 agentos obsidian link-workspace --vault <path> --dest <folder> [--create] [--dry-run]
 agentos obsidian status
@@ -279,6 +280,20 @@ An unchanged repeat is a write-free no-op, verified against the complete referen
 **Trade-off:** this safety-first command is an archival checkpoint, not an automatic size reducer. New links increase live size; reducing historical prose requires a separate reviewed edit. It does not repair malformed Markdown (for example, an unclosed source fence can render an appended link as literal text). Command output always states this rendering limitation and prints direct archive paths with both anchors, outside the proposed source text. Review the full preview before applying.
 
 Archive creation, live replacements, and creation of a missing `runs/` directory share the existing rollback transaction. An in-process archive/state write failure restores original bytes, permission bits, and existence, with no temporary artifacts when rollback succeeds. This is best-effort rollback, not crash-safe multi-file atomicity or protection against concurrent writers; do not run writers concurrently in one checkout.
+
+## Compaction rewrite (opt-in)
+
+```bash
+agentos compact --rewrite --dry-run
+agentos compact --rewrite --objective <id>
+agentos compact --rewrite --objective <id> --expect-state <sha256>
+```
+
+Plain `agentos compact` stays the conservative checkpoint. `--rewrite` is the only mode that *reduces* live context, and it is opt-in, per-run, and reversible. It archives `.agentos/handoff.md` and `.agentos/tasks.md` byte-for-byte under `.agentos/runs/compact-rewrite-<sha256>/` (`handoff.md`, `tasks.md`, `manifest.json`, `README.md`) and only then replaces them with a canonical form. Full behavior, blocking rules, and the section policy are documented in [`docs/compaction.md`](docs/compaction.md).
+
+The rewrite is structural, never a summary: no prose is paraphrased, no section is invented, and no completed-work claim is derived from a date. These stay live unconditionally — the selected objective (with its original heading), scope, protected paths and constraints, blockers and warnings, open decisions, every unfinished task with its nested details, and every section the planner could not classify. Only superseded objectives and explicit history sections (`Previous …`, `Superseded …`, `Done`, `History`) move to the archive, and only when they contain no unchecked task block. Constraint-looking lines inside archived history (`do not`, `never`, `requires approval`, `before merging`, …) are carried forward verbatim, with their source recorded.
+
+Ambiguity blocks instead of guessing. With two or more `## Current objective` headings — including dated variants such as `## Current objective — 2026-09-15 (latest): …` — the command reports every candidate with a content-bound id, refuses with exit code 1, and writes nothing until you pass `--objective <id>`. Missing, empty, or malformed state (unclosed fence, invalid UTF-8, non-regular file, symlinked live file) also refuses without writing. `--expect-state` binds an apply to the exact preview you reviewed, so a context update between review and apply cannot be silently overwritten. A second rewrite of unchanged state is a write-free no-op, and the command reports growth as growth instead of claiming savings.
 
 ## Run handoff notes
 
