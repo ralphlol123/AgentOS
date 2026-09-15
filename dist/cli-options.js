@@ -1,5 +1,5 @@
-const booleans = new Set(['new', 'existing', 'dry-run', 'yes', 'y', 'detected', 'replace', 'preserve', 'fix', 'json', 'create', 'refresh', 'installed', 'normalize-repo-ids', 'adopt-custom-adapters', 'prune-retired']);
-const values = new Set(['agents', 'engine', 'role', 'repo', 'worktree', 'phase', 'reason', 'vault', 'dest', 'link', 'mode', 'name', 'type', 'expected-sha256']);
+const booleans = new Set(['new', 'existing', 'dry-run', 'yes', 'y', 'detected', 'replace', 'preserve', 'fix', 'json', 'create', 'refresh', 'installed', 'normalize-repo-ids', 'adopt-custom-adapters', 'prune-retired', 'rewrite']);
+const values = new Set(['agents', 'engine', 'role', 'repo', 'worktree', 'phase', 'reason', 'vault', 'dest', 'link', 'mode', 'name', 'type', 'expected-sha256', 'objective', 'expect-state']);
 export function parseFlagsAndPositionals(args) {
     const flags = {}, positionals = [];
     for (let i = 0; i < args.length; i++) {
@@ -33,7 +33,7 @@ export function parseFlagsAndPositionals(args) {
 export function validateCommandFlags(command, flags) {
     const allowed = {
         init: ['new', 'existing', 'agents', 'dry-run', 'yes', 'y', 'refresh'], status: [], handoff: [], prompt: [],
-        run: ['engine', 'role', 'repo', 'worktree', 'phase', 'reason', 'dry-run'], doctor: ['fix', 'json', 'normalize-repo-ids', 'adopt-custom-adapters', 'prune-retired', 'dry-run'], compact: ['dry-run'],
+        run: ['engine', 'role', 'repo', 'worktree', 'phase', 'reason', 'dry-run'], doctor: ['fix', 'json', 'normalize-repo-ids', 'adopt-custom-adapters', 'prune-retired', 'dry-run'], compact: ['dry-run', 'rewrite', 'objective', 'expect-state'],
         'link-obsidian': ['vault', 'dest', 'link', 'create', 'dry-run'], obsidian: ['vault', 'dest', 'create', 'dry-run'], adapters: [],
         skills: ['detected', 'mode', 'dry-run', 'replace', 'installed'], agents: ['name', 'dry-run', 'replace', 'installed'],
         templates: ['type', 'name', 'mode', 'dry-run', 'yes', 'replace', 'expected-sha256'], migrate: ['preserve', 'dry-run'],
@@ -45,5 +45,12 @@ export function validateCommandFlags(command, flags) {
         throw new Error('Choose either --new or --existing.');
     if (flags.mode && !['summary', 'full'].includes(String(flags.mode)))
         throw new Error('--mode must be summary or full.');
+    if (flags.objective && !flags.rewrite)
+        throw new Error('--objective requires --rewrite.');
+    if (flags['expect-state'] && !flags.rewrite)
+        throw new Error('--expect-state requires --rewrite.');
+    if (flags['expect-state'] && !/^[a-f0-9]{64}$/.test(String(flags['expect-state']))) {
+        throw new Error('--expect-state requires the sha256 source state printed by compact --rewrite --dry-run.');
+    }
 }
 //# sourceMappingURL=cli-options.js.map

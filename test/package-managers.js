@@ -73,6 +73,28 @@ for (const manager of managers) {
   invoke(['init', '--new']);
   invoke(['skills', 'add', 'core-pack,frontend-pack,backend-pack,fullstack-pack,github-pack']);
   invoke(['templates', 'copy', 'skill:core/code-review', '--replace']);
+  // Packed/installed CLI must expose the opt-in compaction rewrite end to end.
+  await writeFile(join(cwd, '.agentos/handoff.md'), ['# Handoff', '', '## Scope', '', '- Workspace kind: single-repo', '',
+    '## Current objective — 2026-09-15 (latest): packaged check', '', 'Do the work.', '',
+    '## Current objective — 2026-09-01', '', 'Superseded narrative.', '',
+    '## Previous objective — 2026-08-01', '', 'Old narrative.', '',
+    '## Known failures', '', '- Do not treat flaky CI as passing.', ''].join('\n'));
+  await writeFile(join(cwd, '.agentos/tasks.md'), ['# Tasks', '', '## Now', '', '- [ ] Do the work.', '',
+    '## Done', '', '- [x] Old item.', ''].join('\n'));
+  const ambiguous = spawnSync(process.execPath, [installedCli, 'compact', '--rewrite'], { cwd, encoding: 'utf8' });
+  if (ambiguous.status !== 1) throw new Error(`${manager.name}: an ambiguous rewrite must exit 1`);
+  const [packedObjective] = [...new Set(ambiguous.stdout.match(/obj-[a-f0-9]{10}/g) ?? [])];
+  if (!packedObjective) throw new Error(`${manager.name}: blocked rewrite did not report objective candidates`);
+  const rewritePreview = invoke(['compact', '--rewrite', '--objective', packedObjective, '--dry-run']);
+  if (!/Would archive: \.agentos\/runs\/compact-rewrite-[a-f0-9]{64}\//.test(rewritePreview)) {
+    throw new Error(`${manager.name}: rewrite preview did not report the archive target\n${rewritePreview}`);
+  }
+  invoke(['compact', '--rewrite', '--objective', packedObjective]);
+  const rewritten = await readFile(join(cwd, '.agentos/handoff.md'), 'utf8');
+  if (rewritten.includes('Superseded narrative.')) throw new Error(`${manager.name}: superseded history stayed live`);
+  if (!rewritten.includes('Do not treat flaky CI as passing.')) throw new Error(`${manager.name}: live warnings were lost`);
+  const bundles = (await readdir(join(cwd, '.agentos/runs'), { withFileTypes: true })).filter(entry => entry.name.startsWith('compact-rewrite-'));
+  if (bundles.length !== 1) throw new Error(`${manager.name}: expected one rewrite archive bundle, saw ${bundles.length}`);
   let references = 0, cards = 0;
   const packageRoot = join(cwd, 'node_modules/agentos-for-projects');
   for (const category of ['core', 'frontend', 'backend', 'fullstack', 'github']) {

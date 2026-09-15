@@ -28,6 +28,21 @@ export function markdownHeadings(text) {
     }
     return headings;
 }
+/** True when a fence opener is never closed; such sources cannot be split reliably. */
+export function hasUnclosedFence(text) {
+    let fence;
+    for (const raw of text.match(/[^\n]*\n|[^\n]+$/g) || []) {
+        const line = raw.replace(/\r?\n$/, '');
+        const marker = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+        if (fence) {
+            if (marker && marker[1][0] === fence.char && marker[1].length >= fence.length && !marker[2].trim())
+                fence = undefined;
+        }
+        else if (marker)
+            fence = { char: marker[1][0], length: marker[1].length };
+    }
+    return Boolean(fence);
+}
 export function markdownSection(text, title) {
     const headings = markdownHeadings(text);
     const index = headings.findIndex(h => h.level === 2 && h.title === title);
