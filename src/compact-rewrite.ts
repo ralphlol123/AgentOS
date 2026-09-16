@@ -105,7 +105,19 @@ const HISTORY_NOUNS = /^(objective|objectives|state|status|scope|work|notes|note
  */
 const CONSTRAINT_LINE = /\b(?:do not|don't|never|must not|must never|requires? (?:explicit )?approval|without (?:explicit )?approval|only with approval|await(?:s|ing)? (?:approval|explicit approval)|before (?:touching|merging|deploying|committing|pushing|releasing)|protected(?: path| file| files| branch| repo)?|do not touch|no secrets|no migrations)\b/i;
 /** A line that opens with the directive, rather than prose that merely mentions one. */
-const DIRECTIVE_START = /^(?:[-*+]|\d+\.)?\s*(?:\*\*|__)?(?:do not|don't|never|must not|must never|always|only|requires?|before|await|keep|protected|no)\b/i;
+const DIRECTIVE_START = /^(?:[-*+]|\d+\.)?\s*(?:\*{1,3}|_{1,3})?(?:do not|don't|never|must not|must never|always|only|requires?|before|await|keep|protected|no)\b/i;
+/**
+ * A subject followed by an obligation near the start of the line — `Migrations must
+ * not be edited in place`, `Approval from the owner is required before merging`, and
+ * longer subjects like `The production database in staging must never be synced from
+ * dumps` — is an instruction even though it does not open on the directive. The modal
+ * has to sit with its subject rather than anywhere in the line (that is the
+ * keyword-anywhere rule this heuristic exists to avoid), which is why the window is
+ * bounded rather than absent. A line admitted this way gets the prose length limit,
+ * not the directive one: an obligation phrased mid-sentence is not a licence for a
+ * paragraph.
+ */
+const SUBJECT_MODAL = /^\S+(?:\s+\S+){0,6}\s+(?:must(?:\s+(?:not|never|be|only))?|do not|don't|is required|are required|requires?|without approval|only with approval)\b/i;
 /** Prose that happens to contain a keyword is not a standing constraint. */
 const PROSE_LINE_LIMIT = 200;
 /** A directive that opens the line may be longer, but not unbounded. */
@@ -114,17 +126,42 @@ const DIRECTIVE_LINE_LIMIT = 600;
 const CARRIED_HEADING = 'Constraints carried forward from archived history';
 const HISTORY_NOTE = 'Archived material is preserved verbatim, with byte hashes, under `.agentos/runs/` archives.';
 
+/** A line that reads as an instruction: it opens on the directive or ends a sentence. */
+const SENTENCE_END = /[.!?]$/;
+/**
+ * A trailing function word (or an unclosed parenthesis) means the line is a
+ * wrapped fragment, not an instruction — `… and the note said the` is prose.
+ * Deliberately excludes words that can legitimately end an instruction
+ * (`only`, `also`, `just`, …): those dropped real constraints such as
+ * `Never run migrations on production, staging only` and bought nothing on real
+ * data, where this conjunct is otherwise what catches a truncated line.
+ */
+const DANGLING_TAIL = /(?:\b(?:a|an|the|and|or|but|nor|yet|so|that|which|who|whom|whose|this|these|those|it|its|they|them|their|he|she|his|her|we|our|you|your|to|of|in|on|at|by|for|with|from|into|onto|over|under|about|as|than|then|when|where|while|since|because|if|unless|until|after|before|during|between|through|against|via|is|are|was|were|be|been|being|has|have|had|do|does|did|can|could|may|might|must|shall|should|will|would|not|no|never)\b|\([^)]*)$/i;
+
 /**
  * A standing constraint is a short directive, not narrative that happens to
  * contain a keyword: an archived history paragraph mentioning "never" is history.
  * Bullets are stripped so carried lines carry plain text and re-filter cleanly.
+ *
+ * The shape matters as much as the keyword. Reclaiming a history block hands this
+ * rule every soft-wrapped line of it, and a fragment that merely *contains* a
+ * keyword — or begins with `never` because the previous line ended mid-sentence —
+ * re-injects prose into live context. So an instruction must open with an
+ * uppercase character (not a code span, which means it is a continuation), must
+ * either open on the directive itself or end a sentence, and must not trail off
+ * on a function word.
  */
 function isCarriedConstraint(line: string): boolean {
   const trimmed = line.trim();
   if (!trimmed || !CONSTRAINT_LINE.test(trimmed)) return false;
   const body = trimmed.replace(/^(?:[-*+]|\d+\.)\s+/, '').trim();
   if (!body) return false;
-  return DIRECTIVE_START.test(trimmed)
+  const plain = body.replace(/^[*_\s]+/, '').replace(/[*_\s]+$/, '');
+  if (!/^[A-Z]/.test(plain)) return false;
+  const directive = DIRECTIVE_START.test(trimmed);
+  if (!directive && !SUBJECT_MODAL.test(plain) && !SENTENCE_END.test(plain)) return false;
+  if (DANGLING_TAIL.test(plain)) return false;
+  return directive
     ? body.length <= DIRECTIVE_LINE_LIMIT
     : body.length <= PROSE_LINE_LIMIT;
 }

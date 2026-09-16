@@ -47,10 +47,27 @@ agentos compact --rewrite --objective <id> --expect-state <sha256>
   whatever is nested inside it, exactly as archiving a level-2 history section always has.
 - Standing constraints found inside archived history (`do not`, `never`,
   `must not`, `requires approval`, `before merging`, …), carried forward verbatim with a
-  `## Preserved context` block that names their origin. A line qualifies only when it is a
-  short directive (≤ 200 characters) or opens with the directive itself (≤ 600 characters):
-  narrative paragraphs that merely mention a keyword are history, not constraints, and stay
-  in the archive. The generated block is re-evaluated on every rewrite — lines that no longer
+  `## Preserved context` block that names their origin. A line qualifies only when it is short
+  (≤ 200 characters) or opens on the directive itself (≤ 600 characters): narrative paragraphs
+  that merely mention a keyword are history, not constraints, and stay in the archive.
+  Qualifying is also a matter of **shape**, because reclaiming a history block hands this rule
+  every soft-wrapped line of it — a line that merely *starts* with `never` because the previous
+  line ended mid-sentence is prose, not an instruction. So a carried line must open on an
+  uppercase character; must be either an explicit obligation or a sentence ending in `.`/`!`/`?`;
+  and must not trail off on a function word (`… and the note said the`) or an unclosed
+  parenthesis. An explicit obligation is a line that opens on the directive, or that states a
+  subject followed within six words by `must`, `must not`, `must never`, `do not`, `don't`,
+  `requires`, `is required`, `are required`, `without approval` or `only with approval` — as in
+  `Migrations must not be edited in place` or `The production database in staging must never be
+  synced from dumps`. That window is a heuristic, not a parser: an obligation phrased after its
+  subject is capped at the prose length rather than the directive length, and a line that opens
+  as an obligation and then continues as reported speech (`Guards must not be relied on here,
+  the ticket explained …`) will be carried. Two further limits are deliberate, and such a line
+  stays in the archive rather than being re-injected: a line that opens on a code span is read as
+  a continuation of the previous line, and a line ending on a conjunction is read as truncated.
+  On the real workspace that produced this rule, one archived block went from 22 carried lines
+  to the 3 genuine directives.
+  The generated block is re-evaluated on every rewrite — lines that no longer
   qualify are dropped from live context (their originals remain in the archive), and an
   emptied block is removed. Constraint lines carried out of newly archived nested history
   extend that block rather than creating a second one, and the merge ignores fenced samples.
