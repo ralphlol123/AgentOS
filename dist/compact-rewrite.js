@@ -38,7 +38,7 @@ const TASKS_SECTION_ROLES = [
     { role: 'preserved', canonical: 'Preserved context', aliases: ['Preserved context'] },
     { role: 'history', canonical: 'History', aliases: ['History'] },
 ];
-const HISTORY_WORDS = /^(previous|superseded|past|old|historic|archived|earlier)$/i;
+const HISTORY_WORDS = /^(previous|prior|superseded|past|old|historic|archived|earlier)$/i;
 const HISTORY_HEADINGS = /^(history|done|completed|completed work|archived work|archive|run log|run logs)$/i;
 const HISTORY_NOUNS = /^(objective|objectives|state|status|scope|work|notes|note|run|runs|sprint|session|iteration|step|log|logs|context|tasks|next exact action|next action)$/i;
 /**
@@ -49,17 +49,48 @@ const HISTORY_NOUNS = /^(objective|objectives|state|status|scope|work|notes|note
  */
 const CONSTRAINT_LINE = /\b(?:do not|don't|never|must not|must never|requires? (?:explicit )?approval|without (?:explicit )?approval|only with approval|await(?:s|ing)? (?:approval|explicit approval)|before (?:touching|merging|deploying|committing|pushing|releasing)|protected(?: path| file| files| branch| repo)?|do not touch|no secrets|no migrations)\b/i;
 /** A line that opens with the directive, rather than prose that merely mentions one. */
-const DIRECTIVE_START = /^(?:[-*+]|\d+\.)?\s*(?:\*\*|__)?(?:do not|don't|never|must not|must never|always|only|requires?|before|await|keep|protected|no)\b/i;
+const DIRECTIVE_START = /^(?:[-*+]|\d+\.)?\s*(?:\*{1,3}|_{1,3})?(?:do not|don't|never|must not|must never|always|only|requires?|before|await|keep|protected|no)\b/i;
+/**
+ * A subject followed by an obligation near the start of the line — `Migrations must
+ * not be edited in place`, `Approval from the owner is required before merging`, and
+ * longer subjects like `The production database in staging must never be synced from
+ * dumps` — is an instruction even though it does not open on the directive. The modal
+ * has to sit with its subject rather than anywhere in the line (that is the
+ * keyword-anywhere rule this heuristic exists to avoid), which is why the window is
+ * bounded rather than absent. A line admitted this way gets the prose length limit,
+ * not the directive one: an obligation phrased mid-sentence is not a licence for a
+ * paragraph.
+ */
+const SUBJECT_MODAL = /^\S+(?:\s+\S+){0,6}\s+(?:must(?:\s+(?:not|never|be|only))?|do not|don't|is required|are required|requires?|without approval|only with approval)\b/i;
 /** Prose that happens to contain a keyword is not a standing constraint. */
 const PROSE_LINE_LIMIT = 200;
 /** A directive that opens the line may be longer, but not unbounded. */
 const DIRECTIVE_LINE_LIMIT = 600;
 const CARRIED_HEADING = 'Constraints carried forward from archived history';
 const HISTORY_NOTE = 'Archived material is preserved verbatim, with byte hashes, under `.agentos/runs/` archives.';
+/** A line that reads as an instruction: it opens on the directive or ends a sentence. */
+const SENTENCE_END = /[.!?]$/;
+/**
+ * A trailing function word (or an unclosed parenthesis) means the line is a
+ * wrapped fragment, not an instruction — `… and the note said the` is prose.
+ * Deliberately excludes words that can legitimately end an instruction
+ * (`only`, `also`, `just`, …): those dropped real constraints such as
+ * `Never run migrations on production, staging only` and bought nothing on real
+ * data, where this conjunct is otherwise what catches a truncated line.
+ */
+const DANGLING_TAIL = /(?:\b(?:a|an|the|and|or|but|nor|yet|so|that|which|who|whom|whose|this|these|those|it|its|they|them|their|he|she|his|her|we|our|you|your|to|of|in|on|at|by|for|with|from|into|onto|over|under|about|as|than|then|when|where|while|since|because|if|unless|until|after|before|during|between|through|against|via|is|are|was|were|be|been|being|has|have|had|do|does|did|can|could|may|might|must|shall|should|will|would|not|no|never)\b|\([^)]*)$/i;
 /**
  * A standing constraint is a short directive, not narrative that happens to
  * contain a keyword: an archived history paragraph mentioning "never" is history.
  * Bullets are stripped so carried lines carry plain text and re-filter cleanly.
+ *
+ * The shape matters as much as the keyword. Reclaiming a history block hands this
+ * rule every soft-wrapped line of it, and a fragment that merely *contains* a
+ * keyword — or begins with `never` because the previous line ended mid-sentence —
+ * re-injects prose into live context. So an instruction must open with an
+ * uppercase character (not a code span, which means it is a continuation), must
+ * either open on the directive itself or end a sentence, and must not trail off
+ * on a function word.
  */
 function isCarriedConstraint(line) {
     const trimmed = line.trim();
@@ -68,7 +99,15 @@ function isCarriedConstraint(line) {
     const body = trimmed.replace(/^(?:[-*+]|\d+\.)\s+/, '').trim();
     if (!body)
         return false;
-    return DIRECTIVE_START.test(trimmed)
+    const plain = body.replace(/^[*_\s]+/, '').replace(/[*_\s]+$/, '');
+    if (!/^[A-Z]/.test(plain))
+        return false;
+    const directive = DIRECTIVE_START.test(trimmed);
+    if (!directive && !SUBJECT_MODAL.test(plain) && !SENTENCE_END.test(plain))
+        return false;
+    if (DANGLING_TAIL.test(plain))
+        return false;
+    return directive
         ? body.length <= DIRECTIVE_LINE_LIMIT
         : body.length <= PROSE_LINE_LIMIT;
 }
@@ -85,16 +124,19 @@ function splitDocument(text) {
     const preamble = headings.length ? text.slice(0, headings[0].start) : text;
     const sections = headings.map((heading, index) => {
         const end = headings[index + 1]?.start ?? text.length;
+        const rawBody = text.slice(heading.end, end);
+        const trimmed = rawBody.trim();
         return {
             heading: heading.title,
             line: lineNumberAt(text, heading.start),
             raw: text.slice(heading.start, end).trimEnd(),
-            body: text.slice(heading.end, end).trim(),
+            body: trimmed,
+            bodyStart: heading.end + (rawBody.length - rawBody.replace(/^\s+/, '').length),
             suffix: '',
             history: false,
         };
     });
-    return { preamble, nl, sections };
+    return { preamble, nl, sections, text };
 }
 function roleFor(title, roles) {
     for (const def of roles) {
@@ -106,13 +148,17 @@ function roleFor(title, roles) {
     }
     return null;
 }
-/** `Previous objective (superseded) — 2026-09-13: …` is the same section as `Previous objective`. */
+/**
+ * `Previous objective (superseded) — 2026-09-13: …` is the same section as
+ * `Previous objective`. Parenthetical qualifiers are stripped *before* the
+ * date/qualifier cut: cutting first leaves the remainder as
+ * `objective (2026-09-11`, which fails the noun list and quietly keeps a
+ * superseded block live forever (the shape the real workspace contains most).
+ */
 function historyRemainder(rest) {
     return rest.trim()
-        .replace(/^\([^)]*\)\s*/, '')
+        .replace(/\s*\([^)]*\)/g, ' ')
         .replace(/[—–:.,].*$/, '')
-        .trim()
-        .replace(/\s*\([^)]*\)$/, '')
         .trim();
 }
 function isHistoryHeading(title) {
@@ -194,6 +240,135 @@ function refilterCarriedBlock(body, nl) {
             out.push(`### ${CARRIED_HEADING}`, '', ...kept);
     }
     return out.join(nl).trim();
+}
+/**
+ * Which lines sit outside fenced code blocks. Fenced text is content, never
+ * structure: a code sample that happens to quote a generated heading must not
+ * be mistaken for that heading.
+ */
+function unfencedLines(lines) {
+    const outside = [];
+    let fence;
+    for (const raw of lines) {
+        const marker = raw.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+        if (fence) {
+            if (marker && marker[1][0] === fence.char && marker[1].length >= fence.length && !marker[2].trim())
+                fence = undefined;
+            outside.push(false);
+            continue;
+        }
+        if (marker) {
+            fence = { char: marker[1][0], length: marker[1].length };
+            outside.push(false);
+            continue;
+        }
+        outside.push(true);
+    }
+    return outside;
+}
+/**
+ * Add newly carried constraint lines to the container's generated constraints
+ * block instead of emitting a duplicate one. Hand-written bullets are only read
+ * for de-duplication; they are never rewritten, and fenced samples are ignored.
+ */
+function mergeCarriedBlock(body, lines, nl) {
+    if (!lines.length)
+        return body;
+    const parts = body.split(/\r?\n/);
+    const outside = unfencedLines(parts);
+    const present = new Set(parts
+        .filter((line, index) => outside[index] && /^\s*[-*+]\s+/.test(line))
+        .map((line) => line.trim().replace(/^(?:[-*+]\s+)+/, '').trim()));
+    const additions = lines.filter((line) => !present.has(line)).map((line) => `- ${line}`);
+    if (!additions.length)
+        return body;
+    const at = parts.findIndex((line, index) => outside[index] && line.trim() === `### ${CARRIED_HEADING}`);
+    if (at < 0) {
+        const block = [`### ${CARRIED_HEADING}`, '', ...additions].join(nl);
+        return body ? `${body}${nl}${nl}${block}` : block;
+    }
+    // Extend the block already in place: skip its blank line, then its bullet run.
+    let cursor = at + 1;
+    while (cursor < parts.length && !parts[cursor].trim())
+        cursor++;
+    const first = cursor;
+    while (cursor < parts.length && outside[cursor] && /^\s*[-*+]\s+/.test(parts[cursor]))
+        cursor++;
+    const head = parts.slice(0, cursor);
+    if (first === cursor && first === at + 1)
+        head.push('');
+    return [...head, ...additions, ...parts.slice(cursor)].join(nl);
+}
+/**
+ * Re-classify the body of a `## Preserved context` container.
+ *
+ * Section scanning splits level-2 headings only, and the container is a live
+ * container, so history an earlier build demoted to `###` could never be
+ * classified again: it stayed live forever. Archivable blocks are removed here
+ * (after their constraint lines are carried forward) and reported like any
+ * other history entry, so the original bytes remain in the run archive.
+ * Content that is not explicit history — or that still holds an unchecked task
+ * block at any depth — is kept, with block separators normalized to a single
+ * blank line, and a container with nothing to archive is returned unchanged. A
+ * repeat run therefore rewrites nothing once no further block becomes archivable;
+ * a hand-edited container whose shallowest nested block is not itself archivable
+ * (a deeper block above a later sibling, or a generated constraints block that
+ * re-filtering removes) can expose one on a later pass, or never, and every
+ * removal is still planned and reported.
+ */
+function archiveNestedHistory(section, file, document, roles) {
+    const body = section.body;
+    const headings = markdownHeadings(body).filter((heading) => heading.level > 2);
+    if (!headings.length)
+        return { body, plans: [], carried: [] };
+    // Deeper headings stay attached to the shallowest heading that owns them, so a
+    // `- [ ]` under an intervening `####` blocks archival of its parent heading
+    // instead of being split off and orphaned from it.
+    const level = Math.min(...headings.map((heading) => heading.level));
+    const siblings = headings.filter((heading) => heading.level === level);
+    const blocks = siblings.map((heading, index) => {
+        const end = siblings[index + 1]?.start ?? body.length;
+        return {
+            title: heading.title,
+            line: lineNumberAt(document.text, section.bodyStart + heading.start),
+            raw: body.slice(heading.start, end).trimEnd(),
+            body: body.slice(heading.end, end).trim(),
+        };
+    });
+    const archivable = blocks.filter((block) => {
+        const nestedRole = roleFor(block.title, roles)?.role;
+        // Live containers stay whole, exactly as level-2 classification treats them.
+        if (nestedRole === 'preserved' || nestedRole === 'history')
+            return false;
+        return isHistoryHeading(block.title) && !hasUnresolvedWork(block.raw);
+    });
+    if (!archivable.length)
+        return { body, plans: [], carried: [] };
+    const removed = new Set(archivable);
+    // Bound the lead-in at the first SIBLING, not the first heading of any level: a
+    // deeper heading before it owns no sibling span, and bounding at it would drop
+    // that span from live context without reporting it.
+    const segments = [body.slice(0, siblings[0].start).trim()];
+    for (const block of blocks)
+        if (!removed.has(block))
+            segments.push(block.raw);
+    const plans = [];
+    const carried = [];
+    for (const block of archivable) {
+        const lines = constraintLines(block.body);
+        for (const line of lines)
+            if (!carried.includes(line))
+                carried.push(line);
+        plans.push({
+            file,
+            heading: block.title,
+            line: block.line,
+            role: 'history',
+            decision: 'archived',
+            reason: `history nested under a preserved container with no unresolved task blocks${lines.length ? `; ${lines.length} constraint line(s) carried forward verbatim` : ''}`,
+        });
+    }
+    return { body: segments.filter(Boolean).join(`${document.nl}${document.nl}`).trim(), plans, carried };
 }
 function objectiveIdFor(section) {
     return `obj-${createHash('sha256').update(section.raw).digest('hex').slice(0, 10)}`;
@@ -280,6 +455,16 @@ export function planCompactRewrite(input) {
     const carriedByFile = { handoff: [], tasks: [] };
     const classification = { handoff: [], tasks: [] };
     const missing = [];
+    // Planned once per preserved container: the classification reason must say what
+    // actually happened to it, and the render pass reuses the same plan.
+    const nestedPlans = new Map();
+    for (const [file, roles] of [['handoff', HANDOFF_SECTION_ROLES], ['tasks', TASKS_SECTION_ROLES]]) {
+        for (const section of documents[file].sections) {
+            if (section.role !== 'preserved')
+                continue;
+            nestedPlans.set(section, archiveNestedHistory(section, file, documents[file], roles));
+        }
+    }
     for (const file of ['handoff', 'tasks']) {
         for (const section of documents[file].sections) {
             let outcome;
@@ -292,7 +477,12 @@ export function planCompactRewrite(input) {
                     outcome = { decision: 'archived', reason: 'superseded objective; explicit selection resolved which objective is live' };
             }
             else if (section.role === 'preserved') {
-                outcome = { decision: 'preserved', reason: 'live preserved-context container re-emitted verbatim' };
+                // Never claim more fidelity than this run can prove: the container's body is
+                // re-read (and its generated constraints block may be re-filtered), whether or
+                // not anything nested turned out archivable.
+                outcome = nestedPlans.get(section)?.plans.length
+                    ? { decision: 'preserved', reason: 'live preserved-context container re-read; nested history archived' }
+                    : { decision: 'preserved', reason: 'live preserved-context container re-read; nothing nested was archivable' };
             }
             else if (section.role === 'history') {
                 outcome = { decision: 'preserved', reason: 'live history container re-emitted with new archive entries' };
@@ -344,6 +534,7 @@ export function planCompactRewrite(input) {
             entries.push({ heading, body });
         }
         const preservedBlocks = [];
+        let containerIndex = -1;
         for (const section of document.sections) {
             if (outcomes.get(section)?.decision !== 'preserved')
                 continue;
@@ -351,14 +542,27 @@ export function planCompactRewrite(input) {
                 continue;
             if (section.role === 'history')
                 continue;
-            // The `## Preserved context` container itself is re-emitted with its own body below;
-            // a generated constraints block inside it is re-evaluated against the current rule.
-            preservedBlocks.push(section.role === 'preserved'
-                ? refilterCarriedBlock(section.body, document.nl)
-                : `### ${section.heading}${document.nl}${document.nl}${section.body}`);
+            if (section.role !== 'preserved') {
+                preservedBlocks.push(`### ${section.heading}${document.nl}${document.nl}${section.body}`);
+                continue;
+            }
+            // The `## Preserved context` container is re-emitted with its own body, minus
+            // any nested history that becomes archivable once the container is re-read.
+            const nested = nestedPlans.get(section) ?? { body: section.body, plans: [], carried: [] };
+            for (const plan of nested.plans)
+                classification[file].push(plan);
+            for (const line of nested.carried)
+                if (!carriedByFile[file].includes(line))
+                    carriedByFile[file].push(line);
+            containerIndex = preservedBlocks.push(refilterCarriedBlock(nested.body, document.nl)) - 1;
         }
         if (carriedByFile[file].length) {
-            preservedBlocks.push(`### ${CARRIED_HEADING}${document.nl}${document.nl}${carriedByFile[file].map((line) => `- ${line}`).join(document.nl)}`);
+            if (containerIndex >= 0) {
+                preservedBlocks[containerIndex] = mergeCarriedBlock(preservedBlocks[containerIndex], carriedByFile[file], document.nl);
+            }
+            else {
+                preservedBlocks.push(`### ${CARRIED_HEADING}${document.nl}${document.nl}${carriedByFile[file].map((line) => `- ${line}`).join(document.nl)}`);
+            }
         }
         const preservedBody = preservedBlocks.filter(Boolean).join(`${document.nl}${document.nl}`);
         if (preservedBody)
