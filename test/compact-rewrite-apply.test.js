@@ -93,18 +93,23 @@ test('ambiguous objective blocks the rewrite with exit 1 and zero writes', async
   assert.deepEqual(await snapshot(root), before);
 });
 
-test('dry run previews exact live files and writes nothing', async (t) => {
+test('dry run keeps exact live proposals in the API and prints a concise CLI summary', async (t) => {
   const { root } = await fixture(t);
   const before = await snapshot(root);
   const objective = objectiveIdFor(root);
+  const plan = await compactAgentOS({ cwd: root, rewrite: true, objective, dryRun: true });
+  assert.equal(plan.ok, true, plan.text);
+  assert.ok(plan.proposed.handoff.includes('## Current objective — 2026-09-15 (latest): AUM work merged'));
+  assert.equal(plan.proposed.handoff.includes('Superseded narrative that must leave live context.'), false);
+  assert.equal(plan.objectiveCandidates.length, 2);
+
   const preview = cli(root, ['compact', '--rewrite', '--objective', objective, '--dry-run']);
   assert.equal(preview.status, 0, preview.stdout + preview.stderr);
   assert.match(preview.stdout, /dry run/i);
-  assert.match(preview.stdout, /--- Proposed \.agentos\/handoff\.md ---/);
-  assert.ok(preview.stdout.includes('## Current objective — 2026-09-15 (latest): AUM work merged'));
-  assert.equal(preview.stdout.includes('Superseded narrative that must leave live context.'), false);
+  assert.match(preview.stdout, /Mode: structural rewrite/);
   assert.match(preview.stdout, /Would archive: \.agentos\/runs\/compact-rewrite-[a-f0-9]{64}\//);
-  assert.equal(candidateIds(preview.stdout).length, 2);
+  assert.doesNotMatch(preview.stdout, /--- Proposed/);
+  assert.doesNotMatch(preview.stdout, /Superseded narrative that must leave live context\./);
   assert.deepEqual(await snapshot(root), before, 'dry run must not create archives, temp files or locks');
 });
 
@@ -174,7 +179,7 @@ test('a second rewrite of unchanged state is a write-free no-op', async (t) => {
 test('expect-state refuses to apply a stale preview', async (t) => {
   const { root } = await fixture(t);
   const objective = objectiveIdFor(root);
-  const preview = cli(root, ['compact', '--rewrite', '--objective', objective, '--dry-run']);
+  const preview = cli(root, ['compact', '--rewrite', '--objective', objective, '--dry-run', '--diff']);
   assert.equal(preview.status, 0, preview.stdout + preview.stderr);
   const state = /--expect-state ([a-f0-9]{64})/.exec(preview.stdout);
   assert.ok(state, `preview must print the source state hash:\n${preview.stdout}`);
@@ -186,7 +191,7 @@ test('expect-state refuses to apply a stale preview', async (t) => {
   assert.match(stale.stdout, /--expect-state/);
   assert.deepEqual(await snapshot(root), before, 'stale preview must not write');
 
-  const fresh = cli(root, ['compact', '--rewrite', '--objective', objective, '--dry-run']);
+  const fresh = cli(root, ['compact', '--rewrite', '--objective', objective, '--dry-run', '--diff']);
   const freshState = /--expect-state ([a-f0-9]{64})/.exec(fresh.stdout);
   assert.ok(freshState);
   assert.equal(cli(root, ['compact', '--rewrite', '--objective', objective, '--expect-state', freshState[1]]).status, 0);
@@ -231,7 +236,7 @@ test('compact flags are validated and the checkpoint mode is unchanged', async (
 
   const checkpoint = cli(root, ['compact']);
   assert.equal(checkpoint.status, 0, checkpoint.stdout + checkpoint.stderr);
-  assert.match(checkpoint.stdout, /Conservative archival checkpoint/);
+  assert.match(checkpoint.stdout, /Mode: archival checkpoint/);
   assert.equal((await archiveDirs(root)).length, 0, 'checkpoint mode uses the compact-archive-* format');
   const runs = await readdir(join(root, '.agentos/runs'));
   assert.ok(runs.some((name) => /^compact-archive-[a-f0-9]{64}\.md$/.test(name)), JSON.stringify(runs));
@@ -256,7 +261,8 @@ test('rewrite reports how many sections it archived per file', async (t) => {
   assert.match(preview.stdout, /Classification:/);
   assert.match(preview.stdout, /handoff\.md: \d+ archived/);
   assert.match(preview.stdout, /tasks\.md: \d+ archived/);
-  assert.match(preview.stdout, /Objective candidates:/);
+  assert.match(preview.stdout, /carried-forward constraints: \d+ line\(s\)/);
+  assert.doesNotMatch(preview.stdout, /Objective candidates:/);
 });
 
 test('rewrite refuses symlinked live state without touching the link target', async (t) => {

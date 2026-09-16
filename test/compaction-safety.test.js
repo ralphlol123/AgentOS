@@ -43,18 +43,21 @@ test('compact retains every original byte of safety context and unfinished work,
   assert.ok(archive.includes(tasks));
 });
 
-test('compact dry-run exposes exact proposed live files through API and CLI without writes', async (t) => {
+test('compact dry-run exposes exact proposals through the API and a concise CLI summary without writes', async (t) => {
   const root = await fixture(t);
   const before = await snapshot(root);
   const dry = await compactAgentOS({ cwd: root, dryRun: true });
   assert.equal(typeof dry.proposed?.handoff, 'string');
   assert.equal(typeof dry.proposed?.tasks, 'string');
-  assert.ok(dry.text.includes(dry.proposed.handoff));
-  assert.ok(dry.text.includes(dry.proposed.tasks));
+  assert.doesNotMatch(dry.text, /--- Proposed|--- End proposed/);
+  assert.ok(!dry.text.includes(dry.proposed.handoff));
+  assert.ok(!dry.text.includes(dry.proposed.tasks));
   const cli = spawnSync(process.execPath, [resolve('dist/cli.js'), 'compact', '--dry-run'], { cwd: root, encoding: 'utf8' });
   assert.equal(cli.status, 0, cli.stderr);
-  assert.ok(cli.stdout.includes(dry.proposed.handoff));
-  assert.ok(cli.stdout.includes(dry.proposed.tasks));
+  assert.match(cli.stdout, /Mode: archival checkpoint/);
+  assert.doesNotMatch(cli.stdout, /--- Proposed|--- End proposed/);
+  assert.ok(!cli.stdout.includes(dry.proposed.handoff));
+  assert.ok(!cli.stdout.includes(dry.proposed.tasks));
   assert.deepEqual(await snapshot(root), before);
   await compactAgentOS({ cwd: root });
   assert.equal(await readFile(join(root, '.agentos/handoff.md'), 'utf8'), dry.proposed.handoff);

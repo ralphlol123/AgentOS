@@ -10,13 +10,14 @@ have different guarantees.
 | Kind | archival checkpoint | structural rewrite |
 | Live bytes | retained verbatim, plus one archive link per file | rebuilt in canonical form |
 | Reduces live size | no (it can grow it) | yes, when history exists |
-| Requires review | no | yes (`--dry-run` then apply) |
+| Requires review | no | yes (`--dry-run`, optionally `--diff`, then apply) |
 | Reversible | n/a | archive holds the originals byte-for-byte |
 
 ## Conservative checkpoint (default)
 
 ```bash
 agentos compact --dry-run
+agentos compact --dry-run --diff   # include the proposed patch; still writes nothing
 agentos compact
 ```
 
@@ -29,10 +30,24 @@ historical narrative from a standing instruction, so it keeps everything and say
 ## Structural rewrite (`--rewrite`)
 
 ```bash
-agentos compact --rewrite --dry-run                      # review; writes nothing
+agentos compact --rewrite --dry-run                      # concise review; writes nothing
+agentos compact --rewrite --dry-run --diff               # detailed patch; writes nothing
 agentos compact --rewrite --objective <id>               # apply
 agentos compact --rewrite --objective <id> --expect-state <sha256>
 ```
+
+Dry runs are concise by default: they report mode, sizes, classification counts, missing-section
+counts, and the files that would be archived or rewritten, but do not print complete proposed
+file bodies. Library callers still receive the exact proposals and structured classification in
+the result object. Add `--diff` to either compact mode for a unified diff with stable LF output;
+Unicode content and CRLF inputs are preserved in the comparison. `--diff` is preview-only: it is
+accepted only with `compact --dry-run` (with or without `--rewrite`), and `--diff=false` leaves the
+concise default active. An unchanged proposal says so without emitting empty patch headers.
+
+A rewrite diff also prints the source-state hash and the matching `--expect-state` apply command.
+If ambiguity blocks the rewrite, the concise candidate list is still shown, no proposed bodies or
+patch headers are emitted, and the output states that the detailed diff is unavailable because
+compaction is blocked. Every dry-run form is read-only across the whole workspace tree.
 
 ### What stays live, always
 
@@ -149,9 +164,10 @@ agentos doctor
 agentos doctor --json
 ```
 
-Diagnostics run read-only after a changed apply. Canonical sections the source had no
-material for are listed in the command output (`No live source section for: …`) and
-omitted from the files rather than filled with invented text.
+Diagnostics run read-only after a changed apply. In a concise preview, canonical sections for
+which the source had no material are reported as a count; library callers can inspect the exact
+names in the structured `missing` field. Missing sections are omitted from the files rather than
+filled with invented text.
 
 ### Size reporting
 

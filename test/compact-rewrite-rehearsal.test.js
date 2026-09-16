@@ -150,7 +150,7 @@ test('rehearsal: a rewritten workspace still round-trips through the checkpoint 
 
   const checkpoint = cli(root, ['compact']);
   assert.equal(checkpoint.status, 0, checkpoint.stdout + checkpoint.stderr);
-  assert.match(checkpoint.stdout, /Conservative archival checkpoint/);
+  assert.match(checkpoint.stdout, /Mode: archival checkpoint/);
   const doctor = cli(root, ['doctor']);
   assert.equal(doctor.status, 0, doctor.stdout + doctor.stderr);
   assert.ok(!/has no ## Current objective/.test(doctor.stdout), doctor.stdout);
@@ -161,7 +161,8 @@ test('rehearsal: unclear sections are reported, not silently dropped', async (t)
   const { root } = await fixture(t, state);
   const result = await compactAgentOS({ cwd: root, rewrite: true, dryRun: true });
   assert.equal(result.ok, true, result.text);
-  assert.match(result.text, /No live source section for: Current state/);
+  assert.equal(result.missing.length, 2);
+  assert.match(result.text, new RegExp(`missing canonical sections: ${result.missing.length}`));
   assert.ok(result.classification.handoff.some((section) => section.role === 'unknown' && section.decision === 'preserved'));
   assert.deepEqual(
     checkboxes(result.proposed.tasks).filter((line) => line.includes('[ ]')).sort(),

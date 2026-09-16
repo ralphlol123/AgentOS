@@ -4,6 +4,7 @@ import { readImportSource } from './import-source.js';
 import { appendContextRecord, literalMarkdown, markdownHeadings, markdownSection } from './markdown.js';
 import { HANDOFF_ROLES, recognizeSections, resolveObjective, sectionText } from './context-sections.js';
 import { planCompactRewrite } from './compact-rewrite.js';
+import { renderUnifiedDiff } from './compact-report.js';
 import { collectRunHandoffGitState } from './git-evidence.js';
 import { canonicalAgentId, resolveAgentAlias, resolveSkillAlias, RETIRED_AGENT_IDS, RETIRED_SKILL_IDS, SKILL_ALIASES, agentDeprecationNotice, skillDeprecationNotice } from './aliases.js';
 import { LEGACY_SKILL_CARD_HASHES } from './legacy-skill-shapes.js';
@@ -1031,7 +1032,7 @@ async function compactAgentOSUnlocked(options = {}) {
         `- handoff.md: ${oldHandoff.length} chars -> ${compactHandoff.length} chars`,
         `- tasks.md: ${oldTasks.length} chars -> ${compactTasks.length} chars`,
         `- total: ${before} chars -> ${after} chars (${after - before} chars added)`,
-        'Conservative archival checkpoint: original live text retained; no automatic size reduction.',
+        'Mode: archival checkpoint; original live text retained; no automatic size reduction.',
         '',
         `${!changed ? 'Existing archive' : options.dryRun ? 'Would archive' : 'Archived'}: .agentos/runs/${archiveName}`,
         changed ? `${options.dryRun ? 'Would rewrite' : 'Rewrote'}: .agentos/handoff.md, .agentos/tasks.md` : 'No changes: live state already archived.',
@@ -1039,6 +1040,13 @@ async function compactAgentOSUnlocked(options = {}) {
         `- .agentos/runs/${archiveName}#previous-handoff`,
         `- .agentos/runs/${archiveName}#previous-tasks`,
     ];
+    if (options.diff) {
+        const diff = renderUnifiedDiff([
+            { path: '.agentos/handoff.md', before: oldHandoff, after: compactHandoff },
+            { path: '.agentos/tasks.md', before: oldTasks, after: compactTasks },
+        ]);
+        lines.push('', 'Detailed diff:', diff || 'No differences: proposed live files are unchanged.');
+    }
     if (!options.dryRun && changed) {
         await withMutationTransaction(async () => {
             await mkdirTracked(runsDir);
@@ -1051,9 +1059,6 @@ async function compactAgentOSUnlocked(options = {}) {
         });
         const doctor = await doctorAgentOS({ cwd: root });
         lines.push('', doctor.text);
-    }
-    if (options.dryRun) {
-        lines.push('', '--- Proposed .agentos/handoff.md ---', compactHandoff, '--- Proposed .agentos/tasks.md ---', compactTasks, '--- End proposed live files ---');
     }
     return { ok: true, dryRun: Boolean(options.dryRun), changed, archivePath, before, after,
         proposed: { handoff: compactHandoff, tasks: compactTasks }, text: lines.join('\n') };
@@ -1131,7 +1136,7 @@ function renderRewriteReadme({ stateHash, sources, sourceHashes, created }) {
         '',
     ].join('\n');
 }
-function rewriteBlockedResult(root, reasons, candidates, dryRun) {
+function rewriteBlockedResult(root, reasons, candidates, dryRun, diff = false) {
     const lines = [
         `AgentOS compact rewrite${dryRun ? ' dry run' : ''}: blocked`,
         `Root: ${root}`,
@@ -1142,6 +1147,8 @@ function rewriteBlockedResult(root, reasons, candidates, dryRun) {
     if (candidates.length)
         lines.push('', 'Objective candidates:', ...candidates.map((candidate) => `- ${candidate.id} (line ${candidate.line}): ${candidate.heading}`));
     lines.push('', 'Resolve the selection explicitly, for example:', '  agentos compact --rewrite --objective <id> --dry-run');
+    if (diff)
+        lines.push('', 'Detailed diff unavailable: compaction is blocked.');
     return { ok: false, rewrite: true, dryRun: Boolean(dryRun), blockedReasons: reasons, objectiveCandidates: candidates, text: lines.join('\n') };
 }
 /**
@@ -1166,17 +1173,17 @@ async function compactRewriteUnlocked(options = {}) {
         }
     }
     if (readProblems.length)
-        return rewriteBlockedResult(root, readProblems, [], options.dryRun);
+        return rewriteBlockedResult(root, readProblems, [], options.dryRun, options.diff);
     const stateHash = compactStateHash(sources.handoff.text, sources.tasks.text);
     if (options.expectState && String(options.expectState) !== stateHash) {
         return rewriteBlockedResult(root, [
             `.agentos/handoff.md and tasks.md changed after this preview: --expect-state ${options.expectState} is stale (current state ${stateHash}).`,
             'Re-run the dry run to review a proposal for the current state.',
-        ], [], options.dryRun);
+        ], [], options.dryRun, options.diff);
     }
     const plan = planCompactRewrite({ handoff: sources.handoff.text, tasks: sources.tasks.text, objectiveId: options.objective });
     if (!plan.ok)
-        return rewriteBlockedResult(root, plan.blockedReasons, plan.objectiveCandidates, options.dryRun);
+        return rewriteBlockedResult(root, plan.blockedReasons, plan.objectiveCandidates, options.dryRun, options.diff);
     const changed = plan.handoff !== sources.handoff.text || plan.tasks !== sources.tasks.text;
     const sourceHashes = { handoff: sha256Hex(sources.handoff.bytes), tasks: sha256Hex(sources.tasks.bytes) };
     const runsDir = join(root, '.agentos/runs');
@@ -1204,7 +1211,6 @@ async function compactRewriteUnlocked(options = {}) {
     };
     const delta = plan.sizes.delta;
     const deltaText = delta === 0 ? '0 chars' : delta < 0 ? `${-delta} chars removed` : `${delta} chars added`;
-    const selected = plan.objectiveCandidates.find((candidate) => candidate.id === plan.selectedObjectiveId);
     const archivedTotal = plan.classification.handoff.filter((section) => section.decision === 'archived').length
         + plan.classification.tasks.filter((section) => section.decision === 'archived').length;
     const lines = [
@@ -1216,24 +1222,28 @@ async function compactRewriteUnlocked(options = {}) {
         `- tasks.md: ${plan.sizes.tasksBefore} chars -> ${plan.sizes.tasksAfter} chars`,
         `- total: ${plan.sizes.before} chars -> ${plan.sizes.after} chars (${deltaText})`,
         'Mode: structural rewrite; superseded history moves to the archive (original bytes retained verbatim).',
-        `Selected objective: ${plan.selectedObjectiveId}${selected ? ` (line ${selected.line}): ${selected.heading}` : ''}`,
+        '',
+        'Classification:',
+        `- handoff.md: ${counted('handoff')}`,
+        `- tasks.md: ${counted('tasks')}`,
+        `- carried-forward constraints: ${plan.carriedForward.length} line(s)`,
     ];
-    if (plan.objectiveCandidates.length > 1) {
-        lines.push('Objective candidates:', ...plan.objectiveCandidates.map((candidate) => `- ${candidate.id} (line ${candidate.line}): ${candidate.heading}`));
-    }
-    lines.push(`Source state: ${stateHash}`, `  bind an apply to this preview with --expect-state ${stateHash}`, '', 'Classification:', `- handoff.md: ${counted('handoff')}`, `- tasks.md: ${counted('tasks')}`);
-    if (plan.carriedForward.length) {
-        lines.push(`Carried forward verbatim (constraints found in archived history): ${plan.carriedForward.length} line(s)`, ...plan.carriedForward.map((line) => `  - ${line}`));
-    }
     if (plan.missing.length)
-        lines.push(`No live source section for: ${plan.missing.join(', ')}`);
+        lines.push(`- missing canonical sections: ${plan.missing.length}`);
     if (!changed) {
         lines.push('', 'No changes: live state already matches the canonical rewrite form; nothing was archived or rewritten.');
     }
     else {
         if (!archivedTotal)
             lines.push('', 'No sections qualified for archival; this rewrite is a structural normalization only.');
-        lines.push('', `${options.dryRun ? 'Would archive' : 'Archived'}: ${bundleRel}/ (handoff.md, tasks.md, manifest.json, README.md)`);
+        lines.push('', `${options.dryRun ? 'Would archive' : 'Archived'}: ${bundleRel}/ (handoff.md, tasks.md, manifest.json, README.md)`, `${options.dryRun ? 'Would rewrite' : 'Rewrote'}: .agentos/handoff.md, .agentos/tasks.md`);
+    }
+    if (options.diff) {
+        const diff = renderUnifiedDiff([
+            { path: '.agentos/handoff.md', before: sources.handoff.text, after: plan.handoff },
+            { path: '.agentos/tasks.md', before: sources.tasks.text, after: plan.tasks },
+        ]);
+        lines.push('', `Source state: ${stateHash}`, `Bind an apply to this preview with --expect-state ${stateHash}`, '', 'Detailed diff:', diff || 'No differences: proposed live files are unchanged.');
     }
     if (!options.dryRun && changed) {
         const created = new Date().toISOString();
@@ -1270,9 +1280,6 @@ async function compactRewriteUnlocked(options = {}) {
         });
         const doctor = await doctorAgentOS({ cwd: root });
         lines.push('', doctor.text);
-    }
-    if (options.dryRun) {
-        lines.push('', '--- Proposed .agentos/handoff.md ---', plan.handoff, '--- Proposed .agentos/tasks.md ---', plan.tasks, '--- End proposed live files ---');
     }
     return {
         ok: true,

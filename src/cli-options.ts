@@ -1,5 +1,5 @@
 export type FlagValue = string | boolean;
-const booleans = new Set(['new', 'existing', 'dry-run', 'yes', 'y', 'detected', 'replace', 'preserve', 'fix', 'json', 'create', 'refresh', 'installed', 'normalize-repo-ids', 'adopt-custom-adapters', 'prune-retired', 'rewrite']);
+const booleans = new Set(['new', 'existing', 'dry-run', 'yes', 'y', 'detected', 'replace', 'preserve', 'fix', 'json', 'create', 'refresh', 'installed', 'normalize-repo-ids', 'adopt-custom-adapters', 'prune-retired', 'rewrite', 'diff']);
 const values = new Set(['agents', 'engine', 'role', 'repo', 'worktree', 'phase', 'reason', 'vault', 'dest', 'link', 'mode', 'name', 'type', 'expected-sha256', 'objective', 'expect-state']);
 export function parseFlagsAndPositionals(args: string[]): { flags: Record<string, FlagValue>; positionals: string[] } {
   const flags: Record<string, FlagValue> = {}, positionals: string[] = [];
@@ -23,7 +23,7 @@ export function parseFlagsAndPositionals(args: string[]): { flags: Record<string
 export function validateCommandFlags(command: string, flags: Record<string, FlagValue>): void {
   const allowed: Record<string, string[]> = {
     init: ['new', 'existing', 'agents', 'dry-run', 'yes', 'y', 'refresh'], status: [], handoff: [], prompt: [],
-    run: ['engine', 'role', 'repo', 'worktree', 'phase', 'reason', 'dry-run'], doctor: ['fix', 'json', 'normalize-repo-ids', 'adopt-custom-adapters', 'prune-retired', 'dry-run'], compact: ['dry-run', 'rewrite', 'objective', 'expect-state'],
+    run: ['engine', 'role', 'repo', 'worktree', 'phase', 'reason', 'dry-run'], doctor: ['fix', 'json', 'normalize-repo-ids', 'adopt-custom-adapters', 'prune-retired', 'dry-run'], compact: ['dry-run', 'rewrite', 'objective', 'expect-state', 'diff'],
     'link-obsidian': ['vault', 'dest', 'link', 'create', 'dry-run'], obsidian: ['vault', 'dest', 'create', 'dry-run'], adapters: [],
     skills: ['detected', 'mode', 'dry-run', 'replace', 'installed'], agents: ['name', 'dry-run', 'replace', 'installed'],
     templates: ['type', 'name', 'mode', 'dry-run', 'yes', 'replace', 'expected-sha256'], migrate: ['preserve', 'dry-run'],
@@ -31,6 +31,7 @@ export function validateCommandFlags(command: string, flags: Record<string, Flag
   for (const key of Object.keys(flags)) if (allowed[command] && !allowed[command].includes(key)) throw new Error(`--${key} is not supported by ${command}.`);
   if (flags.new && flags.existing) throw new Error('Choose either --new or --existing.');
   if (flags.mode && !['summary', 'full'].includes(String(flags.mode))) throw new Error('--mode must be summary or full.');
+  if (flags.diff && !flags['dry-run']) throw new Error('--diff requires --dry-run.');
   if (flags.objective && !flags.rewrite) throw new Error('--objective requires --rewrite.');
   if (flags['expect-state'] && !flags.rewrite) throw new Error('--expect-state requires --rewrite.');
   if (flags['expect-state'] && !/^[a-f0-9]{64}$/.test(String(flags['expect-state']))) {
