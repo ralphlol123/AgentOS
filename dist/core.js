@@ -2,7 +2,7 @@ import { SKILL_CATALOG, SKILL_BY_ID, SKILL_CATEGORIES, TEMPLATE_ENTRIES, AGENT_D
 import { withWorkspaceWriter } from './workspace-lock.js';
 import { readImportSource } from './import-source.js';
 import { appendContextRecord, literalMarkdown, markdownHeadings, markdownSection } from './markdown.js';
-import { HANDOFF_ROLES, recognizeSections, sectionText } from './context-sections.js';
+import { HANDOFF_ROLES, recognizeSections, resolveObjective, sectionText } from './context-sections.js';
 import { planCompactRewrite } from './compact-rewrite.js';
 import { collectRunHandoffGitState } from './git-evidence.js';
 import { canonicalAgentId, resolveAgentAlias, resolveSkillAlias, RETIRED_AGENT_IDS, RETIRED_SKILL_IDS, SKILL_ALIASES, agentDeprecationNotice, skillDeprecationNotice } from './aliases.js';
@@ -966,7 +966,8 @@ export async function statusAgentOS(options = {}) {
         if (!await exists(join(root, file)))
             missing.push(file);
     }
-    const ok = missing.length === 0;
+    const objective = resolveObjective(handoff);
+    const ok = missing.length === 0 && objective.kind === 'resolved';
     return {
         ok,
         text: [
@@ -977,7 +978,7 @@ export async function statusAgentOS(options = {}) {
             firstYamlValue(project, 'workspace_kind') ? `Workspace kind: ${firstYamlValue(project, 'workspace_kind')}` : null,
             '',
             'Current handoff:',
-            extractSection(handoff, 'Current objective') || '- No current objective found.',
+            objective.selected?.text || `- ${objective.diagnostic}`,
             '',
             missing.length ? `Missing files:\n${missing.map((f) => `- ${f}`).join('\n')}` : 'Required files: all present',
         ].filter(Boolean).join('\n'),
@@ -2688,21 +2689,16 @@ async function checkTasksAndHandoff(root, problems, warnings, diagnostics) {
     }
     const now = extractSection(tasks, 'Now');
     // Objective/next-action headings drift in real workspaces (`## Current objective — 2026-09-15 (latest): …`).
-    // Recognize documented variants, report ambiguity, and never rewrite state from a diagnostic.
-    const objectives = recognizeSections(handoff, [HANDOFF_ROLES[0]]);
+    // Resolve objectives through the same bounded, fence-aware interpretation used
+    // by status and compaction; malformed objective state is a health problem.
+    const objectiveResolution = resolveObjective(handoff);
     const nextActions = recognizeSections(handoff, [HANDOFF_ROLES[1]]);
-    const objective = objectives.length ? sectionText(objectives[0]) : undefined;
+    const objective = objectiveResolution.selected?.text;
     const nextAction = nextActions.length ? sectionText(nextActions[0]) : undefined;
     if (!now || !/- \[[ xX]\]/.test(now))
         warnings.push('.agentos/tasks.md has no actionable ## Now checkbox');
-    if (!objectives.length)
-        warnings.push('.agentos/handoff.md has no ## Current objective');
-    else if (objectives.length > 1) {
-        warnings.push(`.agentos/handoff.md contains ${objectives.length} current-objective headings (lines ${objectives.map((section) => section.line).join(', ')}); `
-            + 'doctor uses the first occurrence for its comparison and does not establish which objective is current');
-    }
-    else if (!objective)
-        warnings.push('.agentos/handoff.md ## Current objective is empty');
+    if (objectiveResolution.kind !== 'resolved')
+        problems.push(objectiveResolution.diagnostic ?? 'The current objective could not be resolved.');
     if (now && objective && !sectionsOverlap(now, `${objective}\n${nextAction || ''}`)) {
         warnings.push('.agentos/tasks.md ## Now may not match .agentos/handoff.md current objective/next action');
     }

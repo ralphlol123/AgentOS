@@ -7,9 +7,8 @@
  * is current. Callers archive the originals byte-for-byte before replacing
  * anything on disk.
  */
-import { createHash } from 'node:crypto';
 import { hasUnclosedFence, markdownHeadings } from './markdown.js';
-import { matchSectionTitle } from './context-sections.js';
+import { matchSectionTitle, resolveObjective } from './context-sections.js';
 
 export type SectionDecision = 'live' | 'preserved' | 'archived';
 export type SourceFile = 'handoff' | 'tasks';
@@ -169,6 +168,7 @@ function isCarriedConstraint(line: string): boolean {
 interface SourceSection {
   heading: string;
   line: number;
+  start: number;
   raw: string;
   body: string;
   /** Offset of `body[0]` in the source file, so nested headings can report real line numbers. */
@@ -197,6 +197,7 @@ function splitDocument(text: string): { preamble: string; nl: string; sections: 
     return {
       heading: heading.title,
       line: lineNumberAt(text, heading.start),
+      start: heading.start,
       raw: text.slice(heading.start, end).trimEnd(),
       body: trimmed,
       bodyStart: heading.end + (rawBody.length - rawBody.replace(/^\s+/, '').length),
@@ -432,14 +433,6 @@ function archiveNestedHistory(
   return { body: segments.filter(Boolean).join(`${document.nl}${document.nl}`).trim(), plans, carried };
 }
 
-function objectiveIdFor(section: SourceSection): string {
-  return `obj-${createHash('sha256').update(section.raw).digest('hex').slice(0, 10)}`;
-}
-
-function sectionText(section: SourceSection): string {
-  return [section.suffix, section.body].filter((part) => part && part.trim()).join('\n\n').trim();
-}
-
 function renderEntries(entries: { heading: string; body: string }[], nl: string): string {
   return entries.map((entry) => `## ${entry.heading}${nl}${nl}${entry.body}`.trimEnd()).join(`${nl}${nl}`);
 }
@@ -463,35 +456,12 @@ export function planCompactRewrite(input: CompactRewriteInput): CompactRewritePl
   classify(documents.handoff.sections, HANDOFF_SECTION_ROLES);
   classify(documents.tasks.sections, TASKS_SECTION_ROLES);
 
-  const objectiveSections = documents.handoff.sections.filter((section) => section.role === 'current-objective' && !section.history);
-  const candidates: ObjectiveCandidate[] = objectiveSections.map((section) => ({
-    id: objectiveIdFor(section),
-    heading: section.heading,
-    line: section.line,
-    text: sectionText(section),
-  }));
-
-  let selected: SourceSection | undefined;
-  if (!objectiveSections.length) {
-    blocked.push('.agentos/handoff.md has no recognized ## Current objective section; --rewrite requires an explicit objective selection.');
-  } else if (objectiveSections.length === 1) {
-    [selected] = objectiveSections;
-  } else {
-    const requested = input.objectiveId?.trim();
-    const index = requested ? candidates.findIndex((candidate) => candidate.id === requested) : -1;
-    if (requested && index < 0) {
-      blocked.push(`.agentos/handoff.md: unknown --objective ${requested}; valid candidates are ${candidates.map((candidate) => candidate.id).join(', ')}.`);
-    } else if (!requested) {
-      blocked.push(`.agentos/handoff.md has ${objectiveSections.length} current-objective headings; --rewrite requires an explicit objective selection (--objective <id>): ${candidates.map((candidate) => `${candidate.id} (line ${candidate.line})`).join(', ')}.`);
-    } else {
-      selected = objectiveSections[index];
-    }
-  }
-
-  if (selected && !sectionText(selected)) {
-    blocked.push('.agentos/handoff.md ## Current objective is empty; --rewrite will not invent an objective.');
-    selected = undefined;
-  }
+  const objectiveResolution = resolveObjective(handoffText, input.objectiveId);
+  const candidates: ObjectiveCandidate[] = objectiveResolution.candidates.map(({ id, heading, line, text }) => ({ id, heading, line, text }));
+  let selected = objectiveResolution.selected
+    ? documents.handoff.sections.find((section) => section.start === objectiveResolution.selected?.section.start)
+    : undefined;
+  if (objectiveResolution.kind !== 'resolved') blocked.push(objectiveResolution.diagnostic ?? 'The current objective could not be resolved.');
 
   const sizes = (handoffAfter: number, tasksAfter: number) => ({
     handoffBefore: handoffText.length, handoffAfter,
@@ -515,7 +485,7 @@ export function planCompactRewrite(input: CompactRewriteInput): CompactRewritePl
     };
   }
 
-  const selectedId = objectiveIdFor(selected);
+  const selectedId = objectiveResolution.selected!.id;
   const outcomes = new Map<SourceSection, Outcome>();
   const carriedByFile: Record<SourceFile, string[]> = { handoff: [], tasks: [] };
   const classification: { handoff: SectionPlan[]; tasks: SectionPlan[] } = { handoff: [], tasks: [] };

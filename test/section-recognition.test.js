@@ -5,7 +5,14 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import { initAgentOS, doctorAgentOS } from '../dist/core.js';
-import { matchSectionTitle, recognizeSections, sectionText, isEmptySection } from '../dist/context-sections.js';
+import {
+  discoverObjectives,
+  isEmptySection,
+  matchSectionTitle,
+  recognizeSections,
+  resolveObjective,
+  sectionText,
+} from '../dist/context-sections.js';
 
 const OBJECTIVE = [{ role: 'current-objective', canonical: 'Current objective' }];
 
@@ -35,6 +42,30 @@ test('section titles recognize documented variants without prefix over-matching'
   for (const title of rejected) assert.equal(matchSectionTitle(title, 'Current objective'), null, `must not recognize: ${title}`);
   assert.equal(matchSectionTitle('Next exact action — 2026-09-15', 'Next exact action').suffix, '2026-09-15');
   assert.equal(matchSectionTitle('Current objective', 'Current objective').suffix, '');
+});
+
+test('shared objective discovery recognizes real heading variants and preserves candidate ids', () => {
+  const handoff = [
+    '# Handoff',
+    '',
+    '## Current objective — 2026-09-15',
+    '',
+    'Newest work.',
+    '',
+    '```md',
+    '## Current objective — fenced example must not count',
+    '```',
+    '',
+    '## Current objective: ship the rewrite',
+    '',
+  ].join('\r\n');
+
+  const candidates = discoverObjectives(handoff);
+  assert.deepEqual(candidates.map(({ id, heading, line, text }) => ({ id, heading, line, text })), [
+    { id: 'obj-d19abe0afd', heading: 'Current objective — 2026-09-15', line: 3, text: '2026-09-15\n\nNewest work.\r\n\r\n```md\r\n## Current objective — fenced example must not count\r\n```' },
+    { id: 'obj-c10ee08a07', heading: 'Current objective: ship the rewrite', line: 11, text: 'ship the rewrite' },
+  ]);
+  assert.equal(resolveObjective(handoff).kind, 'ambiguous');
 });
 
 test('section recognition keeps original text, line numbers and suffix as data', () => {
@@ -100,7 +131,7 @@ test('doctor recognizes dated objective headings and reports duplicates with sou
   const duplicate = await doctorAgentOS({ cwd: root });
   assert.match(duplicate.text, /3 current-objective headings/);
   assert.match(duplicate.text, /lines 3, 6, 9/);
-  assert.match(duplicate.text, /does not establish which objective is current/);
+  assert.match(duplicate.text, /explicit objective selection is required/);
 
   await writeFile(handoffPath, [
     '# Handoff', '',
@@ -113,7 +144,7 @@ test('doctor recognizes dated objective headings and reports duplicates with sou
 
   await writeFile(handoffPath, '# Handoff\n\n## Scope\n- Repos in scope: agentos-for-projects\n');
   const missing = await doctorAgentOS({ cwd: root });
-  assert.match(missing.text, /has no ## Current objective/);
+  assert.match(missing.text, /has no recognized ## Current objective section/);
 
   await writeFile(handoffPath, [
     '# Handoff', '',
@@ -123,10 +154,10 @@ test('doctor recognizes dated objective headings and reports duplicates with sou
     '## Scope', '- Repos in scope: agentos-for-projects',
   ].join('\n'));
   const fenced = await doctorAgentOS({ cwd: root });
-  assert.match(fenced.text, /has no ## Current objective/, 'fenced examples do not satisfy the objective check');
+  assert.match(fenced.text, /has no recognized ## Current objective section/, 'fenced examples do not satisfy the objective check');
 });
 
-test('doctor json carries the same objective diagnostics and stays parseable', async (t) => {
+test('doctor json reports objective ambiguity as a failing health check and stays parseable', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'agentos-sections-json-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
@@ -136,10 +167,10 @@ test('doctor json carries the same objective diagnostics and stays parseable', a
     '## Current objective — 2026-09-01', 'Older.',
   ].join('\n'));
   const cli = spawnSync(process.execPath, [join(process.cwd(), 'dist/cli.js'), 'doctor', '--json'], { cwd: root, encoding: 'utf8' });
-  assert.equal(cli.status, 0, cli.stderr);
+  assert.equal(cli.status, 1, cli.stderr);
   const parsed = JSON.parse(cli.stdout);
-  assert.ok(parsed.warnings.some((w) => /2 current-objective headings/.test(w)), cli.stdout);
-  assert.deepEqual(parsed.warnings.filter((w) => /has no ## Current objective/.test(w)), []);
+  assert.ok(parsed.problems.some((problem) => /2 current-objective headings/.test(problem)), cli.stdout);
+  assert.deepEqual(parsed.problems.filter((problem) => /has no recognized ## Current objective/.test(problem)), []);
   const before = await readFile(join(root, '.agentos/handoff.md'), 'utf8');
   assert.match(before, /Current objective — 2026-09-15/, 'read-only diagnostics must not rewrite state');
 });
