@@ -2,6 +2,18 @@
 
 All notable changes to AgentOS for Projects are documented here.
 
+## [0.6.0] - 2026-09-16
+
+### Fixed
+
+- **History that a previous version parked inside `## Preserved context` can be reclaimed.** Section scanning split level-2 headings only, and the container's history flag was forced off, so a superseded objective that an earlier build re-emitted as a `###` block under the container could never be classified again — it stayed live permanently, and no later version could recover it. A real workspace was carrying 90,003 characters of it and `compact --rewrite` reported **0 archived** there. The container's own body is now re-read on every run: nested blocks that are explicit history with no unchecked task block at any depth are archived and reported, their constraint lines are carried into the container's generated block (extended, never duplicated), and everything else is kept. Deeper headings stay attached to the shallowest heading that owns them, so an unchecked `- [ ]` under an intervening `####` still blocks its parent instead of being orphaned. On that workspace the same read-only preview went from `138,773 -> 117,454` characters (0 archived) to `95,431` with 6 archived, and to **`63,441`** with 12 archived once qualified headings were recognized too.
+- **Qualified history headings are recognized at any nesting level.** `historyRemainder` cut at the first `—–:.,` *before* stripping parentheticals, so `## Previous objective (2026-09-11, now merged, superseded by the entry above)` reduced to `objective (2026-09-11` and failed the noun list; `prior` was not a history word at all, so `## Prior objective` never qualified. Both stayed live forever. Parenthetical groups are now stripped first, and `prior` joins the history words. Negative controls hold: `Previous objective backlog`, `Previous objectives roadmap`, `Current objectives backlog`, `Prior objectives backlog`, `Prior art` and `Notes about Current objective` all stay live, and no canonical alias is diverted into history.
+- **Carried constraint lines must read as instructions, not as wrapped prose.** The carry rule matched keywords plus length, so reclaiming a long history block handed it every soft-wrapped line of it: a real workspace carried 22 lines of which 19 were mid-paragraph fragments (`never actually rendered. Possibly …`), and the same 19 returned on every run. A carried line must now open on an uppercase character, be either an explicit obligation (it opens on the directive, or states a subject followed within six words by `must`/`must not`/`must never`/`do not`/`don't`/`requires`/`is required`/`are required`/`without approval`/`only with approval`) or a sentence ending in `.`/`!`/`?`, and must not trail off on a function word or an unclosed parenthesis. Emphasis markers of one to three characters open a directive, so `*Never push to main*` qualifies. Two limits are deliberate and documented: a line opening on a code span is read as a continuation of the previous line, and a line ending on a conjunction as truncated — both stay in the archive rather than being re-injected. That workspace now carries **3 lines instead of 22**, and the three are the genuine directives. An independent pass measured 0 lines newly carried across 22,441 real lines, 19/19 fragments still dropped and 3/3 directives kept.
+
+### Changed
+
+- `docs/compaction.md` documents the container re-read rule, the qualified-heading rules, the repeat-run behaviour (a repeat run rewrites nothing once no further block becomes archivable; a hand-edited mixed-level container can expose one on a later pass), and the carry rule's shape requirement together with its two deliberate limits.
+
 ## [0.5.1] - 2026-09-15
 
 ### Fixed

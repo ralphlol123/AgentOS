@@ -1,6 +1,6 @@
 {
   "name": "agentos-for-projects",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Project-owned context layer for model-agnostic coding agents.",
   "type": "module",
   "bin": {
