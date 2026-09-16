@@ -93,7 +93,7 @@ const TASKS_SECTION_ROLES: RoleDef[] = [
   { role: 'history', canonical: 'History', aliases: ['History'] },
 ];
 
-const HISTORY_WORDS = /^(previous|superseded|past|old|historic|archived|earlier)$/i;
+const HISTORY_WORDS = /^(previous|prior|superseded|past|old|historic|archived|earlier)$/i;
 const HISTORY_HEADINGS = /^(history|done|completed|completed work|archived work|archive|run log|run logs)$/i;
 const HISTORY_NOUNS = /^(objective|objectives|state|status|scope|work|notes|note|run|runs|sprint|session|iteration|step|log|logs|context|tasks|next exact action|next action)$/i;
 
@@ -180,13 +180,17 @@ function roleFor(title: string, roles: RoleDef[]): { role: string; suffix: strin
   return null;
 }
 
-/** `Previous objective (superseded) — 2026-09-13: …` is the same section as `Previous objective`. */
+/**
+ * `Previous objective (superseded) — 2026-09-13: …` is the same section as
+ * `Previous objective`. Parenthetical qualifiers are stripped *before* the
+ * date/qualifier cut: cutting first leaves the remainder as
+ * `objective (2026-09-11`, which fails the noun list and quietly keeps a
+ * superseded block live forever (the shape the real workspace contains most).
+ */
 function historyRemainder(rest: string): string {
   return rest.trim()
-    .replace(/^\([^)]*\)\s*/, '')
+    .replace(/\s*\([^)]*\)/g, ' ')
     .replace(/[—–:.,].*$/, '')
-    .trim()
-    .replace(/\s*\([^)]*\)$/, '')
     .trim();
 }
 
