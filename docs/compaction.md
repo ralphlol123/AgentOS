@@ -42,7 +42,9 @@ agentos compact --rewrite --objective <id> --expect-state <sha256>
 - **Every unfinished task**, with nested acceptance details, continuation paragraphs,
   code blocks, and links. A checked parent with an unchecked descendant keeps the whole
   block live.
-- Every section the planner could not classify, verbatim, under `## Preserved context`.
+- Every section the planner could not classify, under `## Preserved context` — kept except for
+  nested history blocks, which are re-read on each run (see below). Archiving a block archives
+  whatever is nested inside it, exactly as archiving a level-2 history section always has.
 - Standing constraints found inside archived history (`do not`, `never`,
   `must not`, `requires approval`, `before merging`, …), carried forward verbatim with a
   `## Preserved context` block that names their origin. A line qualifies only when it is a
@@ -50,9 +52,22 @@ agentos compact --rewrite --objective <id> --expect-state <sha256>
   narrative paragraphs that merely mention a keyword are history, not constraints, and stay
   in the archive. The generated block is re-evaluated on every rewrite — lines that no longer
   qualify are dropped from live context (their originals remain in the archive), and an
-  emptied block is removed.
-- The existing `## Preserved context` and `## History` containers, re-emitted as-is
-  (the rewrite never re-wraps its own output, so repeated runs are byte-stable).
+  emptied block is removed. Constraint lines carried out of newly archived nested history
+  extend that block rather than creating a second one, and the merge ignores fenced samples.
+  (Re-filtering a block that is already in the file is still not fence-aware — a fenced sample
+  quoting that heading is a known follow-up, not a guarantee.)
+- The existing `## Preserved context` and `## History` containers. The container's own body is
+  re-read on every run — a nested history block that an earlier build demoted to a `###`
+  heading there is classified again and becomes archivable — while every block not nested
+  inside an archived one is re-emitted unchanged (block separators are normalized to a single
+  blank line). The rewrite never re-wraps its own output, and a container with nothing left in
+  it is dropped rather than emitted empty. A repeat run rewrites nothing once no further block
+  becomes archivable — but in a hand-edited container whose shallowest nested block is not
+  itself archivable (a deeper block above a later sibling, or a machine-generated
+  `### Constraints carried forward from archived history` block that re-filtering removes),
+  blocks beneath it can become the shallowest heading, and archivable, only on a later pass;
+  or they can simply stay live. Nothing is lost either way: every pass is planned, reported and
+  archived.
 
 ### What moves to the archive
 
@@ -62,8 +77,13 @@ agentos compact --rewrite --objective <id> --expect-state <sha256>
   `Historic …`, `Archived …`, `Done`, `History`, `Run log`. Only when they contain no
   unchecked task block.
 - Completed task sections (`## Done`).
+- History nested inside `## Preserved context` — the shape an earlier build produced when it
+  demoted an unclassified section to `###`. A nested block is archivable only when its heading
+  is explicit history and neither it nor any deeper block beneath it holds an unchecked task.
 
-Nothing else is removed, and nothing removed is lost: the archive holds the raw bytes.
+Nothing else is removed. Every archived block is listed in `## History` with its source line and
+its reason — a block nested inside an archived one goes with it, covered by that entry — and
+nothing removed is lost: the archive holds the raw bytes.
 
 ### Archive layout
 
@@ -121,7 +141,9 @@ omitted from the files rather than filled with invented text.
 The command prints before/after per file plus a total, and states growth as growth
 (`… chars added`) instead of presenting negative savings. If nothing qualified for
 archival it says so and calls the result a structural normalization. A repeated rewrite
-of unchanged state writes nothing and adds no archive or link.
+of unchanged state writes nothing and adds no archive or link — unless a later pass exposes a
+block that then becomes archivable (see the container rule above; every such removal is planned,
+reported and archived).
 
 ### Rollback limits
 
