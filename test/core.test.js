@@ -690,13 +690,13 @@ Implement deterministic compaction.
 - [ ] Add CI.
 `);
 
-  const dry = await compactAgentOS({ cwd: root, dryRun: true });
+  const dry = await compactAgentOS({ cwd: root, checkpoint: true, dryRun: true });
   assert.equal(dry.ok, true);
   assert.match(dry.text, /AgentOS compact dry run/);
   assert.match(dry.text, /Would archive/);
   assert.equal(await exists(dry.archivePath), false);
 
-  const result = await compactAgentOS({ cwd: root });
+  const result = await compactAgentOS({ cwd: root, checkpoint: true });
   assert.equal(result.ok, true);
   assert.match(result.text, /Archived: \.agentos\/runs\/compact-archive-/);
   assert.match(result.text, /AgentOS doctor: FAIL/);

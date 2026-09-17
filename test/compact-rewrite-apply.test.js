@@ -13,8 +13,8 @@ const HANDOFF = [
   '# Handoff', '',
   '## Scope', '', '- Workspace kind: multi-repo', '- Repos in scope: backend, frontend', '',
   '## Current objective — 2026-09-15 (latest): AUM work merged', '', 'Finish the compaction rewrite.', '',
-  '## Current objective — 2026-09-01', '', 'Superseded narrative that must leave live context.', '',
-  '## Previous objective — 2026-08-15', '', 'Much older narrative.', '', 'Never deploy without owner approval.', '',
+  '## Current objective — 2026-09-01', '', `Superseded narrative that must leave live context. ${'Historical detail. '.repeat(80)}`, '',
+  '## Previous objective — 2026-08-15', '', `Much older narrative. ${'Older detail. '.repeat(80)}`, '', 'Never deploy without owner approval.', '',
   '## Known failures', '', '- Flaky CI must never be treated as passing.', '',
   '## Files changed', '', '- src/core.ts', '',
   '```md', '## Current objective — fenced example, not a section', '```', '',
@@ -26,7 +26,7 @@ const TASKS = [
   '## Now', '', '- [ ] Apply the verified rewrite.', '  - Acceptance: archive is byte-exact.', '',
   '## Next', '', '- [ ] Wire the CLI flag.', '',
   '## Later', '', '- [ ] Publish the release.', '',
-  '## Done', '', '- [x] Slice 1 heading recognition.', '',
+  '## Done', '', `- [x] Slice 1 heading recognition. ${'Completed detail. '.repeat(80)}`, '',
 ].join('\n');
 
 async function fixture(t, { handoff = HANDOFF, tasks = TASKS } = {}) {
@@ -167,7 +167,7 @@ test('a second rewrite of unchanged state is a write-free no-op', async (t) => {
   const after = await snapshot(root);
   const again = cli(root, ['compact', '--rewrite', '--objective', objective]);
   assert.equal(again.status, 0, again.stdout + again.stderr);
-  assert.match(again.stdout, /no changes|already/i);
+  assert.match(again.stdout, /No safe reduction found; files unchanged\./);
   assert.deepEqual(await snapshot(root), after, 'repeat rewrite must not write, re-archive, or re-link');
   assert.equal((await archiveDirs(root)).length, 1);
 
@@ -227,7 +227,7 @@ test('apply carries an uncertain obligation live and records the block as archiv
     '# Handoff', '',
     '## Current objective — 2026-09-15', '', 'Finish the rewrite.', '',
     '## Scope', '', '- Workspace kind: single-repo', '',
-    '## Previous objective — 2026-08-20', '', 'Marker QZ-APPLY.', '', 'never push to main', '',
+    '## Previous objective — 2026-08-20', '', `Marker QZ-APPLY. ${'Archived narrative. '.repeat(100)}`, '', 'never push to main', '',
     '## Next exact action', '', 'Verify.', '',
   ].join('\n');
   const { root } = await fixture(t, { handoff });
@@ -269,13 +269,13 @@ test('rewrite refuses invalid UTF-8 and unreadable sources without writing', asy
   assert.deepEqual(await snapshot(root), before);
 });
 
-test('compact flags are validated and the checkpoint mode is unchanged', async (t) => {
+test('compact flags permit normal selectors and checkpoint preserves the legacy path', async (t) => {
   const { root } = await fixture(t);
-  const noRewrite = cli(root, ['compact', '--objective', 'obj-abcdef0123']);
-  assert.equal(noRewrite.status, 1);
-  assert.match(noRewrite.stderr + noRewrite.stdout, /--objective requires --rewrite/);
+  const normalSelector = cli(root, ['compact', '--objective', 'obj-abcdef0123']);
+  assert.equal(normalSelector.status, 1);
+  assert.match(normalSelector.stdout, /unknown --objective/);
 
-  const checkpoint = cli(root, ['compact']);
+  const checkpoint = cli(root, ['compact', '--checkpoint']);
   assert.equal(checkpoint.status, 0, checkpoint.stdout + checkpoint.stderr);
   assert.match(checkpoint.stdout, /Mode: archival checkpoint/);
   assert.equal((await archiveDirs(root)).length, 0, 'checkpoint mode uses the compact-archive-* format');

@@ -38,11 +38,11 @@ console.log(run(['compact', '--dry-run']));
 console.log('\n--- compact rewrite: ambiguous objectives block with candidates ---');
 await writeFile(join(root, '.agentos/handoff.md'), ['# Handoff', '', '## Scope', '', '- Workspace kind: multi-repo', '',
   '## Current objective — 2026-09-15 (latest): smoke', '', 'Do the work.', '',
-  '## Current objective — 2026-09-01', '', 'Superseded narrative.', '',
-  '## Previous objective — 2026-08-01', '', 'Old narrative.', '',
+  '## Current objective — 2026-09-01', '', `Superseded narrative. ${'History. '.repeat(100)}`, '',
+  '## Previous objective — 2026-08-01', '', `Old narrative. ${'Older history. '.repeat(100)}`, '',
   '## Known failures', '', '- Do not treat flaky CI as passing.', ''].join('\n'));
 await writeFile(join(root, '.agentos/tasks.md'), ['# Tasks', '', '## Now', '', '- [ ] Do the work.', '',
-  '## Done', '', '- [x] Old item.', ''].join('\n'));
+  '## Done', '', `- [x] Old item. ${'Completed detail. '.repeat(100)}`, ''].join('\n'));
 const blockedRewrite = spawnSync(process.execPath, [cli, 'compact', '--rewrite'], { cwd: root, encoding: 'utf8' });
 if (blockedRewrite.status !== 1) throw new Error('an ambiguous rewrite must exit 1 without writing');
 const objectiveIds = [...new Set(blockedRewrite.stdout.match(/obj-[a-f0-9]{10}/g) ?? [])];

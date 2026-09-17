@@ -3,6 +3,8 @@ export declare function writeFileAtomic(path: string, content: string | Buffer, 
 }): Promise<void>;
 export declare function __setAtomicWriteFaultForTests(path: string, point: 'before-sync' | 'before-rename', onTrigger?: (context: any) => void): void;
 export declare function __clearAtomicWriteFaultForTests(): void;
+export declare function __setCompactPreflightHookForTests(onTrigger: () => void | Promise<void>): void;
+export declare function __clearCompactPreflightHookForTests(): void;
 export declare function __writeFileExclusiveAtomicForTests(path: string, content: string): Promise<{
     created: boolean;
 }>;
@@ -105,6 +107,8 @@ export declare function compactAgentOS(options?: any): Promise<{
     text: string;
     dryRun?: undefined;
     changed?: undefined;
+    plannedChange?: undefined;
+    safeReduction?: undefined;
     archivePath?: undefined;
     archiveRelPath?: undefined;
     stateHash?: undefined;
@@ -122,6 +126,8 @@ export declare function compactAgentOS(options?: any): Promise<{
     rewrite: boolean;
     dryRun: boolean;
     changed: boolean;
+    plannedChange: boolean;
+    safeReduction: boolean;
     archivePath: string;
     archiveRelPath: string;
     stateHash: string;

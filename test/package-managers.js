@@ -73,14 +73,14 @@ for (const manager of managers) {
   invoke(['init', '--new']);
   invoke(['skills', 'add', 'core-pack,frontend-pack,backend-pack,fullstack-pack,github-pack']);
   invoke(['templates', 'copy', 'skill:core/code-review', '--replace']);
-  // Packed/installed CLI must expose the opt-in compaction rewrite end to end.
+  // Packed/installed CLI must expose default structural compaction and its compatibility alias end to end.
   await writeFile(join(cwd, '.agentos/handoff.md'), ['# Handoff', '', '## Scope', '', '- Workspace kind: single-repo', '',
     '## Current objective — 2026-09-15 (latest): packaged check', '', 'Do the work.', '',
-    '## Current objective — 2026-09-01', '', 'Superseded narrative.', '',
-    '## Previous objective — 2026-08-01', '', 'Old narrative.', '',
+    '## Current objective — 2026-09-01', '', `Superseded narrative. ${'History. '.repeat(100)}`, '',
+    '## Previous objective — 2026-08-01', '', `Old narrative. ${'Older history. '.repeat(100)}`, '',
     '## Known failures', '', '- Do not treat flaky CI as passing.', ''].join('\n'));
   await writeFile(join(cwd, '.agentos/tasks.md'), ['# Tasks', '', '## Now', '', '- [ ] Do the work.', '',
-    '## Done', '', '- [x] Old item.', ''].join('\n'));
+    '## Done', '', `- [x] Old item. ${'Completed detail. '.repeat(100)}`, ''].join('\n'));
   const ambiguous = spawnSync(process.execPath, [installedCli, 'compact', '--rewrite'], { cwd, encoding: 'utf8' });
   if (ambiguous.status !== 1) throw new Error(`${manager.name}: an ambiguous rewrite must exit 1`);
   const [packedObjective] = [...new Set(ambiguous.stdout.match(/obj-[a-f0-9]{10}/g) ?? [])];
@@ -119,7 +119,7 @@ for (const manager of managers) {
   await assert.rejects(() => lstat(join(cwd, '.agentos/skills/core/code-review')), { code: 'ENOENT' });
   invoke(['templates', 'copy', 'agent:planner']);
   invoke(['run', 'handoff', '--reason', 'packaged-smoke']);
-  invoke(['compact']);
+  invoke(['compact', '--checkpoint']);
   invoke(['doctor']);
   const handoff = await readFile(join(cwd, '.agentos/handoff.md'), 'utf8');
   if (!handoff.includes('packaged-smoke')) throw new Error('Packaged handoff did not retain its pause record.');

@@ -148,7 +148,7 @@ test('rehearsal: a rewritten workspace still round-trips through the checkpoint 
   assert.ok(objective, blocked.stdout);
   assert.equal(cli(root, ['compact', '--rewrite', '--objective', objective]).status, 0);
 
-  const checkpoint = cli(root, ['compact']);
+  const checkpoint = cli(root, ['compact', '--checkpoint']);
   assert.equal(checkpoint.status, 0, checkpoint.stdout + checkpoint.stderr);
   assert.match(checkpoint.stdout, /Mode: archival checkpoint/);
   const doctor = cli(root, ['doctor']);

@@ -59,7 +59,7 @@ test('compact rolls back handoff/tasks rewrite and archive creation when the las
   __setAtomicWriteFaultForTests(tasksPath, 'before-rename');
   t.after(__clearAtomicWriteFaultForTests);
 
-  await assert.rejects(() => compactAgentOS({ cwd: root }), /Injected atomic-write test fault/);
+  await assert.rejects(() => compactAgentOS({ cwd: root, checkpoint: true }), /Injected atomic-write test fault/);
 
   assert.equal(await readFile(handoffPath, 'utf8'), beforeHandoff, 'handoff.md must be restored to its pre-compact bytes');
   assert.equal(await readFile(tasksPath, 'utf8'), beforeTasks, 'tasks.md must be unchanged (it was the failing write)');
@@ -319,7 +319,7 @@ test('successful multi-file commands leave no atomic-write temp artifacts behind
   const root = await tempProject();
   await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
 
-  await compactAgentOS({ cwd: root });
+  await compactAgentOS({ cwd: root, checkpoint: true });
   await runHandoffAgentOS({ cwd: root, engine: 'claude-code', reason: 'manual-pause' });
   await agentsAgentOS({ cwd: root, add: 'planner' });
   await skillsAgentOS({ cwd: root, add: 'test-driven-development' });

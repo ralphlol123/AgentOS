@@ -5,6 +5,7 @@ import { appendContextRecord, literalMarkdown, markdownHeadings, markdownSection
 import { HANDOFF_ROLES, recognizeSections, resolveObjective, sectionText } from './context-sections.js';
 import { planCompactRewrite } from './compact-rewrite.js';
 import { renderUnifiedDiff } from './compact-report.js';
+import { resolveCompactMode } from './cli-options.js';
 import { collectRunHandoffGitState } from './git-evidence.js';
 import { canonicalAgentId, resolveAgentAlias, resolveSkillAlias, RETIRED_AGENT_IDS, RETIRED_SKILL_IDS, SKILL_ALIASES, agentDeprecationNotice, skillDeprecationNotice } from './aliases.js';
 import { LEGACY_SKILL_CARD_HASHES } from './legacy-skill-shapes.js';
@@ -259,6 +260,21 @@ export function __setAtomicWriteFaultForTests(path, point, onTrigger) {
 }
 export function __clearAtomicWriteFaultForTests() {
     pendingAtomicFault = null;
+}
+// Narrowly scoped, one-shot scheduling hook for compaction routing tests. It
+// runs only after the unlocked structural preflight and is reachable only by
+// importing core.js/dist directly; no CLI option exposes it.
+let pendingCompactPreflightHook = null;
+export function __setCompactPreflightHookForTests(onTrigger) {
+    pendingCompactPreflightHook = onTrigger;
+}
+export function __clearCompactPreflightHookForTests() {
+    pendingCompactPreflightHook = null;
+}
+async function runCompactPreflightHookForTests() {
+    const hook = pendingCompactPreflightHook;
+    pendingCompactPreflightHook = null;
+    await hook?.();
 }
 // Test-only direct access to the exclusive no-clobber write primitive, so its
 // mutual-exclusion guarantee under real concurrency can be verified without
@@ -997,7 +1013,7 @@ export async function promptAgentOS(options = {}) {
     return { ok: true, engine, text: prompt };
 }
 async function compactAgentOSUnlocked(options = {}) {
-    if (options.rewrite)
+    if (options.compactMode === 'structural')
         return compactRewriteUnlocked(options);
     const root = await findAgentOSRoot(options.cwd ?? process.cwd());
     if (!root)
@@ -1138,7 +1154,7 @@ function renderRewriteReadme({ stateHash, sources, sourceHashes, created }) {
 }
 function rewriteBlockedResult(root, reasons, candidates, dryRun, diff = false) {
     const lines = [
-        `AgentOS compact rewrite${dryRun ? ' dry run' : ''}: blocked`,
+        `AgentOS compact${dryRun ? ' dry run' : ''}: blocked`,
         `Root: ${root}`,
         '',
         'No files were changed. The rewrite was refused because:',
@@ -1146,15 +1162,14 @@ function rewriteBlockedResult(root, reasons, candidates, dryRun, diff = false) {
     ];
     if (candidates.length)
         lines.push('', 'Objective candidates:', ...candidates.map((candidate) => `- ${candidate.id} (line ${candidate.line}): ${candidate.heading}`));
-    lines.push('', 'Resolve the selection explicitly, for example:', '  agentos compact --rewrite --objective <id> --dry-run');
+    lines.push('', 'Resolve the selection explicitly, for example:', '  agentos compact --objective <id> --dry-run');
     if (diff)
         lines.push('', 'Detailed diff unavailable: compaction is blocked.');
     return { ok: false, rewrite: true, dryRun: Boolean(dryRun), blockedReasons: reasons, objectiveCandidates: candidates, text: lines.join('\n') };
 }
 /**
- * `agentos compact --rewrite`: archive live handoff/tasks byte-for-byte, then
- * replace them with the planner's canonical form. Opt-in only: the conservative
- * checkpoint behaviour of plain `agentos compact` is unchanged.
+ * Structural compaction archives live handoff/tasks byte-for-byte, then replaces
+ * them with the planner's canonical form when the combined live text shrinks.
  */
 async function compactRewriteUnlocked(options = {}) {
     const root = await findAgentOSRoot(options.cwd ?? process.cwd());
@@ -1184,7 +1199,9 @@ async function compactRewriteUnlocked(options = {}) {
     const plan = planCompactRewrite({ handoff: sources.handoff.text, tasks: sources.tasks.text, objectiveId: options.objective });
     if (!plan.ok)
         return rewriteBlockedResult(root, plan.blockedReasons, plan.objectiveCandidates, options.dryRun, options.diff);
-    const changed = plan.handoff !== sources.handoff.text || plan.tasks !== sources.tasks.text;
+    const plannedChange = plan.handoff !== sources.handoff.text || plan.tasks !== sources.tasks.text;
+    const safeReduction = plan.sizes.after < plan.sizes.before;
+    const changed = plannedChange && safeReduction;
     const sourceHashes = { handoff: sha256Hex(sources.handoff.bytes), tasks: sha256Hex(sources.tasks.bytes) };
     const runsDir = join(root, '.agentos/runs');
     const stem = `compact-rewrite-${stateHash}`;
@@ -1214,7 +1231,7 @@ async function compactRewriteUnlocked(options = {}) {
     const archivedTotal = plan.classification.handoff.filter((section) => section.decision === 'archived').length
         + plan.classification.tasks.filter((section) => section.decision === 'archived').length;
     const lines = [
-        `AgentOS compact rewrite${options.dryRun ? ' dry run' : ''}`,
+        `AgentOS compact${options.dryRun ? ' dry run' : ''}`,
         `Root: ${root}`,
         '',
         'Live context:',
@@ -1230,8 +1247,10 @@ async function compactRewriteUnlocked(options = {}) {
     ];
     if (plan.missing.length)
         lines.push(`- missing canonical sections: ${plan.missing.length}`);
-    if (!changed) {
-        lines.push('', 'No changes: live state already matches the canonical rewrite form; nothing was archived or rewritten.');
+    if (!safeReduction) {
+        lines.push('', 'No safe reduction found; files unchanged.');
+        if (options.dryRun)
+            lines.push('Preview only: projected deltas are shown above, but no apply would occur.');
     }
     else {
         if (!archivedTotal)
@@ -1245,7 +1264,7 @@ async function compactRewriteUnlocked(options = {}) {
         ]);
         lines.push('', `Source state: ${stateHash}`, `Bind an apply to this preview with --expect-state ${stateHash}`, '', 'Detailed diff:', diff || 'No differences: proposed live files are unchanged.');
     }
-    if (!options.dryRun && changed) {
+    if (!options.dryRun && !options.preflight && changed) {
         const created = new Date().toISOString();
         const manifest = renderRewriteManifest({ root, bundleRel, stateHash, sources, sourceHashes, plan, candidates: plan.objectiveCandidates });
         const readme = renderRewriteReadme({ stateHash, sources, sourceHashes, created });
@@ -1286,6 +1305,8 @@ async function compactRewriteUnlocked(options = {}) {
         rewrite: true,
         dryRun: Boolean(options.dryRun),
         changed,
+        plannedChange,
+        safeReduction,
         archivePath: bundlePath,
         archiveRelPath: `${bundleRel}/`,
         stateHash,
@@ -4509,9 +4530,27 @@ export async function normalizeRepoIdsAgentOS(options = {}) {
     return root && !options.dryRun ? withWorkspaceWriter(root, action) : action();
 }
 export async function compactAgentOS(options = {}) {
+    const compactMode = resolveCompactMode({
+        rewrite: options.rewrite,
+        checkpoint: options.checkpoint,
+        objective: options.objective,
+        expectState: options.expectState,
+        diff: options.diff,
+        dryRun: options.dryRun,
+    });
+    const resolved = { ...options, compactMode };
     const root = await findAgentOSRoot(options.cwd ?? process.cwd());
-    const action = () => compactAgentOSUnlocked(options);
-    return root && (!options.dryRun) ? withWorkspaceWriter(root, action) : action();
+    const action = () => compactAgentOSUnlocked(resolved);
+    if (!root || options.dryRun || compactMode === 'checkpoint') {
+        return root && !options.dryRun ? withWorkspaceWriter(root, action) : action();
+    }
+    // A refusal or non-reducing plan must not create even a transient lock.
+    const preflight = await compactAgentOSUnlocked({ ...resolved, preflight: true });
+    await runCompactPreflightHookForTests();
+    if (!preflight.ok || !('safeReduction' in preflight) || !preflight.safeReduction)
+        return preflight;
+    // Replan under the writer lock so an unbound apply always uses current files.
+    return withWorkspaceWriter(root, action);
 }
 export async function linkObsidianAgentOS(options = {}) {
     const root = await findAgentOSRoot(options.cwd ?? process.cwd());

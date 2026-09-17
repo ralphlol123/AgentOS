@@ -80,7 +80,7 @@ test('blocked rewrite --diff keeps concise candidates and writes nothing', async
 });
 
 test('rewrite --diff reports unchanged proposals without empty patch headers or writes', async (t) => {
-  const { parent, root } = await fixture(t, { handoff: rewriteHandoff(2), tasks: rewriteTasks(2) });
+  const { parent, root } = await fixture(t, { handoff: rewriteHandoff(100), tasks: rewriteTasks(100) });
   const apply = cli(root, ['compact', '--rewrite']);
   assert.equal(apply.status, 0, apply.stdout + apply.stderr);
   const before = await snapshotTree(parent);
@@ -113,9 +113,9 @@ test('rewrite --diff shows the intended removals and additions without writing',
   assert.deepEqual(await snapshotTree(parent), before);
 });
 
-test('checkpoint --diff renders the intended Unicode CRLF changes without writing', async (t) => {
-  const handoff = '# Handoff\r\n\r\n## Current objective\r\n\r\nKeep café ☕ context.\r\n';
-  const tasks = '# Tasks\r\n\r\n## Now\r\n\r\n- [ ] Ship 雪 safely.\r\n';
+test('structural --diff renders intended Unicode CRLF changes without writing', async (t) => {
+  const handoff = `# Handoff\r\n\r\n## Current objective\r\n\r\nKeep café ☕ context.\r\n\r\n## Previous objective\r\n\r\nOLD_雪 ${'history '.repeat(200)}\r\n`;
+  const tasks = `# Tasks\r\n\r\n## Now\r\n\r\n- [ ] Ship 雪 safely.\r\n\r\n## Done\r\n\r\n- [x] OLD_☕ ${'detail '.repeat(200)}\r\n`;
   const { parent, root } = await fixture(t, { handoff, tasks });
   const before = await snapshotTree(parent);
 
@@ -127,8 +127,9 @@ test('checkpoint --diff renders the intended Unicode CRLF changes without writin
   assert.match(preview.stdout, /^--- a\/\.agentos\/tasks\.md$/m);
   assert.match(preview.stdout, /^\+\+\+ b\/\.agentos\/tasks\.md$/m);
   assert.match(preview.stdout, /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@$/m);
-  assert.match(preview.stdout, /^\+\[Compaction archive: previous handoff\.md\]\(runs\/compact-archive-[a-f0-9]{64}\.md#previous-handoff\)$/m);
-  assert.match(preview.stdout, /^\+\[Compaction archive: previous tasks\.md\]\(runs\/compact-archive-[a-f0-9]{64}\.md#previous-tasks\)$/m);
+  assert.match(preview.stdout, /^-OLD_雪 history /m);
+  assert.match(preview.stdout, /^-- \[x\] OLD_☕ detail /m);
+  assert.match(preview.stdout, /^\+## History\r$/m);
   assert.match(preview.stdout, /café ☕ context/);
   assert.match(preview.stdout, /Ship 雪 safely/);
   assert.match(preview.stdout, /^ Keep café ☕ context\.\r$/m, 'CRLF context preserves its line terminator in the unified diff');
@@ -166,8 +167,8 @@ test('checkpoint dry-run is concise and independent of live body size', async (t
   const beforeSmall = await snapshotTree(small.parent);
   const beforeLarge = await snapshotTree(large.parent);
 
-  const smallPreview = cli(small.root, ['compact', '--dry-run']);
-  const largePreview = cli(large.root, ['compact', '--dry-run']);
+  const smallPreview = cli(small.root, ['compact', '--checkpoint', '--dry-run']);
+  const largePreview = cli(large.root, ['compact', '--checkpoint', '--dry-run']);
 
   for (const preview of [smallPreview, largePreview]) {
     assert.equal(preview.status, 0, preview.stdout + preview.stderr);
@@ -187,7 +188,7 @@ test('checkpoint dry-run is concise and independent of live body size', async (t
 });
 
 test('rewrite dry-run is concise and independent of live body size', async (t) => {
-  const small = await fixture(t, { handoff: rewriteHandoff(1), tasks: rewriteTasks(1) });
+  const small = await fixture(t, { handoff: rewriteHandoff(100), tasks: rewriteTasks(100) });
   const large = await fixture(t, { handoff: rewriteHandoff(4000), tasks: rewriteTasks(4000) });
   const beforeSmall = await snapshotTree(small.parent);
   const beforeLarge = await snapshotTree(large.parent);
@@ -197,7 +198,7 @@ test('rewrite dry-run is concise and independent of live body size', async (t) =
 
   for (const preview of [smallPreview, largePreview]) {
     assert.equal(preview.status, 0, preview.stdout + preview.stderr);
-    assert.match(preview.stdout, /^AgentOS compact rewrite dry run/m);
+    assert.match(preview.stdout, /^AgentOS compact dry run/m);
     assert.match(preview.stdout, /Root:/);
     assert.match(preview.stdout, /handoff\.md: \d+ chars -> \d+ chars/);
     assert.match(preview.stdout, /tasks\.md: \d+ chars -> \d+ chars/);
