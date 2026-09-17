@@ -1,53 +1,53 @@
 # Compaction
 
-AgentOS keeps live context in two files: `.agentos/handoff.md` and `.agentos/tasks.md`.
-Both grow without bound in a long-lived workspace, because every session appends a new
-objective, state block, or history entry. There are two ways to deal with that, and they
-have different guarantees.
+AgentOS keeps live context in `.agentos/handoff.md` and `.agentos/tasks.md`. The normal command
+structurally compacts those files; the older archive-and-link workflow now requires an explicit
+flag.
 
-| | `agentos compact` | `agentos compact --rewrite` |
+| Command | Role | Live-state behavior |
 | --- | --- | --- |
-| Kind | archival checkpoint | structural rewrite |
-| Live bytes | retained verbatim, plus one archive link per file | rebuilt in canonical form |
-| Reduces live size | no (it can grow it) | yes, when history exists |
-| Requires review | no | yes (`--dry-run`, optionally `--diff`, then apply) |
-| Reversible | n/a | archive holds the originals byte-for-byte |
+| `agentos compact` | **Default structural compaction** | Rebuilds canonical live context and applies only when the combined character count strictly decreases. |
+| `agentos compact --rewrite` | Compatibility alias | Uses exactly the same planner, safety checks, and apply behavior as normal compact; it is not a separate or safer mode. |
+| `agentos compact --checkpoint` | Legacy checkpoint | Retains all live text, appends archive links, and may grow live state. |
 
-## Conservative checkpoint (default)
+## Default structural compaction
 
 ```bash
-agentos compact --dry-run
-agentos compact --dry-run --diff   # include the proposed patch; still writes nothing
-agentos compact
+agentos compact --dry-run                         # concise preview; writes nothing
+agentos compact --dry-run --diff                  # detailed patch; writes nothing
+agentos compact                                   # apply only a safe reduction
+agentos compact --objective <id>                  # ambiguity or intentional override
+agentos compact --expect-state <sha256>           # optional preview binding
 ```
 
-Archives the exact before/after text under `.agentos/runs/compact-archive-<sha256>.md`,
-appends a relative link in each live file to its `previous-handoff` / `previous-tasks`
-anchor, and changes nothing else. Unchanged repeats are write-free no-ops verified against
-the full referenced archive. This mode never removes live prose: it cannot distinguish
-historical narrative from a standing instruction, so it keeps everything and says so.
+Preview and apply use the same planner. Dry runs report mode, sizes, classification counts,
+missing-section counts, and intended paths without printing complete proposed file bodies; library
+callers still receive exact proposals and structured classification. `--diff` adds a unified diff
+with stable LF output while preserving Unicode and CRLF inputs in the comparison. It is valid only
+with `--dry-run`; `--diff=false` leaves concise output active, and unchanged proposals emit no empty
+patch headers. Every dry-run form is read-only across the entire workspace tree.
 
-## Structural rewrite (`--rewrite`)
+A diff also prints the source-state hash and matching `--expect-state` apply command. That binding
+is optional: ordinary apply replans current disk state, then replans again under the writer lock
+before writing. If ambiguity blocks compaction, the concise candidate list remains available but no
+proposed body or patch header is emitted.
+
+One valid current objective is selected automatically. `--objective` is needed only when candidates
+are ambiguous or the user intentionally overrides the automatic selection. Dates and labels such as
+“latest” are content, never selection rules.
+
+## Explicit checkpoint mode
 
 ```bash
-agentos compact --rewrite --dry-run                      # concise review; writes nothing
-agentos compact --rewrite --dry-run --diff               # detailed patch; writes nothing
-agentos compact --rewrite --objective <id>               # apply
-agentos compact --rewrite --objective <id> --expect-state <sha256>
+agentos compact --checkpoint --dry-run
+agentos compact --checkpoint
 ```
 
-Dry runs are concise by default: they report mode, sizes, classification counts, missing-section
-counts, and the files that would be archived or rewritten, but do not print complete proposed
-file bodies. Library callers still receive the exact proposals and structured classification in
-the result object. Add `--diff` to either compact mode for a unified diff with stable LF output;
-Unicode content and CRLF inputs are preserved in the comparison. `--diff` is preview-only: it is
-accepted only with `compact --dry-run` (with or without `--rewrite`), and `--diff=false` leaves the
-concise default active. An unchanged proposal says so without emitting empty patch headers.
-
-A rewrite diff also prints the source-state hash and the matching `--expect-state` apply command.
-If ambiguity blocks the rewrite, the concise candidate list is still shown, no proposed bodies or
-patch headers are emitted, and the output states that the detailed diff is unavailable because
-compaction is blocked. Every dry-run form is read-only across the whole workspace tree.
+Checkpoint mode archives the exact before/after text under
+`.agentos/runs/compact-archive-<sha256>.md`, appends a relative link in each live file to its
+`previous-handoff` / `previous-tasks` anchor, and changes nothing else. It never removes live prose
+and may increase live size. Unchanged repeats are write-free no-ops verified against the referenced
+archive.
 
 ### What stays live, always
 
@@ -214,8 +214,10 @@ compaction is blocked. Every dry-run form is read-only across the whole workspac
   byte-identical to HEAD, the 82 that carry an uncertain line without preserving a
   block grow 16.61% (36 of them above 20%), and the 205 that keep a block whole grow 21.57% (89
   above 20%). Over-retention can therefore make a rewrite *add* bytes rather than shrink — the
-  measured residual corpora above do — which is why the size report states growth as growth, and the
-  archive remains the recovery path in either direction.
+  measured residual corpora above do — which is why the size report states growth as growth and
+  normal compact refuses the proposal without creating an archive or changing live files. The raw
+  source remains live in that case; an explicit checkpoint is available when an archive-and-link
+  snapshot is wanted without reduction.
 - The existing `## Preserved context` and `## History` containers. The container's own body is
   re-read on every run — a nested history block that an earlier build demoted to a `###`
   heading there is classified again and becomes archivable, unless it still holds an unchecked
@@ -256,8 +258,8 @@ compaction is blocked. Every dry-run form is read-only across the whole workspac
 
 ### What moves to the archive
 
-- Superseded objectives — only after an explicit objective selection resolves which one
-  is live, and only when the block holds no unchecked task and no **un-liftable** uncertain
+- Superseded objectives — only after objective resolution determines which one is live,
+  and only when the block holds no unchecked task and no **un-liftable** uncertain
   obligation. Liftable obligations are carried forward live before the block archives.
 - Explicit history sections: `Previous …`, `Superseded …`, `Past …`, `Old …`,
   `Historic …`, `Archived …`, `Done`, `History`, `Run log`. They archive when they contain
@@ -302,7 +304,7 @@ hashes; otherwise a deterministic `-1`, `-2`, … suffix is used.
   preflight rejects the link first).
 - An `--expect-state` hash that no longer matches the current sources.
 
-A blocked rewrite proposes no live files at all — it is a refusal, not a partial plan.
+A blocked compaction proposes no live files at all — it is a refusal, not a partial plan.
 
 ### Heading variants
 
@@ -314,13 +316,14 @@ never matched. Content inside fenced code blocks is never treated as a heading. 
 reports missing, empty, and duplicate objective headings separately, always with line
 numbers, and never rewrites state from a diagnostic.
 
-### Doctor after a rewrite
+### Status and doctor after compaction
 
 ```bash
 agentos doctor
 agentos doctor --json
 ```
 
+`status` and `doctor` use the same objective recognition and resolution rules as compaction.
 Diagnostics run read-only after a changed apply. In a concise preview, canonical sections for
 which the source had no material are reported as a count; library callers can inspect the exact
 names in the structured `missing` field. Missing sections are omitted from the files rather than
@@ -328,17 +331,20 @@ filled with invented text.
 
 ### Size reporting
 
-The command prints before/after per file plus a total, and states growth as growth
-(`… chars added`) instead of presenting negative savings. If nothing qualified for
-archival it says so and calls the result a structural normalization. A repeated rewrite
-of unchanged state writes nothing and adds no archive or link — unless a later pass exposes a
-block that then becomes archivable (see the container rule above; every such removal is planned,
-reported and archived).
+The command prints before/after per file plus a total, and states growth as growth (`… chars added`)
+instead of presenting negative savings. Normal apply proceeds only when the **combined** live
+character count strictly decreases. Equal, growing, and identical proposals say
+`No safe reduction found; files unchanged.` and create no archive, writer lock, temporary file, or
+live-state write. One live file may grow when the combined total still falls; both file deltas are
+reported honestly. A repeat writes nothing once no safe reduction remains — unless a later pass
+exposes a block that then becomes archivable (see the container rule above; every such removal is
+planned, reported and archived).
 
 ### Rollback limits
 
-Archive creation and both live replacements run inside the existing in-process mutation
-transaction: a write failure restores original bytes, mode, and existence, and removes the
-new archive bundle. This is best-effort rollback plus per-file atomic rename — not a
-crash-safe multi-file transaction and not protection against concurrent writers. Do not
-run two writers against one workspace.
+On a safe reduction, the exact original files are archived, read back, and hash-verified before
+replacement. Source state is rechecked, workspace boundaries are enforced, and planning is repeated
+under the workspace writer lock. Archive creation and both live replacements run inside the existing
+in-process mutation transaction: a write failure restores original bytes, mode, and existence and
+removes the new archive bundle. This is best-effort rollback plus per-file atomic rename — not a
+crash-safe multi-file transaction. Do not run two writers against one workspace.

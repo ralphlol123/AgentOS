@@ -9,9 +9,9 @@ import { initAgentOS, compactAgentOS, doctorAgentOS } from '../dist/core.js';
 
 const CLI = resolve('dist/cli.js');
 
-/** A workspace shaped like the real one that motivated the rewrite: years of dated
+/** A disposable multi-repo workspace shaped like the real one that motivated compaction: dated
  *  objectives, a long Done list, custom sections, and old checkpoint links. */
-function kargaxLikeState({ objectives = 4, previous = 30, detailsPerTask = 3 } = {}) {
+function representativeState({ objectives = 1, previous = 30, detailsPerTask = 3 } = {}) {
   const handoff = ['# Handoff', ''];
   for (let i = 0; i < objectives; i++) {
     handoff.push(`## Current objective — 2026-09-${String(15 - i).padStart(2, '0')}${i === 0 ? ' (latest): AUM work merged' : ''}`, '',
@@ -24,10 +24,15 @@ function kargaxLikeState({ objectives = 4, previous = 30, detailsPerTask = 3 } =
     '## Open decisions', '', '- [ ] Decide the release cadence.', '',
     '## Files changed', '', '- src/core.ts', '',
     '## Custom escalation', '', 'Call the owner before migration.', '');
+  const retainedObligations = new Map([
+    [1, 'never push to main'],
+    [2, '`migration.sql` must never be edited after being applied.'],
+    [3, 'Accounts, locations and trips in the production database must not be modified without approval.'],
+  ]);
   for (let i = 0; i < previous; i++) {
     handoff.push(`## Previous objective — 2026-0${(i % 9) + 1}-${String((i % 28) + 1).padStart(2, '0')} (run ${i})`, '',
-      `Historical narrative ${i}: ${'detail '.repeat(120)}`, '',
-      i % 7 === 0 ? 'Never deploy this repo without owner approval.' : `- [x] Finished step ${i}`, '');
+      `Historical narrative ${i}: ${'detail '.repeat(120)}End.`, '',
+      retainedObligations.get(i) ?? (i % 7 === 0 ? 'Never deploy this repo without owner approval.' : `- [x] Finished step ${i}`), '');
   }
   handoff.push('[Compaction archive: previous handoff.md](runs/compact-archive-deadbeef.md#previous-handoff)', '');
 
@@ -51,7 +56,11 @@ async function fixture(t, state) {
   t.after(() => rm(parent, { recursive: true, force: true }));
   const root = join(parent, 'workspace');
   await mkdir(root);
-  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
+  for (const repo of ['backend', 'frontend', 'frontend-client']) {
+    await mkdir(join(root, repo));
+    await writeFile(join(root, repo, 'package.json'), JSON.stringify({ name: repo, private: true }));
+  }
+  await initAgentOS({ cwd: root, mode: 'existing', yes: true, agents: 'minimal' });
   await writeFile(join(root, '.agentos/handoff.md'), state.handoff);
   await writeFile(join(root, '.agentos/tasks.md'), state.tasks);
   return { parent, root };
@@ -72,26 +81,20 @@ async function snapshot(dir) {
 const unchecked = (text) => (text.match(/^\s*[-*+]\s+\[ \].*$/gm) ?? []).map((line) => line.trim());
 const checkboxes = (text) => (text.match(/^\s*[-*+]\s+\[[ xX]\].*$/gm) ?? []).map((line) => line.trim());
 
-test('rehearsal: rewrite reduces a history-heavy workspace without losing live obligations', async (t) => {
-  const state = kargaxLikeState();
+test('rehearsal: plain compact reduces a representative multi-repo workspace without losing live obligations', async (t) => {
+  const state = representativeState();
   const { root } = await fixture(t, state);
 
-  // 1. Four "current" headings must block rather than guess.
-  const blocked = cli(root, ['compact', '--rewrite']);
-  assert.equal(blocked.status, 1, blocked.stdout + blocked.stderr);
-  assert.match(blocked.stdout, /4 current-objective headings/);
-  const ids = [...new Set(blocked.stdout.match(/obj-[a-f0-9]{10}/g) ?? [])];
-  assert.equal(ids.length, 4, blocked.stdout);
-
-  // 2. Explicit selection produces a reviewable, write-free preview.
+  // 1. A sole dated objective auto-selects in the ordinary write-free preview.
   const before = await snapshot(root);
-  const preview = cli(root, ['compact', '--rewrite', '--objective', ids[0], '--dry-run']);
+  const preview = cli(root, ['compact', '--dry-run']);
   assert.equal(preview.status, 0, preview.stdout + preview.stderr);
   assert.match(preview.stdout, /chars removed/);
+  assert.doesNotMatch(preview.stdout, /Historical narrative 12/, 'concise preview must not dump full source/proposed files');
   assert.deepEqual(await snapshot(root), before, 'dry run must not write');
 
-  // 3. Apply, then verify retention, recovery, and no-op behaviour.
-  const applied = cli(root, ['compact', '--rewrite', '--objective', ids[0]]);
+  // 2. Plain apply, then verify retention, recovery, diagnostics, and no-op behaviour.
+  const applied = cli(root, ['compact']);
   assert.equal(applied.status, 0, applied.stdout + applied.stderr);
   const liveHandoff = await readFile(join(root, '.agentos/handoff.md'), 'utf8');
   const liveTasks = await readFile(join(root, '.agentos/tasks.md'), 'utf8');
@@ -109,6 +112,9 @@ test('rehearsal: rewrite reduces a history-heavy workspace without losing live o
   assert.ok(liveHandoff.includes('Do not treat flaky CI as passing.'));
   assert.ok(liveHandoff.includes('Call the owner before migration.'));
   assert.ok(liveHandoff.includes('Never deploy this repo without owner approval.'), 'constraint inside archived history is carried forward');
+  assert.ok(liveHandoff.includes('never push to main'), 'lowercase obligation from history must stay live');
+  assert.ok(liveHandoff.includes('`migration.sql` must never be edited after being applied.'), 'code-led obligation from history must stay live');
+  assert.ok(liveHandoff.includes('Accounts, locations and trips in the production database must not be modified without approval.'), 'long-subject obligation from history must stay live');
   assert.ok(liveHandoff.includes('## Custom escalation') || liveHandoff.includes('### Custom escalation'));
   assert.ok(liveHandoff.includes('## Current objective — 2026-09-15 (latest): AUM work merged'), 'selected objective keeps its heading');
 
@@ -124,29 +130,33 @@ test('rehearsal: rewrite reduces a history-heavy workspace without losing live o
   assert.ok(archivedHandoff.every((section) => /^Previous objective/.test(section.heading)), JSON.stringify(archivedHandoff));
   assert.equal(
     manifest.classification.handoff.filter((section) => section.role === 'current-objective' && section.decision === 'preserved').length,
-    3,
-    'superseded objectives that still hold unchecked obligations stay live instead of being archived',
+    0,
+    'the sole selected objective stays live rather than being classified as a preserved superseded objective',
   );
 
-  // 4. Diagnostics are clean on the rewritten state, and a repeat is a write-free no-op.
+  // 3. Status and doctor share objective recognition, and a repeat is a write-free no-op.
+  const status = cli(root, ['status']);
+  assert.equal(status.status, 0, status.stdout + status.stderr);
+  assert.match(status.stdout, /Current handoff:/);
+  assert.match(status.stdout, /2026-09-15 \(latest\): AUM work merged/);
   const doctor = await doctorAgentOS({ cwd: root });
   assert.ok(!/current-objective headings/.test(doctor.text), doctor.text);
   assert.ok(!/has no ## Current objective/.test(doctor.text), doctor.text);
   assert.ok(!/duplicate ## (Now|Next|Later|Done)/.test(doctor.text), doctor.text);
   const after = await snapshot(root);
-  const repeat = cli(root, ['compact', '--rewrite', '--objective', ids[0]]);
+  const repeat = cli(root, ['compact']);
   assert.equal(repeat.status, 0, repeat.stdout + repeat.stderr);
-  assert.deepEqual(await snapshot(root), after, 'repeat rewrite must not write, re-archive, or re-link');
+  assert.match(repeat.stdout, /No safe reduction found; files unchanged\./);
+  assert.deepEqual(await snapshot(root), after, 'repeat compact must not write, re-archive, or re-link');
   assert.equal((await readdir(join(root, '.agentos/runs'), { withFileTypes: true })).filter((e) => e.name.startsWith('compact-rewrite-')).length, 1);
 });
 
-test('rehearsal: a rewritten workspace still round-trips through the checkpoint compactor', async (t) => {
-  const state = kargaxLikeState({ objectives: 2, previous: 4, detailsPerTask: 1 });
+test('rehearsal: the compatibility alias and explicit checkpoint remain separate', async (t) => {
+  const state = representativeState({ previous: 4, detailsPerTask: 1 });
   const { root } = await fixture(t, state);
-  const blocked = cli(root, ['compact', '--rewrite']);
-  const [objective] = [...new Set(blocked.stdout.match(/obj-[a-f0-9]{10}/g) ?? [])];
-  assert.ok(objective, blocked.stdout);
-  assert.equal(cli(root, ['compact', '--rewrite', '--objective', objective]).status, 0);
+  const alias = cli(root, ['compact', '--rewrite']);
+  assert.equal(alias.status, 0, alias.stdout + alias.stderr);
+  assert.match(alias.stdout, /Mode: structural rewrite/);
 
   const checkpoint = cli(root, ['compact', '--checkpoint']);
   assert.equal(checkpoint.status, 0, checkpoint.stdout + checkpoint.stderr);
@@ -157,7 +167,7 @@ test('rehearsal: a rewritten workspace still round-trips through the checkpoint 
 });
 
 test('rehearsal: unclear sections are reported, not silently dropped', async (t) => {
-  const state = kargaxLikeState({ objectives: 1, previous: 1, detailsPerTask: 1 });
+  const state = representativeState({ objectives: 1, previous: 1, detailsPerTask: 1 });
   const { root } = await fixture(t, state);
   const result = await compactAgentOS({ cwd: root, rewrite: true, dryRun: true });
   assert.equal(result.ok, true, result.text);
@@ -169,4 +179,15 @@ test('rehearsal: unclear sections are reported, not silently dropped', async (t)
     unchecked(state.tasks).sort(),
     'every unchecked task survives, merged into the canonical sections',
   );
+});
+
+test('rehearsal: ambiguous default compact refuses with zero writes', async (t) => {
+  const state = representativeState({ objectives: 2, previous: 2, detailsPerTask: 1 });
+  const { root } = await fixture(t, state);
+  const before = await snapshot(root);
+  const blocked = cli(root, ['compact']);
+  assert.equal(blocked.status, 1, blocked.stdout + blocked.stderr);
+  assert.match(blocked.stdout, /2 current-objective headings/);
+  assert.equal(new Set(blocked.stdout.match(/obj-[a-f0-9]{10}/g) ?? []).size, 2);
+  assert.deepEqual(await snapshot(root), before, 'ambiguous default compact must not archive, lock, or write');
 });

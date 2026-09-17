@@ -2,6 +2,20 @@
 
 All notable changes to AgentOS for Projects are documented here.
 
+## [0.7.0] - 2026-09-17
+
+### Changed
+
+- **Structural compaction is now the default.** The ordinary workflow is `agentos compact --dry-run`, then `agentos compact`. `--rewrite` remains a compatibility alias for that same behavior; `--checkpoint` explicitly selects the previous archive-and-link mode, which may grow live state.
+- **Objective interpretation is shared across compact, status, and doctor.** One valid current objective is selected automatically. `--objective` is reserved for ambiguity or an intentional override, and dates or labels such as “latest” never decide. Missing, empty, malformed, unknown, ambiguous, or stale selections refuse with zero writes.
+- **Preview output is concise by default.** Every dry run is write-free and omits complete proposed file bodies. `--diff` adds the detailed unified patch and is valid only with `--dry-run`; `--expect-state` remains an optional binding rather than a requirement for ordinary apply.
+- **Normal apply requires a real reduction.** Compaction replans current disk state under the writer lock and writes only when the combined live character count strictly decreases. Equal, growing, and identical proposals report `No safe reduction found; files unchanged.` without creating an archive, lock, temporary file, or live-state write. Per-file growth is still reported honestly when the combined total falls.
+
+### Safety
+
+- Exact originals are archived and hash-verified before live replacement; source state is rechecked, workspace boundaries and the writer lock are enforced, and archive/live writes share the existing transaction and rollback path.
+- Unknown sections remain live. Complete uncertain obligations that can be lifted are carried forward verbatim; an uncertain obligation that cannot be lifted as a complete unit keeps its whole block live. Repeat compaction reaches a write-free fixed point once no safe reduction remains. Detailed measured preservation residuals and known conservative semantic limits remain in `docs/compaction.md`.
+
 ## [0.6.0] - 2026-09-16
 
 ### Fixed
