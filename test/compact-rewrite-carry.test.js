@@ -55,6 +55,56 @@ test('qualified history headings are recognized as history', () => {
   assert.equal(plan.handoff.includes('## Current objective\n\nCurrent work.'), true);
 });
 
+test('a confident directive and an uncertain obligation are both carried while their blocks archive', () => {
+  // Slice 3 carries a liftable uncertain obligation down the same path as the confident
+  // rule: the statement stays live as a bullet, and the block around it archives byte-exact
+  // and is reported with that reason. Keeping the whole block live is now the fallback for a
+  // candidate that cannot be lifted on its own (see compact-preservation.test.js).
+  const handoff = doc([
+    ['Current objective', 'Current work.'],
+    ['Previous objective — 2026-08-01', ['Archived narrative marker QZ-CARRIED.', '', 'Do not deploy on a Friday.'].join('\n')],
+    ['Previous objective — 2026-08-02', ['Archived narrative marker QZ-UNCERTAIN.', '', 'never push to main'].join('\n')],
+  ]);
+  const plan = planCompactRewrite({ handoff, tasks: TASKS });
+  assert.equal(plan.ok, true, plan.blockedReasons.join('\n'));
+  assert.deepEqual(plan.carriedForward, ['Do not deploy on a Friday.', 'never push to main']);
+
+  const [confident, uncertain] = plan.classification.handoff.filter((section) => /Previous objective/.test(section.heading));
+  assert.equal(confident.decision, 'archived');
+  assert.equal(plan.handoff.includes('Archived narrative marker QZ-CARRIED.'), false, 'the block around a carried directive still archives');
+  assert.equal(uncertain.decision, 'archived');
+  assert.equal(plan.handoff.includes('Archived narrative marker QZ-UNCERTAIN.'), false, 'and the block around a carried obligation archives with it');
+  assert.match(confident.reason, /1 constraint line\(s\) carried forward/);
+  assert.match(uncertain.reason, /uncertain obligation\(s\) carried forward verbatim/);
+  assert.match(plan.handoff, /^- Do not deploy on a Friday\.$/m, 'the confident directive is live as a bullet');
+  assert.match(plan.handoff, /^- never push to main$/m, 'and so is the uncertain obligation');
+  for (const heading of ['Previous objective — 2026-08-01', 'Previous objective — 2026-08-02']) {
+    assert.match(plan.handoff, new RegExp(`- Archived \\\`${heading}\\\` \\(line \\d+\\)`), `${heading} is reported in History`);
+  }
+
+  const second = planCompactRewrite({ handoff: plan.handoff, tasks: plan.tasks });
+  assert.equal(second.handoff, plan.handoff, 'the carried obligations are a fixed point');
+  assert.deepEqual(second.carriedForward, []);
+});
+
+test('a generated constraints block keeps an uncertain obligation through re-filtering', () => {
+  const handoff = doc([
+    ['Current objective', 'Current work.'],
+    ['Preserved context', [
+      '### Constraints carried forward from archived history',
+      '',
+      '- `migration.sql` must never be edited after being applied',
+      '- never push to main',
+    ].join('\n')],
+  ]);
+  const plan = planCompactRewrite({ handoff, tasks: TASKS });
+  assert.equal(plan.ok, true, plan.blockedReasons.join('\n'));
+  assert.ok(plan.handoff.includes('- `migration.sql` must never be edited after being applied'), 'a code-led obligation is not erased by re-filtering');
+  assert.ok(plan.handoff.includes('- never push to main'), 'a lowercase obligation is not erased by re-filtering');
+  assert.equal(plan.handoff.match(/### Constraints carried forward from archived history/g).length, 1);
+  assert.equal(planCompactRewrite({ handoff: plan.handoff, tasks: plan.tasks }).handoff, plan.handoff, 'stable across runs');
+});
+
 test('stacked bullet markers in an earlier generated block are normalized', () => {
   const handoff = doc([
     ['Current objective', 'Current work.'],

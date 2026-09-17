@@ -118,21 +118,73 @@ test('unresolved work deeper than a history block keeps the whole block live', (
   assert.deepEqual(archivedOf(plan), []);
 });
 
-test('a fenced example that mentions the generated heading is never treated as that block', () => {
+test('nested history holding an uncertain obligation carries it live and archives the block', () => {
+  // The carry contract, one level down: an uncertain obligation that can be lifted is
+  // carried forward verbatim as a live bullet, so the nested history block around it
+  // archives and the container reports that.
+  const block = 'Old narrative marker QZ-NESTED.\n\nnever push to main';
+  const plan = planCompactRewrite({
+    handoff: fixture({ nested: [['Previous objective — 2026-08-02', block], ['Files changed', '- src/core.ts']] }),
+    tasks: TASKS,
+  });
+  assert.equal(plan.ok, true, plan.blockedReasons.join('\n'));
+  assert.equal(plan.handoff.includes(block), false, 'the nested history block leaves live context');
+  assert.equal(plan.handoff.includes('QZ-NESTED.'), false, 'and its narrative archives with it');
+  assert.match(plan.handoff, /^- never push to main$/m, 'the obligation is carried out of it and stays live');
+  assert.ok(plan.carriedForward.includes('never push to main'), 'and is reported as carried forward');
+  assert.ok(plan.handoff.includes('- src/core.ts'), 'non-history nested content stays live');
+  const entry = plan.classification.handoff.find((section) => section.heading === 'Previous objective — 2026-08-02');
+  assert.equal(entry.decision, 'archived');
+  assert.match(entry.reason, /uncertain obligation\(s\) carried forward verbatim/);
+  assert.match(
+    plan.classification.handoff.find((section) => section.role === 'preserved').reason,
+    /nested history archived/,
+    JSON.stringify(plan.classification.handoff, null, 1),
+  );
+  const second = planCompactRewrite({ handoff: plan.handoff, tasks: plan.tasks });
+  assert.equal(second.handoff, plan.handoff, 'the rewritten container is stable across runs');
+});
+
+test('nested history in the tasks container gets the same treatment', () => {
+  const block = 'Archived tasks marker QZ-TASKS-NESTED.\n\n`migration.sql` must never be edited after being applied';
+  const tasks = [TASKS, '## Preserved context', '', '### Previous objective — 2026-08-03', '', block, ''].join('\n');
+  const plan = planCompactRewrite({ handoff: fixture({ nested: [['Files changed', '- src/cli.ts']] }), tasks });
+  assert.equal(plan.ok, true, plan.blockedReasons.join('\n'));
+  assert.equal(plan.tasks.includes(block), false, 'the tasks-side nested block leaves live context');
+  assert.equal(plan.tasks.includes('QZ-TASKS-NESTED.'), false, 'and its narrative archives with it');
+  assert.match(plan.tasks, /^- `migration\.sql` must never be edited after being applied$/m, 'the obligation is carried out of it and stays live');
+  assert.ok(plan.carriedForward.includes('`migration.sql` must never be edited after being applied'), 'and is reported as carried forward');
+  const entry = plan.classification.tasks.find((section) => section.heading === 'Previous objective — 2026-08-03');
+  assert.equal(entry.decision, 'archived');
+  assert.match(entry.reason, /uncertain obligation\(s\) carried forward verbatim/);
+  assert.match(
+    plan.classification.tasks.find((section) => section.role === 'preserved').reason,
+    /nested history archived/,
+    JSON.stringify(plan.classification.tasks, null, 1),
+  );
+});
+
+test('fenced samples inside a container are still never treated as that block', () => {
   const fenced = ['```md', '### Constraints carried forward from archived history', '', '- Must not commit production dumps.', '```'].join('\n');
+  // A sample that would not qualify is not re-filtered either: re-filtering is
+  // fence-aware, so a fenced example is reproduced byte-for-byte.
+  const narrative = ['```md', '### Constraints carried forward from archived history', '', '- narrative that merely mentions never', '```'].join('\n');
   const handoff = fixture({
     nested: [
       ['Files changed', fenced],
+      ['Notes', narrative],
       ['Previous objective — 2026-08-01', 'Old narrative.\n\nNever deploy without owner approval.'],
     ],
   });
   const plan = planCompactRewrite({ handoff, tasks: TASKS });
   assert.equal(plan.ok, true);
   assert.ok(plan.handoff.includes(fenced), 'the fenced sample is byte-identical');
+  assert.ok(plan.handoff.includes(narrative), 'a fenced sample is never re-filtered or rewritten');
   assert.ok(
     plan.handoff.includes('```\n\n### Constraints carried forward from archived history\n\n- Never deploy without owner approval.'),
     'the carried line lands in a real block after the closed fence, not inside the sample',
   );
+  assert.equal(plan.handoff.match(/### Constraints carried forward from archived history/g).length, 3, 'two samples plus the real block');
 });
 
 test('a deeper heading before the first sibling block is never dropped', () => {
@@ -305,6 +357,66 @@ test('nested archival records the absolute source line and is not a live-context
   const [archived] = archivedOf(plan);
   assert.equal(archived.line, expected, 'the audit entry points at the real source line');
   assert.match(plan.handoff, new RegExp(`- Archived \`Previous objective \\(superseded\\) — 2026-09-13: reviewed\` \\(line ${expected}\\)`));
+});
+
+test('a demoted block whose obligation was flattened into a sibling is stable and reported', () => {
+  // A promoted-then-demoted history block can end up as a `###` sibling of the heading
+  // that used to sit inside it. Re-reading the container must keep looking at
+  // the block plus the content that followed it, or the parent is archived on
+  // the second pass and the uncertain-obligation report disappears.
+  //
+  // The fixture's obligation must be UN-LIFTABLE. This test is about a parent that stays
+  // preserved live with the report naming the statement that stopped it; a statement that
+  // CAN be lifted is carried out of the container, the parent archives, and the report is
+  // a carried line instead — a different outcome, asserted in the liftable variant below.
+  const unliftable = ['Accounts, locations and trips in the production database must not be modified without', '', '- approval from the release manager'].join('\n');
+  const handoff = fixture({
+    nested: [
+      ['Previous objective (superseded) — 2026-09-13: flattened', 'plain narrative marker QZ-FLATTENED.'],
+      ['Notes', unliftable],
+    ],
+  });
+  const first = planCompactRewrite({ handoff, tasks: TASKS });
+  assert.equal(first.ok, true, first.blockedReasons.join('\n'));
+  assert.ok(first.handoff.includes('plain narrative marker QZ-FLATTENED.'), 'the parent block stays whole and live');
+  assert.ok(first.handoff.includes(unliftable), 'and the un-liftable statement stays live with it');
+  assert.deepEqual(first.carriedForward, [], 'nothing is extracted from a statement that cannot be lifted');
+  assert.deepEqual(archivedOf(first), []);
+  const entry = first.classification.handoff.find((section) => section.heading === 'Previous objective (superseded) — 2026-09-13: flattened');
+  assert.equal(entry.decision, 'preserved');
+  assert.match(entry.reason, /uncertain obligation/i);
+  assert.match(first.classification.handoff.find((section) => section.role === 'preserved').reason, /nested history preserved live \(1\)/);
+
+  const second = planCompactRewrite({ handoff: first.handoff, tasks: first.tasks });
+  assert.equal(second.handoff, first.handoff, 'the container is byte-identical on a repeat run');
+  assert.equal(
+    second.classification.handoff.find((section) => section.heading === 'Previous objective (superseded) — 2026-09-13: flattened').decision,
+    'preserved',
+    'the decision does not flip on the planner\'s own output',
+  );
+  assert.deepEqual(archivedOf(second), []);
+
+  // The liftable variant of the same shape: the obligation is live in the sibling block
+  // that owns it (not duplicated as a carried line), so the parent archives and the
+  // second pass over the planner's own output rewrites nothing.
+  const liftable = planCompactRewrite({
+    handoff: fixture({
+      nested: [
+        ['Previous objective (superseded) — 2026-09-13: flattened', 'plain narrative marker QZ-FLATTENED.'],
+        ['Notes', 'never push to main'],
+      ],
+    }),
+    tasks: TASKS,
+  });
+  assert.equal(liftable.ok, true, liftable.blockedReasons.join('\n'));
+  assert.ok(liftable.handoff.includes('never push to main'), 'the obligation is live in the sibling that owns it');
+  assert.match(liftable.handoff, /^### Notes$/m);
+  assert.deepEqual(liftable.carriedForward, [], 'a live sibling is not duplicated as a carried line');
+  assert.equal(liftable.handoff.includes('plain narrative marker QZ-FLATTENED.'), false, 'the parent archives and takes its narrative with it');
+  assert.equal(archivedOf(liftable).length, 1);
+  const liftableSecond = planCompactRewrite({ handoff: liftable.handoff, tasks: liftable.tasks });
+  assert.equal(liftableSecond.handoff, liftable.handoff, 'the liftable variant is byte-identical on a repeat run');
+  assert.deepEqual(archivedOf(liftableSecond), []);
 });
 
 test('a second rewrite of the rewritten container is byte-identical', () => {

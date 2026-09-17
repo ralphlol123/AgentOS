@@ -218,6 +218,47 @@ test('apply rolls the whole workspace back when any write fails', async (t) => {
   assert.deepEqual(await snapshot(root), before, 'archive failure must leave live state untouched');
 });
 
+test('apply carries an uncertain obligation live and records the block as archived', async (t) => {
+  // The carry contract end to end: a liftable uncertain obligation leaves its block as a
+  // carried-forward bullet, the block around it archives byte-exact, and the manifest
+  // records that. The apply / archive-bundle / manifest / repeat-run behaviour is
+  // otherwise unchanged.
+  const handoff = [
+    '# Handoff', '',
+    '## Current objective — 2026-09-15', '', 'Finish the rewrite.', '',
+    '## Scope', '', '- Workspace kind: single-repo', '',
+    '## Previous objective — 2026-08-20', '', 'Marker QZ-APPLY.', '', 'never push to main', '',
+    '## Next exact action', '', 'Verify.', '',
+  ].join('\n');
+  const { root } = await fixture(t, { handoff });
+  const originalHandoff = await readFile(join(root, '.agentos/handoff.md'));
+  const preview = await compactAgentOS({ cwd: root, rewrite: true, dryRun: true });
+  assert.equal(preview.ok, true, preview.text);
+  const objective = preview.objective;
+  assert.equal(typeof objective, 'string');
+
+  const apply = cli(root, ['compact', '--rewrite', '--objective', objective]);
+  assert.equal(apply.status, 0, apply.stdout + apply.stderr);
+
+  const liveHandoff = await readFile(join(root, '.agentos/handoff.md'), 'utf8');
+  assert.match(liveHandoff, /^- never push to main$/m, 'the obligation stays live as a carried bullet');
+  assert.equal(liveHandoff.includes('Marker QZ-APPLY.'), false, 'the block around it archives');
+
+  const [dir] = await archiveDirs(root);
+  assert.ok(dir, 'the rewrite still archives the originals');
+  const bundle = join(root, '.agentos/runs', dir);
+  assert.deepEqual(await readFile(join(bundle, 'handoff.md')), originalHandoff, 'archived bytes are exact');
+  const manifest = JSON.parse(await readFile(join(bundle, 'manifest.json'), 'utf8'));
+  const entry = manifest.classification.handoff.find((section) => /Previous objective/.test(section.heading));
+  assert.equal(entry.decision, 'archived');
+  assert.match(entry.reason, /uncertain obligation\(s\) carried forward verbatim/);
+  assert.equal(manifest.classification.handoff.filter((section) => section.decision === 'archived').length, 1);
+
+  const again = cli(root, ['compact', '--rewrite', '--objective', objective]);
+  assert.equal(again.status, 0, again.stdout + again.stderr);
+  assert.equal((await archiveDirs(root)).length, 1, 'a repeat run re-archives nothing');
+});
+
 test('rewrite refuses invalid UTF-8 and unreadable sources without writing', async (t) => {
   const { root } = await fixture(t);
   await writeFile(join(root, '.agentos/tasks.md'), Buffer.from([0x23, 0x20, 0xff, 0x0a]));
