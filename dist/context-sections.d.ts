@@ -12,6 +12,8 @@ export interface RecognizedSection {
     line: number;
     start: number;
     end: number;
+    /** Whole section from its heading through its body, excluding trailing whitespace. */
+    raw: string;
     body: string;
 }
 /** Section roles that belong to live `.agentos/handoff.md`. */
@@ -34,3 +36,21 @@ export declare function recognizeSections(text: string, roles: SectionRole[]): R
 export declare function sectionText(section: RecognizedSection): string;
 /** A present heading with no suffix text and no body text is empty, not missing. */
 export declare function isEmptySection(section: RecognizedSection): boolean;
+export interface ObjectiveCandidate {
+    id: string;
+    heading: string;
+    line: number;
+    text: string;
+    section: RecognizedSection;
+}
+export type ObjectiveResolutionKind = 'resolved' | 'missing' | 'empty' | 'ambiguous' | 'invalid-selector';
+export interface ObjectiveResolution {
+    kind: ObjectiveResolutionKind;
+    candidates: ObjectiveCandidate[];
+    selected?: ObjectiveCandidate;
+    diagnostic?: string;
+}
+/** Discover current-objective candidates with stable IDs bound to source bytes. */
+export declare function discoverObjectives(text: string): ObjectiveCandidate[];
+/** Resolve the one objective all read-only and compaction consumers should use. */
+export declare function resolveObjective(text: string, requestedId?: string): ObjectiveResolution;

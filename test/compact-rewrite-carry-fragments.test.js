@@ -49,6 +49,11 @@ const FRAGMENTS = [
 test('the recorded real workspace carries its directives and none of its wrapped prose', () => {
   const plan = planCompactRewrite({ handoff: withHistory('Previous objective — 2026-09-14 (earlier)', [...DIRECTIVES, ...FRAGMENTS]), tasks: TASKS });
   assert.equal(plan.ok, true, plan.blockedReasons.join('\n'));
+  assert.equal(
+    plan.classification.handoff.find((section) => section.role === 'history').decision,
+    'archived',
+    'the 22-line run is prose, so no uncertain-obligation retention fires on it',
+  );
   assert.deepEqual(plan.carriedForward, DIRECTIVES, 'exactly the three standing directives');
   for (const fragment of FRAGMENTS) {
     assert.equal(plan.handoff.includes(fragment), false, `fragment must not reach live context: ${fragment.slice(0, 60)}`);
@@ -62,7 +67,35 @@ test('the recorded real workspace carries its directives and none of its wrapped
   assert.deepEqual(second.carriedForward, []);
 });
 
+test('the recorded fragments stay archived however the layout separates them', () => {
+  // NEGATIVE control for the layout-sensitive regression: the same 22 lines used to
+  // be archived as one long run, but separating them with blank lines made each
+  // fragment its own short run, and a short run that opens a statement and merely
+  // contains a keyword was retained — so the whole block went live (19/19 fragments).
+  // Prose does not become an instruction because someone re-flowed the paragraph.
+  const layouts = {
+    'single newline': [...DIRECTIVES, ...FRAGMENTS].map((line) => `- ${line}`).join('\n'),
+    'blank-line separated': [...DIRECTIVES, ...FRAGMENTS].map((line) => `- ${line}`).join('\n\n'),
+  };
+  for (const [name, body] of Object.entries(layouts)) {
+    const handoff = doc([
+      ['Current objective', 'Current work.'],
+      [`Previous objective — 2026-09-14 (${name})`, body],
+    ]);
+    const plan = planCompactRewrite({ handoff, tasks: TASKS });
+    assert.equal(plan.ok, true, plan.blockedReasons.join('\n'));
+    const entry = plan.classification.handoff.find((section) => section.role === 'history');
+    assert.equal(entry.decision, 'archived', `${name}: the fragments are prose in either layout`);
+    const live = FRAGMENTS.filter((fragment) => plan.handoff.includes(fragment));
+    assert.deepEqual(live, [], `${name}: ${live.length}/19 fragments reached live context`);
+    assert.deepEqual(plan.carriedForward, DIRECTIVES, `${name}: exactly the three standing directives`);
+  }
+});
+
 test('a carried line must read as an instruction, not as a wrapped fragment', () => {
+  // `expected` is whether the statement is live as a carried line — taken verbatim by the
+  // confident rule, or lifted out of its block by the uncertain-obligation tier. A line
+  // that is neither is archived with its block and must not reach live context.
   const cases = [
     ['Do not deploy on a Friday.', true, 'sentence-final directive'],
     ['Never push to main.', true, 'sentence-final directive'],
@@ -70,9 +103,9 @@ test('a carried line must read as an instruction, not as a wrapped fragment', ()
     ['No secrets in the repo', true, 'opens on the directive itself'],
     ['**Never push to main**', true, 'bold-wrapped directive'],
     ['Migrations and deployment remain separately protected.', true, 'uppercase sentence'],
-    ['never deploy without asking anyone first', false, 'starts lowercase'],
-    ['and then it was protected by the old guard all along', false, 'starts lowercase'],
-    ['`/tmp/dump.sql` must not be committed anywhere', false, 'opens on a code span, i.e. a continuation'],
+    ['never deploy without asking anyone first', true, 'a lowercase directive opens the statement, so the uncertain tier carries it'],
+    ['and then it was protected by the old guard all along', false, 'opens on a continuation connective'],
+    ['`/tmp/dump.sql` must not be committed anywhere', true, 'opens on a code span, so the confident rule refuses it and the uncertain tier carries it'],
     ['Cancel discards the edit refs; it never needed to "restore" anything since read mode reads', false, 'trails off without ending a sentence'],
     ['Since the migration that added it was created this same session and never shared, edited that', false, 'dangling connective'],
     ['The equivalent gap exists in `OperatorService.update()` (never had this check either) but', false, 'dangling conjunction'],
@@ -82,6 +115,11 @@ test('a carried line must read as an instruction, not as a wrapped fragment', ()
     const plan = planCompactRewrite({ handoff: withHistory('Previous objective — 2026-08-01', [line]), tasks: TASKS });
     assert.equal(plan.ok, true);
     assert.equal(plan.carriedForward.length === 1, expected, `${why}: ${line.slice(0, 60)}`);
+    if (expected) continue;
+    // A line neither rule takes is prose: it stays out of live context entirely, and the
+    // block it sat in is the one that archives.
+    assert.equal(plan.handoff.includes(line), false, `prose must not reach live context: ${why}`);
+    assert.equal(plan.classification.handoff.find((section) => section.role === 'history').decision, 'archived', why);
   }
 });
 
@@ -146,26 +184,58 @@ test('a late obligation phrase does not turn a fragment into a constraint', () =
   }
 });
 
-test('the documented limits of the shape rule hold', () => {
-  // Both are deliberate, and both are written down next to the rule in
-  // docs/compaction.md: a line that opens on a code span is treated as a
-  // continuation of the previous line, and a line that ends on a conjunction is
-  // treated as truncated. Pin them so a future loosening is a conscious choice.
-  const notCarried = [
+test("the confident rule's limits are covered by the uncertain-obligation tier", () => {
+  // These are the presentation variants the confident rule cannot extract. They are not
+  // left to the whole-block fallback: the statement is lifted out of its block as a
+  // complete statement, carried forward verbatim, and the block archives and is reported.
+  // The obligation stays live without the narrative that surrounded it.
+  const carriedLines = [
     '`/tmp/dump.sql` must not be committed anywhere',
     '`migration.sql` must never be edited after being applied',
-    'Do not push before the release is tagged and',
-    // The subject-before-modal window is bounded on purpose (six words). A very long
-    // subject pushes the modal past it: the line stays in the archive rather than
-    // live context. Widening the window was measured to buy 3 more constructed
-    // obligations at the cost of admitting narrative, so the bound is deliberate.
     'Accounts, locations and trips in the production database must not be modified without approval',
   ];
-  for (const line of notCarried) {
+  for (const line of carriedLines) {
     const plan = planCompactRewrite({ handoff: withHistory('Previous objective — 2026-08-01', [line]), tasks: TASKS });
     assert.equal(plan.ok, true);
-    assert.deepEqual(plan.carriedForward, [], `documented limit: ${line}`);
+    assert.deepEqual(plan.carriedForward, [line], `carried verbatim by the uncertain tier: ${line}`);
+    assert.ok(plan.handoff.split('\n').some((text) => text.trim() === `- ${line}`), `kept live as a carried bullet: ${line}`);
+    const entry = plan.classification.handoff.find((section) => section.role === 'history');
+    assert.equal(entry.decision, 'archived', line);
+    assert.match(entry.reason, /uncertain obligation\(s\) carried forward verbatim/, line);
+    assert.match(plan.handoff, /- Archived `Previous objective — 2026-08-01` \(line \d+\): .*uncertain obligation/, 'the removed block is reported');
   }
+
+  // A line that opens as an obligation and then trails off is still read as
+  // truncated narrative rather than as an obligation: it stays in the archive,
+  // and the block around it still shrinks.
+  const truncated = 'Do not push before the release is tagged and';
+  const plan = planCompactRewrite({ handoff: withHistory('Previous objective — 2026-08-01', [truncated]), tasks: TASKS });
+  assert.equal(plan.ok, true);
+  assert.deepEqual(plan.carriedForward, [], 'documented limit: a line ending on a conjunction is truncated');
+  assert.equal(plan.handoff.includes(truncated), false, 'a truncated line is prose, not an obligation');
+  assert.equal(plan.classification.handoff.find((section) => section.role === 'history').decision, 'archived');
+});
+
+test('a bounded run of obligation-looking lines is carried line by line, an unbounded one archives as prose', () => {
+  const boundedPlan = planCompactRewrite({
+    handoff: withHistory('Previous objective — 2026-08-02', ['never push to main', '`migration.sql` must never be edited after being applied']),
+    tasks: TASKS,
+  });
+  assert.equal(boundedPlan.ok, true, boundedPlan.blockedReasons.join('\n'));
+  const bounded = ['- never push to main', '- `migration.sql` must never be edited after being applied'].join('\n');
+  assert.ok(boundedPlan.handoff.includes(bounded), 'a short list of obligations stays live bullet by bullet');
+  assert.deepEqual(boundedPlan.carriedForward, ['never push to main', '`migration.sql` must never be edited after being applied']);
+  const boundedEntry = boundedPlan.classification.handoff.find((section) => section.role === 'history');
+  assert.equal(boundedEntry.decision, 'archived', 'the block around the list archives');
+  assert.match(boundedEntry.reason, /2 uncertain obligation\(s\) carried forward verbatim/);
+  assert.match(boundedPlan.handoff, /- Archived `Previous objective — 2026-08-02` \(line \d+\)/, 'and it is reported');
+
+  // The same shape, long enough to be narrative: the 22-line recorded block.
+  const unboundedPlan = planCompactRewrite({ handoff: withHistory('Previous objective — 2026-08-03', [...DIRECTIVES, ...FRAGMENTS]), tasks: TASKS });
+  assert.equal(unboundedPlan.ok, true);
+  assert.equal(unboundedPlan.classification.handoff.find((section) => section.role === 'history').decision, 'archived', 'a run this long is prose');
+  for (const fragment of FRAGMENTS) assert.equal(unboundedPlan.handoff.includes(fragment), false, fragment.slice(0, 50));
+  assert.deepEqual(unboundedPlan.carriedForward, DIRECTIVES);
 });
 
 test('a bloated block from an earlier build is re-filtered down on the next run', () => {

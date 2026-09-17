@@ -7,9 +7,8 @@
  * is current. Callers archive the originals byte-for-byte before replacing
  * anything on disk.
  */
-import { createHash } from 'node:crypto';
 import { hasUnclosedFence, markdownHeadings } from './markdown.js';
-import { matchSectionTitle } from './context-sections.js';
+import { matchSectionTitle, resolveObjective } from './context-sections.js';
 
 export type SectionDecision = 'live' | 'preserved' | 'archived';
 export type SourceFile = 'handoff' | 'tasks';
@@ -166,9 +165,384 @@ function isCarriedConstraint(line: string): boolean {
     : body.length <= PROSE_LINE_LIMIT;
 }
 
+/**
+ * An opener that continues the preceding sentence rather than starting a new
+ * one. History in a real workspace is soft-wrapped, so lines routinely begin on
+ * a connective or a demonstrative that only resolves against the line above
+ * (`and then …`, `which means …`, `This is why …`): prose however rule-like its
+ * text reads.
+ */
+const LEAD_CONTINUATION = /^(?:and|or|but|nor|so|yet|then|also|plus|because|since|which|who|whom|whose|that|this|these|those|it|its|they|them|their|there|such|where|when|whenever|while|whereas|though|although|however|therefore|thus|meanwhile|otherwise|instead|moreover|furthermore|additionally|still|e\.g\.|i\.e\.)\b/i;
+
+/** Strip a bullet marker and wrapping emphasis, leaving the statement text. */
+function statementText(line: string): string {
+  return line
+    .trim()
+    .replace(/^(?:[-*+]|\d+\.)\s+/, '')
+    .trim()
+    .replace(/^[*_\s]+/, '')
+    .replace(/[*_\s]+$/, '');
+}
+
+/**
+ * Does the statement open a new statement instead of continuing the previous
+ * line? An obligation may open lowercase (`never push to main`), on a code span
+ * (`` `migration.sql` must never be edited after being applied ``), or on an
+ * ordinary uppercase subject — but it never opens on a continuation connective.
+ */
+function opensStatement(line: string, statement: string): boolean {
+  if (!statement || LEAD_CONTINUATION.test(statement)) return false;
+  return DIRECTIVE_START.test(line.trim()) || /^[A-Z]/.test(statement) || statement.startsWith('`');
+}
+
+/**
+ * Modal or requirement phrasing that makes a statement an obligation rather than
+ * narration that happens to mention a word. Every alternative carries the complement
+ * that constrains its subject or excludes the shape that reports one, so a deontic
+ * instruction matches and a description of one does not:
+ *
+ *  - `must not`, `must never`, `must only` are deontic without a complement, EXCEPT as
+ *    an epistemic perfect: `must not have been warm`, `must never have been active on
+ *    that path`, `must only have been lifted` report how a state came about. The
+ *    reported past is the commonest shape history takes, so the perfect is excluded by
+ *    lookahead. A bare prohibition (`must not be relied on`) still matches: it is
+ *    deontic where it is written as an instruction, and where it is reported speech
+ *    this tier carries the sentence forward verbatim rather than guessing it away
+ *    (docs/compaction.md states that as a measured limit, it is not claimed here);
+ *  - `must be` needs a participial predicate — the complement that commits the subject
+ *    to an action (`must be approved`, `must be kept`, `must be removed`) and not a
+ *    stative adjective that describes it (`must be stale`, `must be silent`);
+ *  - `require(s)`/`required` need a constraint complement: a permission or review noun
+ *    (`requires approval`, `required before merging`). `requires two passes` reports a
+ *    count, and `was required for the staging deploy` a past event;
+ *  - `without approval`/`only with approval` are negated permissions already.
+ *
+ * A prohibition that OPENS the statement is recognized by DIRECTIVE_START together with
+ * CONSTRAINT_LINE, so `do not`/`don't` are deliberately not alternatives here: mid-sentence
+ * they are narration (`I don't recall which branch carried that change`), and a short
+ * subject-modal line is still taken verbatim by the confident rule above.
+ */
+const IRREGULAR_PARTICIPLES = 'forbidden|hidden|known|shown|seen|chosen|written|given|taken|driven|frozen|broken|stolen|sworn|drawn|grown|blown|thrown|worn|torn|kept|held|left|set|made|done|run|put|read|found|sent|built|spent|brought|told|said|met|won|lost|cut|shut|paid|sold';
+/** A requirement noun that constrains: permission, review, or a gate that stands for one. */
+const CONSTRAINT_COMPLEMENT = '(?:(?:explicit|written|formal|prior|manual|a|an|the|another|independent) )*(?:approval|permission|authorisation|authorization|sign-?off|consent|review)';
+/**
+ * `before merging`, `before deploying` — a gate phrased as a clause rather than a noun.
+ * The gerund is anchored to the action verbs the confident rule's CONSTRAINT_LINE
+ * already trusts: an unanchored `before [a-z]+ing` matches any participle at all, so
+ * `The pipeline requires a restart before running the new migration, which the team
+ * discovered last month.` — a mechanical report of what a pipeline does — was read as
+ * an obligation and held its whole block live (measured at -0.07% reduction over 150
+ * blocks). A gate outside this list is archived, and named as a limit in
+ * docs/compaction.md.
+ */
+const BEFORE_GERUND = 'before\\s+(?:touching|merging|deploying|committing|pushing|releasing)\\b';
+/** A past participle, including the suppletive `been`/`had` the perfect uses. */
+const PERFECT_PARTICIPLE = `(?:been|had|got|gotten|[a-z]+ed\\b|(?:${IRREGULAR_PARTICIPLES})\\b)`;
+/** `must not have been warm` — an epistemic perfect, not a prohibition. */
+const EPISTEMIC_PERFECT = `(?!\\s+have\\s+${PERFECT_PARTICIPLE})`;
+const MODAL_PHRASE = new RegExp(
+  [
+    `\\bmust\\s+(?:not|never|only)\\b${EPISTEMIC_PERFECT}`,
+    `\\bmust\\s+be\\s+(?:[a-z]+ed\\b|(?:${IRREGULAR_PARTICIPLES})\\b)`,
+    `\\brequires?\\s+(?:for\\s+)?${CONSTRAINT_COMPLEMENT}\\b`,
+    `\\brequires?\\b[^.;!?]{0,60}?\\b${BEFORE_GERUND}`,
+    `\\brequired\\s+(?:for\\s+)?${CONSTRAINT_COMPLEMENT}\\b`,
+    `\\brequired\\s+${BEFORE_GERUND}`,
+    '\\b(?:without|only with)\\s+(?:explicit\\s+)?approval\\b',
+  ].join('|'),
+  'i',
+);
+/** A trailing colon, semicolon or comma announces more text, so the statement is not complete. */
+const CONTINUATION_TAIL = /[:,;]$/;
+
+/** One soft-wrapped statement: a sentence accumulated across consecutive wrapped lines. */
+interface Statement {
+  lines: string[];
+  text: string;
+}
+
+function makeStatement(lines: string[]): Statement {
+  return { lines, text: lines.join(' ').replace(/\s+/g, ' ').trim() };
+}
+
+/** The next line that holds content, skipping blank lines and fenced regions. */
+function nextContentLine(lines: string[], outside: boolean[], from: number): number | undefined {
+  for (let index = from; index < lines.length; index++) if (outside[index] && lines[index].trim()) return index;
+  return undefined;
+}
+
+/** One statement a block holds, with the layout evidence that decides whether it can be lifted. */
+interface BlockStatement {
+  statement: Statement;
+  /** The sentence only reached its end by crossing a blank line into the next paragraph. */
+  joined: boolean;
+  /** The sentence is unfinished and the next paragraph carries it on in a shape that is not joined. */
+  continues: boolean;
+}
+
+/**
+ * The statements a block holds, in order, each with the layout evidence that decides
+ * whether it can be lifted out of the block on its own.
+ *
+ * A line that ends a sentence closes the statement; a line that does not is a wrap and is
+ * joined with the next one. The joined text is what the shape is judged on, because the
+ * unit that matters is the sentence a reader would see, not the width the file happened to
+ * be wrapped at.
+ *
+ * A blank line is a layout artifact too, so a sentence the layout split across one is
+ * assembled across it (`… must not be modified without` / blank / `approval`): judging the
+ * text above the break alone lifts half a statement into live context and archives the half
+ * that completes it. A statement that reaches its end that way is recorded as `joined`, and
+ * an assembled sentence that is still unfinished is not liftable.
+ *
+ * Some following lines cannot be pasted onto the sentence above, and they are not silently
+ * treated as a finish either: an item whose own text carries the sentence on
+ * (`- approval from the release manager` after `… must not be removed`) cannot be joined
+ * without writing a sentence nobody wrote, so the statement is recorded as `continues` and
+ * the block keeps it. Both flags are evidence for the caller; only a sentence that is
+ * finished, and needed no join, is liftable.
+ */
+function blockStatements(lines: string[], outside: boolean[]): BlockStatement[] {
+  const statements: BlockStatement[] = [];
+  let buffer: string[] = [];
+  let joined = false;
+  let continues = false;
+  let blank = false;
+  const openText = () => makeStatement(buffer).text;
+  const close = () => {
+    if (!buffer.length) return;
+    statements.push({ statement: makeStatement(buffer), joined, continues });
+    buffer = [];
+    joined = false;
+    continues = false;
+    blank = false;
+  };
+  const append = (line: string) => {
+    buffer.push(line);
+    blank = false;
+    if (SENTENCE_END.test(openText())) close();
+  };
+  for (let index = 0; index < lines.length; index++) {
+    // A fence ends the sentence it interrupts: fenced text is content, never a wrap.
+    if (!outside[index]) { close(); continue; }
+    const line = lines[index].trim();
+    if (!line) { if (buffer.length) blank = true; continue; }
+    if (buffer.length && !SENTENCE_END.test(openText())) {
+      const carriedOn = continuesPreviousSentence(line);
+      // Structure is never wrapped onto the next paragraph, however it opens: a heading
+      // above a lowercase line is a heading with a body, not half a sentence.
+      if (STRUCTURAL_OPENING.test(buffer[0])) { close(); append(line); continue; }
+      if (carriedOn && ITEM_OPENING.test(line)) {
+        // An item that carries the sentence on is not joined: pasting the item's own text
+        // onto the sentence above produces a sentence nobody wrote. The statement is
+        // unfinished, so the block keeps it rather than lifting a fragment.
+        continues = true;
+        close();
+        append(line);
+        continue;
+      }
+      if (carriedOn) { joined = joined || blank; append(line); continue; }
+      // Two items are two statements: markdown will not read them as one sentence, so
+      // neither does this. A heading, quote or fence opens its own block, and everything
+      // else that opens a statement of its own splits too, while a code-span or
+      // parenthesised wrap is appended to the sentence above.
+      if (STRUCTURAL_OPENING.test(line) || (ITEM_OPENING.test(line) && ITEM_OPENING.test(buffer[0])) || startsNewStatement(line)) {
+        close();
+        append(line);
+        continue;
+      }
+      append(line);
+      continue;
+    }
+    append(line);
+  }
+  close();
+  return statements;
+}
+
+/**
+ * Does this line open a statement of its own rather than continue the sentence above — a
+ * directive, or an ordinary uppercase subject? A backtick-led line is a wrap (a sentence
+ * that names the code it is about does not begin with its subject), and a continuation
+ * connective never opens one.
+ */
+function startsNewStatement(line: string): boolean {
+  const statement = statementText(line);
+  if (!statement || LEAD_CONTINUATION.test(statement)) return false;
+  return DIRECTIVE_START.test(line) || /^[A-Z]/.test(statement);
+}
+
+/**
+ * Is this statement shaped like an obligation, ignoring length? The shape has to be an
+ * obligation shape, because a keyword is not evidence — an earlier keyword-anywhere rule
+ * re-injected roughly 21KB of narrative into live context:
+ *  - opens a statement: it never continues the line above on a connective;
+ *  - obligation content: it opens on a directive, or states a modal/requirement phrase
+ *    (`must not`, `requires approval`, `without approval`, …). The modal is allowed to
+ *    sit after a long subject — `Accounts, locations and trips in the production
+ *    database must not …` is exactly the obligation the confident rule cannot take,
+ *    because its subject-to-modal window is bounded at six words;
+ *  - complete: it does not trail off on a function word or an unclosed parenthesis, and
+ *    a statement without terminal punctuation does not end on a colon, semicolon or
+ *    comma.
+ *
+ * DANGLING_TAIL is applied to the JOINED statement, never to each line: every line of a
+ * soft-wrapped obligation but the last ends mid-clause, so a per-line check would drop
+ * `… must not be modified without / approval` and split the block around it.
+ */
+function readsAsObligationShape(statement: Statement): boolean {
+  const { lines, text } = statement;
+  const first = lines[0];
+  if (!opensStatement(first, statementText(first))) return false;
+  if (!(DIRECTIVE_START.test(first) && CONSTRAINT_LINE.test(text)) && !MODAL_PHRASE.test(text)) return false;
+  if (DANGLING_TAIL.test(text)) return false;
+  if (!SENTENCE_END.test(text) && CONTINUATION_TAIL.test(text)) return false;
+  return true;
+}
+
+/**
+ * Statements that carry an obligation but that `isCarriedConstraint` cannot extract
+ * confidently: a lowercase directive, a code-span subject, a subject longer than the
+ * modal window, wrapping emphasis, a sentence the layout split across a blank line, or no
+ * terminal punctuation. They are `uncertain obligations`: possible standing instructions
+ * whose removal from live context this planner must not guess at.
+ *
+ * The unit of evidence is the STATEMENT — a sentence, assembled across the soft-wrapped
+ * lines that carry it, and across a blank line when the sentence continues there — and not
+ * the blank-line-bounded run. A run is a layout artifact: soft-wrapped history puts
+ * several sentences in one run, and the same prose re-flowed with blank lines between its
+ * sentences puts each one in a run of its own. Judging the run therefore made the verdict
+ * depend on where the blank lines fell, and inspected only its opening and its tail. A
+ * complete obligation in the middle of a paragraph was archived with the prose around it,
+ * while prose re-flowed with blank lines between its sentences was retained whole. The
+ * shape is applied to every statement a block contains.
+ *
+ * Bounded: longer than the prose limit is a paragraph, not an instruction. A statement
+ * that only became that long by crossing a blank line is handled by the caller instead,
+ * which keeps its block rather than losing the fragment the confident rule refused. A
+ * statement the confident rule already extracts verbatim is the caller's business too:
+ * carrying it here as well would duplicate a live line rather than save one.
+ */
+function isUncertainObligation(statement: Statement): boolean {
+  const { text } = statement;
+  if (!text || text.length > PROSE_LINE_LIMIT) return false;
+  return readsAsObligationShape(statement);
+}
+
+/** One possible obligation a block holds, and whether it can be lifted out of it. */
+interface UncertainCandidate {
+  /** Statement text, bullet markers and wrapping emphasis stripped. */
+  text: string;
+  /** The statement stands alone: it can be carried forward on its own. */
+  liftable: boolean;
+}
+
+/** A markdown item, heading, quote or fence — something that opens rather than continues. */
+const ITEM_OPENING = /^(?:[-*+]|\d+\.)\s|^#{1,6}\s|^>|^`{3,}|^~{3,}|^\|/;
+
+/**
+ * A heading, quote, fence or table row is structure, not prose: prose wraps under it, it
+ * does not wrap onto the next paragraph. `### Notes` above a lowercase line is a heading
+ * with a body, never a sentence whose second half follows the blank line.
+ */
+const STRUCTURAL_OPENING = /^#{1,6}\s|^>|^`{3,}|^~{3,}|^\|/;
+
+/**
+ * Does the line that follows a blank line continue the sentence before it, or open
+ * something new? A statement without terminal punctuation cannot be lifted when the
+ * next paragraph carries it on: the sentence was split by the layout, not finished, and
+ * lifting the part above the break would put a fragment into live context.
+ *
+ * A markdown item counts only when its own text carries the sentence on (`- approval
+ * from the release manager` after `… must not be modified without`); an item or heading
+ * with an ordinary opening word opens something new, exactly as one without a marker
+ * does. A heading, quote, fence or table row therefore never continues a sentence.
+ */
+function continuesPreviousSentence(line: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) return false;
+  const body = ITEM_OPENING.test(trimmed) ? statementText(trimmed) : trimmed;
+  if (!body) return false;
+  return /^[a-z]/.test(body) || /^[,;:)\]]/.test(body);
+}
+
+/** The sentence this line ends is carried on by the next paragraph across a blank line. */
+function continuesAfterBlankLine(lines: string[], outside: boolean[], index: number): boolean {
+  const next = nextContentLine(lines, outside, index + 1);
+  return next !== undefined && continuesPreviousSentence(lines[next]);
+}
+
+/**
+ * Every possible obligation a block holds, each marked liftable or not.
+ *
+ * A candidate is liftable when it reads as a complete unit on its own: it ends a
+ * sentence, or it is unterminated but nothing follows it that continues it. The
+ * fallback — keeping the whole block live — is reserved for the shapes that cannot be
+ * lifted: a statement the layout split across a blank line whose halves do not rejoin into
+ * a finished sentence (`… must not be modified without` / blank / `approval` is assembled,
+ * but the assembled sentence is still unterminated), a tail an item carries on without
+ * being joined, and a joined sentence too long to read as an instruction. A candidate the
+ * confident rule already extracts verbatim is not repeated here: the same line would
+ * otherwise be carried twice.
+ */
+function uncertainCandidates(body: string): UncertainCandidate[] {
+  const lines = body.split(/\r?\n/);
+  const outside = unfencedLines(lines);
+  const found: UncertainCandidate[] = [];
+  for (const { statement, joined, continues } of blockStatements(lines, outside)) {
+    const text = statement.lines.map(statementText).join(' ').replace(/\s+/g, ' ').trim();
+    if (!text) continue;
+    if (statement.text.length > PROSE_LINE_LIMIT) {
+      // Too long to read as an instruction — unless it only became that long by crossing a
+      // blank line. The fragment above the break was refused by the confident rule, so the
+      // block keeps the statement rather than losing it.
+      if (joined && readsAsObligationShape(statement)) found.push({ text, liftable: false });
+      continue;
+    }
+    if (!isUncertainObligation(statement)) continue;
+    // Already extracted verbatim by the confident rule: carrying it here as well would
+    // duplicate a live line instead of saving one.
+    if (!joined && !continues && statement.lines.length === 1 && isCarriedConstraint(statement.lines[0])) continue;
+    found.push({ text, liftable: SENTENCE_END.test(statement.text) || (!joined && !continues) });
+  }
+  return found;
+}
+
+/**
+ * The obligation candidates a block holds, split by whether they can be lifted out of
+ * it. The callers act on the split: liftable candidates are carried forward verbatim
+ * into live constraints context and the block archives byte-exact; one unsafe candidate
+ * means the block itself stays live and nothing is extracted from it, because a
+ * statement that cannot be lifted on its own would lose its other half if it were.
+ */
+function uncertainVerdict(body: string): { carry: string[]; unsafe: string[] } {
+  const candidates = uncertainCandidates(body);
+  const pick = (liftable: boolean) => [...new Set(
+    candidates.filter((candidate) => candidate.liftable === liftable).map((candidate) => candidate.text),
+  )];
+  return { carry: pick(true), unsafe: pick(false) };
+}
+
+/** The classification reason for a block kept live because a candidate cannot be lifted. */
+function uncertainReason(scope: string, obligations: string[]): string {
+  const named = obligations.slice(0, 2).map((line) => `"${line}"`).join(', ');
+  const rest = obligations.length > 2 ? ` (+${obligations.length - 2} more)` : '';
+  return `${scope}: uncertain obligation cannot be extracted safely, so the whole block is preserved live (${named}${rest})`;
+}
+
+/**
+ * `1 uncertain obligation(s) carried forward verbatim`. Deliberately the same shape as
+ * the confident rule's clause: the statement itself is live as a bullet, so naming it
+ * again in the audit entry would only add bytes to live context.
+ */
+function uncertainCarryClause(carried: string[]): string {
+  return `${carried.length} uncertain obligation(s) carried forward verbatim`;
+}
+
 interface SourceSection {
   heading: string;
   line: number;
+  start: number;
   raw: string;
   body: string;
   /** Offset of `body[0]` in the source file, so nested headings can report real line numbers. */
@@ -197,6 +571,7 @@ function splitDocument(text: string): { preamble: string; nl: string; sections: 
     return {
       heading: heading.title,
       line: lineNumberAt(text, heading.start),
+      start: heading.start,
       raw: text.slice(heading.start, end).trimEnd(),
       body: trimmed,
       bodyStart: heading.end + (rawBody.length - rawBody.replace(/^\s+/, '').length),
@@ -259,19 +634,27 @@ function hasUnresolvedWork(text: string): boolean {
   return /^\s*(?:[-*+]|\d+\.)\s+\[ \]/m.test(text);
 }
 
-/** Constraint-looking lines outside fenced code blocks, in source order. */
+/**
+ * Constraint-looking lines outside fenced code blocks, in source order.
+ *
+ * A line the shape rule accepts is still refused when a following blank line continues its
+ * sentence. `The staging guard must not be removed` matches as a subject-modal line inside
+ * the six-word window, but when the next paragraph opens lowercase (`and the note was left
+ * in place for the next window.`) the line is the first half of a longer sentence: carrying
+ * it as a constraint puts a fragment into live context and archives the half that completes
+ * it. The line falls through to the statement-shaped tier below, which lifts the complete
+ * sentence, or keeps the block when even that cannot be done safely.
+ */
 function constraintLines(body: string): string[] {
+  const source = body.split(/\r?\n/);
+  const outside = unfencedLines(source);
   const lines: string[] = [];
-  let fence: { char: string; length: number } | undefined;
-  for (const raw of body.match(/[^\n]*\n|[^\n]+$/g) ?? []) {
-    const line = raw.replace(/\r?\n$/, '');
-    const marker = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
-    if (fence) {
-      if (marker && marker[1][0] === fence.char && marker[1].length >= fence.length && !marker[2].trim()) fence = undefined;
-      continue;
-    }
-    if (marker) { fence = { char: marker[1][0], length: marker[1].length }; continue; }
-    if (isCarriedConstraint(line)) lines.push(line.trim().replace(/^(?:[-*+]|\d+\.)\s+/, '').trim());
+  for (let index = 0; index < source.length; index++) {
+    if (!outside[index]) continue;
+    const line = source[index];
+    if (!isCarriedConstraint(line)) continue;
+    if (!SENTENCE_END.test(statementText(line)) && continuesAfterBlankLine(source, outside, index)) continue;
+    lines.push(line.trim().replace(/^(?:[-*+]|\d+\.)\s+/, '').trim());
   }
   return lines;
 }
@@ -281,20 +664,32 @@ function constraintLines(body: string): string[] {
  * re-evaluate: lines that no longer qualify as standing constraints are dropped
  * from live context (their originals remain in the archive). Hand-written
  * content in the same container is never filtered.
+ *
+ * Re-evaluation never erases an uncertain obligation. A generated line is judged as
+ * the single statement it is, so a line the confident rule cannot take, that still
+ * reads as a possible obligation, survives on its own evidence — the other bullets
+ * around it are not a reason to keep or drop it.
  */
 function refilterCarriedBlock(body: string, nl: string): string {
   const lines = body.split(/\r?\n/);
+  const outside = unfencedLines(lines);
   const out: string[] = [];
   for (let index = 0; index < lines.length; index++) {
-    if (lines[index].trim() !== `### ${CARRIED_HEADING}`) { out.push(lines[index]); continue; }
+    // Fenced text is content, never structure: a sample quoting the generated
+    // heading is not that block, and nothing inside a fence is ever rewritten.
+    if (!outside[index] || lines[index].trim() !== `### ${CARRIED_HEADING}`) { out.push(lines[index]); continue; }
     const kept: string[] = [];
     let cursor = index + 1;
     while (cursor < lines.length && !lines[cursor].trim()) cursor++;
-    while (cursor < lines.length && /^\s*[-*+]\s+/.test(lines[cursor])) {
+    const runStart = cursor;
+    while (cursor < lines.length && outside[cursor] && /^\s*[-*+]\s+/.test(lines[cursor])) cursor++;
+    const run = lines.slice(runStart, cursor);
+    for (const line of run) {
       // Normalize any stacked markers (`- - text`) left by an earlier generation.
-      const body = lines[cursor].trim().replace(/^(?:[-*+]\s+)+/, '').trim();
-      if (body && isCarriedConstraint(`- ${body}`)) kept.push(`- ${body}`);
-      cursor++;
+      const statement = line.trim().replace(/^(?:[-*+]\s+)+/, '').trim();
+      if (statement && (isCarriedConstraint(`- ${statement}`) || isUncertainObligation(makeStatement([statement])))) {
+        kept.push(`- ${statement}`);
+      }
     }
     index = cursor - 1;
     if (kept.length) out.push(`### ${CARRIED_HEADING}`, '', ...kept);
@@ -360,6 +755,22 @@ function mergeCarriedBlock(body: string, lines: string[], nl: string): string {
 }
 
 /**
+ * Keep a demoted section's heading tree nested beneath it. Re-emitting a level-2
+ * section as level 3 without shifting its descendants flattens an original level-3
+ * child into the parent's sibling, so the next pass can archive the parent out from
+ * under the evidence that preserved it. Fenced samples are content and stay exact.
+ * An original level-6 heading becomes seven hashes intentionally: Markdown treats it
+ * as plain preserved text rather than as a heading that could escape its owner.
+ */
+function demoteDescendantHeadings(body: string, nl: string): string {
+  const lines = body.split(/\r?\n/);
+  const outside = unfencedLines(lines);
+  return lines.map((line, index) => outside[index]
+    ? line.replace(/^( {0,3}#{3,6})(?=[ \t]|$)/, '$1#')
+    : line).join(nl);
+}
+
+/**
  * Re-classify the body of a `## Preserved context` container.
  *
  * Section scanning splits level-2 headings only, and the container is a live
@@ -393,20 +804,86 @@ function archiveNestedHistory(
   const siblings = headings.filter((heading) => heading.level === level);
   const blocks = siblings.map((heading, index) => {
     const end = siblings[index + 1]?.start ?? body.length;
+    const blockBody = body.slice(heading.end, end).trim();
+    // A block is judged on its own body plus every following sibling until the next
+    // history-shaped one. Older planner output flattened descendants when it demoted a
+    // level-2 section to `###`, so the obligation — or unchecked task — that kept the
+    // section live can already sit in a following non-history sibling. New output keeps
+    // descendant headings nested via demoteDescendantHeadings, but widening remains the
+    // compatibility path for containers written by those older builds. Reading only the
+    // block's own span archived the parent on the second pass while its evidence stayed
+    // live in the sibling: a preserved decision that flips is not a fixed point.
+    // History-shaped siblings are excluded, because they are judged on their own
+    // evidence: including them would let one block's obligation retain every earlier
+    // sibling in the container.
+    let evidenceEnd = end;
+    for (let next = index + 1; next < siblings.length && !isHistoryHeading(siblings[next].title); next++) {
+      evidenceEnd = siblings[next + 1]?.start ?? body.length;
+    }
+    const evidence = body.slice(heading.end, evidenceEnd).trim();
     return {
       title: heading.title,
       line: lineNumberAt(document.text, section.bodyStart + heading.start),
       raw: body.slice(heading.start, end).trimEnd(),
-      body: body.slice(heading.end, end).trim(),
+      body: blockBody,
+      // The decision is taken on the wider evidence span, but only the block's OWN body is
+      // lifted out of it: a candidate that sits in a following non-history sibling is still
+      // live with that sibling, and carrying it as well would duplicate a live line.
+      own: uncertainVerdict(blockBody),
+      uncertain: uncertainVerdict(evidence),
+      unchecked: hasUnresolvedWork(evidence),
     };
   });
+  // History is archivable only when nothing inside it still needs a decision: an
+  // unchecked task block, or a possible obligation that cannot be lifted out of the
+  // block as a self-contained statement. Preservation wins over reduction.
   const archivable = blocks.filter((block) => {
     const nestedRole = roleFor(block.title, roles)?.role;
     // Live containers stay whole, exactly as level-2 classification treats them.
     if (nestedRole === 'preserved' || nestedRole === 'history') return false;
-    return isHistoryHeading(block.title) && !hasUnresolvedWork(block.raw);
+    return isHistoryHeading(block.title) && !block.unchecked && !block.uncertain.unsafe.length;
   });
-  if (!archivable.length) return { body, plans: [], carried: [] };
+  const kept = blocks.filter((block) => {
+    const nestedRole = roleFor(block.title, roles)?.role;
+    // Live containers are re-emitted whole and are not history to report.
+    if (nestedRole === 'preserved' || nestedRole === 'history') return false;
+    return isHistoryHeading(block.title) && !archivable.includes(block);
+  });
+
+  const plans: SectionPlan[] = [];
+  const carried: string[] = [];
+  for (const block of archivable) {
+    const lines = constraintLines(block.body);
+    const lifted = [...lines, ...block.own.carry];
+    for (const line of lifted) if (!carried.includes(line)) carried.push(line);
+    const events = [
+      lines.length ? `${lines.length} constraint line(s) carried forward verbatim` : '',
+      block.own.carry.length ? uncertainCarryClause(block.own.carry) : '',
+    ].filter(Boolean);
+    plans.push({
+      file,
+      heading: block.title,
+      line: block.line,
+      role: 'history',
+      decision: 'archived',
+      reason: `history nested under a preserved container with no unresolved task blocks${events.length ? `; ${events.join('; ')}` : ''}`,
+    });
+  }
+  // Kept blocks are reported too, so a nested block is always kept, reported or
+  // archived — never silently unaccounted for.
+  for (const block of kept) {
+    plans.push({
+      file,
+      heading: block.title,
+      line: block.line,
+      role: 'history',
+      decision: 'preserved',
+      reason: block.uncertain.unsafe.length
+        ? uncertainReason('nested history kept live', block.uncertain.unsafe)
+        : 'nested history kept live: contains unresolved task blocks',
+    });
+  }
+  if (!archivable.length) return { body, plans, carried: [] };
 
   const removed = new Set(archivable);
   // Bound the lead-in at the first SIBLING, not the first heading of any level: a
@@ -415,29 +892,7 @@ function archiveNestedHistory(
   const segments = [body.slice(0, siblings[0].start).trim()];
   for (const block of blocks) if (!removed.has(block)) segments.push(block.raw);
 
-  const plans: SectionPlan[] = [];
-  const carried: string[] = [];
-  for (const block of archivable) {
-    const lines = constraintLines(block.body);
-    for (const line of lines) if (!carried.includes(line)) carried.push(line);
-    plans.push({
-      file,
-      heading: block.title,
-      line: block.line,
-      role: 'history',
-      decision: 'archived',
-      reason: `history nested under a preserved container with no unresolved task blocks${lines.length ? `; ${lines.length} constraint line(s) carried forward verbatim` : ''}`,
-    });
-  }
   return { body: segments.filter(Boolean).join(`${document.nl}${document.nl}`).trim(), plans, carried };
-}
-
-function objectiveIdFor(section: SourceSection): string {
-  return `obj-${createHash('sha256').update(section.raw).digest('hex').slice(0, 10)}`;
-}
-
-function sectionText(section: SourceSection): string {
-  return [section.suffix, section.body].filter((part) => part && part.trim()).join('\n\n').trim();
 }
 
 function renderEntries(entries: { heading: string; body: string }[], nl: string): string {
@@ -463,35 +918,12 @@ export function planCompactRewrite(input: CompactRewriteInput): CompactRewritePl
   classify(documents.handoff.sections, HANDOFF_SECTION_ROLES);
   classify(documents.tasks.sections, TASKS_SECTION_ROLES);
 
-  const objectiveSections = documents.handoff.sections.filter((section) => section.role === 'current-objective' && !section.history);
-  const candidates: ObjectiveCandidate[] = objectiveSections.map((section) => ({
-    id: objectiveIdFor(section),
-    heading: section.heading,
-    line: section.line,
-    text: sectionText(section),
-  }));
-
-  let selected: SourceSection | undefined;
-  if (!objectiveSections.length) {
-    blocked.push('.agentos/handoff.md has no recognized ## Current objective section; --rewrite requires an explicit objective selection.');
-  } else if (objectiveSections.length === 1) {
-    [selected] = objectiveSections;
-  } else {
-    const requested = input.objectiveId?.trim();
-    const index = requested ? candidates.findIndex((candidate) => candidate.id === requested) : -1;
-    if (requested && index < 0) {
-      blocked.push(`.agentos/handoff.md: unknown --objective ${requested}; valid candidates are ${candidates.map((candidate) => candidate.id).join(', ')}.`);
-    } else if (!requested) {
-      blocked.push(`.agentos/handoff.md has ${objectiveSections.length} current-objective headings; --rewrite requires an explicit objective selection (--objective <id>): ${candidates.map((candidate) => `${candidate.id} (line ${candidate.line})`).join(', ')}.`);
-    } else {
-      selected = objectiveSections[index];
-    }
-  }
-
-  if (selected && !sectionText(selected)) {
-    blocked.push('.agentos/handoff.md ## Current objective is empty; --rewrite will not invent an objective.');
-    selected = undefined;
-  }
+  const objectiveResolution = resolveObjective(handoffText, input.objectiveId);
+  const candidates: ObjectiveCandidate[] = objectiveResolution.candidates.map(({ id, heading, line, text }) => ({ id, heading, line, text }));
+  let selected = objectiveResolution.selected
+    ? documents.handoff.sections.find((section) => section.start === objectiveResolution.selected?.section.start)
+    : undefined;
+  if (objectiveResolution.kind !== 'resolved') blocked.push(objectiveResolution.diagnostic ?? 'The current objective could not be resolved.');
 
   const sizes = (handoffAfter: number, tasksAfter: number) => ({
     handoffBefore: handoffText.length, handoffAfter,
@@ -515,7 +947,7 @@ export function planCompactRewrite(input: CompactRewriteInput): CompactRewritePl
     };
   }
 
-  const selectedId = objectiveIdFor(selected);
+  const selectedId = objectiveResolution.selected!.id;
   const outcomes = new Map<SourceSection, Outcome>();
   const carriedByFile: Record<SourceFile, string[]> = { handoff: [], tasks: [] };
   const classification: { handoff: SectionPlan[]; tasks: SectionPlan[] } = { handoff: [], tasks: [] };
@@ -534,23 +966,43 @@ export function planCompactRewrite(input: CompactRewriteInput): CompactRewritePl
   for (const file of ['handoff', 'tasks'] as const) {
     for (const section of documents[file].sections) {
       let outcome: Outcome;
+      // Candidate obligations the confident rule cannot extract. Their fate is decided
+      // with the block: carried out of it verbatim when each one stands alone, or kept
+      // with it when one of them cannot be lifted.
+      let uncertainCarry: string[] = [];
       if (section.role === 'current-objective' && !section.history) {
+        const { carry, unsafe } = uncertainVerdict(section.body);
         if (section === selected) outcome = { decision: 'live', reason: 'selected current objective' };
         else if (hasUnresolvedWork(section.raw)) outcome = { decision: 'preserved', reason: 'superseded objective kept live: contains unresolved task blocks' };
-        else outcome = { decision: 'archived', reason: 'superseded objective; explicit selection resolved which objective is live' };
+        else if (unsafe.length) outcome = { decision: 'preserved', reason: uncertainReason('superseded objective kept live', unsafe) };
+        else {
+          uncertainCarry = carry;
+          outcome = { decision: 'archived', reason: 'superseded objective; explicit selection resolved which objective is live' };
+        }
       } else if (section.role === 'preserved') {
         // Never claim more fidelity than this run can prove: the container's body is
         // re-read (and its generated constraints block may be re-filtered), whether or
         // not anything nested turned out archivable.
-        outcome = nestedPlans.get(section)?.plans.length
-          ? { decision: 'preserved', reason: 'live preserved-context container re-read; nested history archived' }
-          : { decision: 'preserved', reason: 'live preserved-context container re-read; nothing nested was archivable' };
+        const nested = nestedPlans.get(section);
+        const archivedNested = nested?.plans.filter((plan) => plan.decision === 'archived').length ?? 0;
+        const keptNested = nested?.plans.filter((plan) => plan.decision === 'preserved').length ?? 0;
+        const events: string[] = [];
+        if (archivedNested) events.push('nested history archived');
+        if (keptNested) events.push(`nested history preserved live (${keptNested})`);
+        outcome = {
+          decision: 'preserved',
+          reason: `live preserved-context container re-read; ${events.length ? events.join('; ') : 'nothing nested was archivable'}`,
+        };
       } else if (section.role === 'history') {
         outcome = { decision: 'preserved', reason: 'live history container re-emitted with new archive entries' };
       } else if (section.history) {
-        outcome = hasUnresolvedWork(section.raw)
-          ? { decision: 'preserved', reason: 'history section kept live: contains unresolved task blocks' }
-          : { decision: 'archived', reason: 'explicit history section with no unresolved task blocks' };
+        const { carry, unsafe } = uncertainVerdict(section.body);
+        if (hasUnresolvedWork(section.raw)) outcome = { decision: 'preserved', reason: 'history section kept live: contains unresolved task blocks' };
+        else if (unsafe.length) outcome = { decision: 'preserved', reason: uncertainReason('history section kept live', unsafe) };
+        else {
+          uncertainCarry = carry;
+          outcome = { decision: 'archived', reason: 'explicit history section with no unresolved task blocks' };
+        }
       } else if (section.role) {
         outcome = { decision: 'live', reason: 'canonical live section' };
       } else {
@@ -558,10 +1010,12 @@ export function planCompactRewrite(input: CompactRewriteInput): CompactRewritePl
       }
       if (outcome.decision === 'archived') {
         const lines = constraintLines(section.body);
-        if (lines.length) {
-          for (const line of lines) if (!carriedByFile[file].includes(line)) carriedByFile[file].push(line);
-          outcome = { ...outcome, reason: `${outcome.reason}; ${lines.length} constraint line(s) carried forward verbatim` };
-        }
+        for (const line of [...lines, ...uncertainCarry]) if (!carriedByFile[file].includes(line)) carriedByFile[file].push(line);
+        const events = [
+          lines.length ? `${lines.length} constraint line(s) carried forward verbatim` : '',
+          uncertainCarry.length ? uncertainCarryClause(uncertainCarry) : '',
+        ].filter(Boolean);
+        if (events.length) outcome = { ...outcome, reason: `${outcome.reason}; ${events.join('; ')}` };
       }
       outcomes.set(section, outcome);
       classification[file].push({ file, heading: section.heading, line: section.line, role: section.role ?? (section.history ? 'history' : 'unknown'), ...outcome });
@@ -597,7 +1051,7 @@ export function planCompactRewrite(input: CompactRewriteInput): CompactRewritePl
       if (renderedSections.has(section)) continue;
       if (section.role === 'history') continue;
       if (section.role !== 'preserved') {
-        preservedBlocks.push(`### ${section.heading}${document.nl}${document.nl}${section.body}`);
+        preservedBlocks.push(`### ${section.heading}${document.nl}${document.nl}${demoteDescendantHeadings(section.body, document.nl)}`);
         continue;
       }
       // The `## Preserved context` container is re-emitted with its own body, minus

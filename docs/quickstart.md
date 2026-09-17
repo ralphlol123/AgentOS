@@ -202,7 +202,7 @@ agentos compact --dry-run
 agentos compact
 ```
 
-`compact --dry-run` shows the exact proposed live files without writes. `compact` makes a deterministic archive checkpoint under `.agentos/runs/` and adds explicit archive links, retaining all original live text (including safety constraints and unfinished work). Unchanged repeats do not write. It intentionally does not promise size reduction or summarize arbitrary Markdown; reduce historical prose only through a separate reviewed edit. See [compaction safety](../README.md#compaction-safety) for collision, CRLF, and rollback behavior.
+`compact --dry-run` gives a concise, write-free structural preview; add `--diff` when you need the detailed patch. Plain `compact` applies only when the combined live context strictly shrinks, after archiving and hash-verifying the exact originals. `compact --checkpoint` explicitly selects the older archive-and-link behavior, which retains all live text and may grow it. See [compaction](../README.md#compaction) and [the detailed policy](compaction.md) for collision, CRLF, and rollback behavior.
 
 ## Health checks
 

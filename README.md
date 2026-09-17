@@ -243,8 +243,10 @@ agentos doctor [--fix] [--json]
 agentos doctor --fix [--dry-run] [--adopt-custom-adapters] [--prune-retired]
 agentos doctor --fix --normalize-repo-ids [--dry-run]
 agentos adapters explain <file>
-agentos compact [--dry-run]
-agentos compact --rewrite [--objective <id>] [--expect-state <sha256>] [--dry-run]
+agentos compact [--objective <id>] [--expect-state <sha256>]
+agentos compact [--objective <id>] --dry-run [--diff]
+agentos compact --checkpoint [--dry-run]
+agentos compact --rewrite ...  # compatibility alias for normal compact
 agentos link-obsidian [--vault <path> --dest <folder> --link <note> --create]
 agentos obsidian link-workspace --vault <path> --dest <folder> [--create] [--dry-run]
 agentos obsidian status
@@ -262,38 +264,29 @@ agentos migrate claude --preserve [--dry-run]
 agentos prompt [claude|codex|opencode|hermes]
 ```
 
-## Compaction safety
+## Compaction
+
+The ordinary workflow is:
 
 ```bash
 agentos compact --dry-run
 agentos compact
 ```
 
-`--dry-run` prints the exact proposed `handoff.md` and `tasks.md` text, the archive path, and before/after character counts, without creating files or directories. The core API also returns `proposed: { handoff, tasks }` and `changed`.
+Both commands use the same structural planner. The dry run is strictly read-only and concise: it reports sizes, classifications, and intended paths without dumping complete proposed files. Add `--diff` for the detailed unified patch; `--diff` is accepted only with `--dry-run`. A single valid current objective is selected automatically. Use `--objective <id>` only to resolve ambiguity or deliberately override that selection; dates and words such as “latest” never choose for you. `--expect-state <sha256>` is an optional preview binding. Without it, apply replans the current files under the writer lock.
 
-Compaction is deliberately conservative: **all original live text stays live, byte-for-byte for valid UTF-8**. It does not guess which prose is obsolete, truncate long sections, drop duplicate headings, cap unchecked tasks, or invent completed work. This preserves unfinished work (including nested details and custom sections), protected paths, warnings, decisions, and existing archive references. LF/CRLF content is preserved; new reference lines use the file's newline convention. Invalid UTF-8 and source read errors fail before writes; missing live files are treated as empty.
+Normal compact is structural, not a summary. It keeps the selected objective and heading, active tasks with nested details, protected paths, warnings and decisions. Unknown sections remain live. Complete obligations that can be lifted safely are carried forward verbatim; when a possible obligation cannot be lifted as a complete unit, its whole block stays live. The recognition is intentionally conservative and has known semantic limits; the rules, measured residuals, and fixed-point behavior are documented in [`docs/compaction.md`](docs/compaction.md).
 
-A new checkpoint archives the exact before/after text under `.agentos/runs/compact-archive-<sha256>.md` and appends a relative link in each live file to its explicit `previous-handoff` or `previous-tasks` archive anchor. Archive Markdown is fenced as literal source so embedded headings/fences cannot hide those targets. Names derive from both original files, not the clock; existing names are skipped using deterministic `-1`, `-2`, … suffixes and archive creation is exclusive. Preview and apply agree while the input tree is unchanged.
+Apply proceeds only when the combined live character count strictly decreases. Equal, growing, or identical proposals report `No safe reduction found; files unchanged.` and create no archive, lock, temporary file, or live-state write. One file may grow when the combined total still falls, and the report shows each file honestly. A successful apply first archives the exact original `handoff.md` and `tasks.md`, verifies their hashes, rechecks source state, then replaces both files inside the workspace writer lock and rollback transaction. Boundary checks and per-file atomic writes still apply.
 
-An unchanged repeat is a write-free no-op, verified against the complete referenced archive, not merely a marker. After edits, the next checkpoint retains prior links. Missing or modified archives do not cause live content to be discarded. `memory.md`, `decisions.md`, project config, and adapters are not rewritten. Doctor diagnostics are included after a changed apply; duplicate sections remain diagnosable rather than being silently deleted.
+Ambiguous, missing, empty, malformed, stale-selector, and stale-`--expect-state` inputs refuse with zero writes. `status` and `doctor` use the same current-objective recognition as compaction.
 
-**Trade-off:** this safety-first command is an archival checkpoint, not an automatic size reducer. New links increase live size; reducing historical prose requires a separate reviewed edit. It does not repair malformed Markdown (for example, an unclosed source fence can render an appended link as literal text). Command output always states this rendering limitation and prints direct archive paths with both anchors, outside the proposed source text. Review the full preview before applying.
+Two compatibility paths remain explicit:
 
-Archive creation, live replacements, and creation of a missing `runs/` directory share the existing rollback transaction. An in-process archive/state write failure restores original bytes, permission bits, and existence, with no temporary artifacts when rollback succeeds. This is best-effort rollback, not crash-safe multi-file atomicity or protection against concurrent writers; do not run writers concurrently in one checkout.
+- `agentos compact --checkpoint` selects the old archive-and-link behavior. It keeps all live text, appends archive links, and may grow live state.
+- `agentos compact --rewrite` is a compatibility alias for normal structural compaction. It is not a safer or different mode.
 
-## Compaction rewrite (opt-in)
-
-```bash
-agentos compact --rewrite --dry-run
-agentos compact --rewrite --objective <id>
-agentos compact --rewrite --objective <id> --expect-state <sha256>
-```
-
-Plain `agentos compact` stays the conservative checkpoint. `--rewrite` is the only mode that *reduces* live context, and it is opt-in, per-run, and reversible. It archives `.agentos/handoff.md` and `.agentos/tasks.md` byte-for-byte under `.agentos/runs/compact-rewrite-<sha256>/` (`handoff.md`, `tasks.md`, `manifest.json`, `README.md`) and only then replaces them with a canonical form. Full behavior, blocking rules, and the section policy are documented in [`docs/compaction.md`](docs/compaction.md).
-
-The rewrite is structural, never a summary: no prose is paraphrased, no section is invented, and no completed-work claim is derived from a date. These stay live unconditionally — the selected objective (with its original heading), scope, protected paths and constraints, blockers and warnings, open decisions, every unfinished task with its nested details, and every section the planner could not classify. Inside `## Preserved context` the container's own body is re-read on each run, so history a previous build demoted to a `###` heading there is classified again and can be archived, while every block not nested inside an archived one is kept. Only superseded objectives and explicit history sections (`Previous …`, `Superseded …`, `Done`, `History`) move to the archive, and only when they contain no unchecked task block. Constraint-looking lines inside archived history (`do not`, `never`, `requires approval`, `before merging`, …) are carried forward verbatim, with their source recorded.
-
-Ambiguity blocks instead of guessing. With two or more `## Current objective` headings — including dated variants such as `## Current objective — 2026-09-15 (latest): …` — the command reports every candidate with a content-bound id, refuses with exit code 1, and writes nothing until you pass `--objective <id>`. Missing, empty, or malformed state (unclosed fence, invalid UTF-8, non-regular file, symlinked live file) also refuses without writing. `--expect-state` binds an apply to the exact preview you reviewed, so a context update between review and apply cannot be silently overwritten. A repeated rewrite of unchanged state rewrites nothing once no further block becomes archivable. In a hand-edited container whose shallowest nested block is not itself archivable — a deeper block above a later sibling, or a machine-generated `### Constraints carried forward from archived history` block that re-filtering removes — blocks beneath it can become archivable only on a later pass, or can simply stay live; nothing is lost either way, because every pass is planned, reported and archived. The command reports growth as growth instead of claiming savings.
+Full archive layout, preservation policy, refusal rules, rollback boundaries, and known limits: [`docs/compaction.md`](docs/compaction.md).
 
 ## Run handoff notes
 

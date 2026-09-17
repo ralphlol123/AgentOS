@@ -1,5 +1,5 @@
 export type FlagValue = string | boolean;
-const booleans = new Set(['new', 'existing', 'dry-run', 'yes', 'y', 'detected', 'replace', 'preserve', 'fix', 'json', 'create', 'refresh', 'installed', 'normalize-repo-ids', 'adopt-custom-adapters', 'prune-retired', 'rewrite']);
+const booleans = new Set(['new', 'existing', 'dry-run', 'yes', 'y', 'detected', 'replace', 'preserve', 'fix', 'json', 'create', 'refresh', 'installed', 'normalize-repo-ids', 'adopt-custom-adapters', 'prune-retired', 'rewrite', 'checkpoint', 'diff']);
 const values = new Set(['agents', 'engine', 'role', 'repo', 'worktree', 'phase', 'reason', 'vault', 'dest', 'link', 'mode', 'name', 'type', 'expected-sha256', 'objective', 'expect-state']);
 export function parseFlagsAndPositionals(args: string[]): { flags: Record<string, FlagValue>; positionals: string[] } {
   const flags: Record<string, FlagValue> = {}, positionals: string[] = [];
@@ -23,7 +23,7 @@ export function parseFlagsAndPositionals(args: string[]): { flags: Record<string
 export function validateCommandFlags(command: string, flags: Record<string, FlagValue>): void {
   const allowed: Record<string, string[]> = {
     init: ['new', 'existing', 'agents', 'dry-run', 'yes', 'y', 'refresh'], status: [], handoff: [], prompt: [],
-    run: ['engine', 'role', 'repo', 'worktree', 'phase', 'reason', 'dry-run'], doctor: ['fix', 'json', 'normalize-repo-ids', 'adopt-custom-adapters', 'prune-retired', 'dry-run'], compact: ['dry-run', 'rewrite', 'objective', 'expect-state'],
+    run: ['engine', 'role', 'repo', 'worktree', 'phase', 'reason', 'dry-run'], doctor: ['fix', 'json', 'normalize-repo-ids', 'adopt-custom-adapters', 'prune-retired', 'dry-run'], compact: ['dry-run', 'rewrite', 'checkpoint', 'objective', 'expect-state', 'diff'],
     'link-obsidian': ['vault', 'dest', 'link', 'create', 'dry-run'], obsidian: ['vault', 'dest', 'create', 'dry-run'], adapters: [],
     skills: ['detected', 'mode', 'dry-run', 'replace', 'installed'], agents: ['name', 'dry-run', 'replace', 'installed'],
     templates: ['type', 'name', 'mode', 'dry-run', 'yes', 'replace', 'expected-sha256'], migrate: ['preserve', 'dry-run'],
@@ -31,9 +31,32 @@ export function validateCommandFlags(command: string, flags: Record<string, Flag
   for (const key of Object.keys(flags)) if (allowed[command] && !allowed[command].includes(key)) throw new Error(`--${key} is not supported by ${command}.`);
   if (flags.new && flags.existing) throw new Error('Choose either --new or --existing.');
   if (flags.mode && !['summary', 'full'].includes(String(flags.mode))) throw new Error('--mode must be summary or full.');
-  if (flags.objective && !flags.rewrite) throw new Error('--objective requires --rewrite.');
-  if (flags['expect-state'] && !flags.rewrite) throw new Error('--expect-state requires --rewrite.');
+  if (command === 'compact') resolveCompactMode(flags);
   if (flags['expect-state'] && !/^[a-f0-9]{64}$/.test(String(flags['expect-state']))) {
-    throw new Error('--expect-state requires the sha256 source state printed by compact --rewrite --dry-run.');
+    throw new Error('--expect-state requires the sha256 source state printed by compact --dry-run.');
   }
+}
+
+export type CompactMode = 'structural' | 'checkpoint';
+
+/** Resolve compact's public mode using only explicitly-active boolean flags. */
+export function resolveCompactMode(options: Record<string, any>): CompactMode {
+  for (const key of ['rewrite', 'checkpoint', 'diff']) {
+    if (options[key] !== undefined && typeof options[key] !== 'boolean') {
+      throw new Error(`--${key} requires true or false.`);
+    }
+  }
+  const dryRun = options['dry-run'] ?? options.dryRun;
+  if (options.checkpoint === true) {
+    const conflicts = [
+      options.rewrite === true ? '--rewrite' : null,
+      options.objective !== undefined ? '--objective' : null,
+      options['expect-state'] !== undefined || options.expectState !== undefined ? '--expect-state' : null,
+      options.diff === true ? '--diff' : null,
+    ].filter(Boolean);
+    if (conflicts.length) throw new Error(`Cannot combine --checkpoint with ${conflicts.join(', ')}.`);
+    return 'checkpoint';
+  }
+  if (options.diff === true && dryRun !== true) throw new Error('--diff requires --dry-run.');
+  return 'structural';
 }

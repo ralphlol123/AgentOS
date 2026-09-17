@@ -23,7 +23,6 @@ test('planner blocks when the live objective cannot be established', () => {
   const missing = planCompactRewrite({ handoff: '# Handoff\n\n## Scope\n\n- x\n', tasks: TASKS });
   assert.equal(missing.ok, false);
   assert.match(missing.blockedReasons.join('\n'), /no recognized ## Current objective/);
-  assert.match(missing.blockedReasons.join('\n'), /--rewrite requires an explicit objective selection/);
   assert.equal(missing.handoff, '');
   assert.equal(missing.tasks, '');
 
@@ -65,6 +64,35 @@ test('planner blocks when the live objective cannot be established', () => {
   assert.equal(unclosed.ok, false);
   assert.match(unclosed.blockedReasons.join('\n'), /unclosed Markdown fence/);
   assert.equal(unclosed.handoff, '');
+});
+
+test('planner rejects a stale explicit objective id even with one candidate', () => {
+  const handoff = handoffFixture({ objectives: [['Current objective — 2026-09-15', 'Newest work.']] });
+  const automatic = planCompactRewrite({ handoff, tasks: TASKS });
+  assert.equal(automatic.ok, true);
+  assert.equal(automatic.selectedObjectiveId, 'obj-36064210f0');
+
+  const stale = planCompactRewrite({ handoff, tasks: TASKS, objectiveId: 'obj-0000000000' });
+  assert.equal(stale.ok, false);
+  assert.match(stale.blockedReasons.join('\n'), /unknown --objective obj-0000000000/);
+  assert.equal(stale.handoff, '');
+  assert.equal(stale.tasks, '');
+});
+
+test('objective candidate ids preserve the legacy level-2 section boundary', () => {
+  const handoff = [
+    '# Handoff', '',
+    '## Current objective — 2026-09-15', '',
+    'Live work.', '',
+    '# Appendix', '',
+    'Appendix bytes.', '',
+    '## Scope', '',
+    '- Repo.',
+  ].join('\n');
+  const plan = planCompactRewrite({ handoff, tasks: TASKS });
+  assert.equal(plan.ok, true);
+  assert.equal(plan.selectedObjectiveId, 'obj-d2639b101d', 'existing IDs hash through the next level-2 heading');
+  assert.match(plan.objectiveCandidates[0].text, /Appendix bytes\./, 'shared discovery uses the same section extent as the planner');
 });
 
 test('objective candidate ids bind to source content, not ordinal position', () => {

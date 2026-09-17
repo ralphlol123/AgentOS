@@ -35,30 +35,33 @@ console.log(run(['doctor']));
 console.log('\n--- compact dry-run from root ---');
 console.log(run(['compact', '--dry-run']));
 
-console.log('\n--- compact rewrite: ambiguous objectives block with candidates ---');
+console.log('\n--- default compact: ambiguous objectives block with candidates ---');
 await writeFile(join(root, '.agentos/handoff.md'), ['# Handoff', '', '## Scope', '', '- Workspace kind: multi-repo', '',
   '## Current objective — 2026-09-15 (latest): smoke', '', 'Do the work.', '',
-  '## Current objective — 2026-09-01', '', 'Superseded narrative.', '',
-  '## Previous objective — 2026-08-01', '', 'Old narrative.', '',
+  '## Current objective — 2026-09-01', '', `Superseded narrative. ${'History. '.repeat(100)}`, '',
+  '## Previous objective — 2026-08-01', '', `Old narrative. ${'Older history. '.repeat(100)}`, '',
   '## Known failures', '', '- Do not treat flaky CI as passing.', ''].join('\n'));
 await writeFile(join(root, '.agentos/tasks.md'), ['# Tasks', '', '## Now', '', '- [ ] Do the work.', '',
-  '## Done', '', '- [x] Old item.', ''].join('\n'));
-const blockedRewrite = spawnSync(process.execPath, [cli, 'compact', '--rewrite'], { cwd: root, encoding: 'utf8' });
-if (blockedRewrite.status !== 1) throw new Error('an ambiguous rewrite must exit 1 without writing');
-const objectiveIds = [...new Set(blockedRewrite.stdout.match(/obj-[a-f0-9]{10}/g) ?? [])];
+  '## Done', '', `- [x] Old item. ${'Completed detail. '.repeat(100)}`, ''].join('\n'));
+const blockedDefault = spawnSync(process.execPath, [cli, 'compact'], { cwd: root, encoding: 'utf8' });
+if (blockedDefault.status !== 1) throw new Error('an ambiguous default compact must exit 1 without writing');
+const objectiveIds = [...new Set(blockedDefault.stdout.match(/obj-[a-f0-9]{10}/g) ?? [])];
 if (objectiveIds.length !== 2) throw new Error(`expected two objective candidates, saw ${objectiveIds.length}`);
-console.log(blockedRewrite.stdout);
-console.log('\n--- compact rewrite dry-run with an explicit objective ---');
-console.log(run(['compact', '--rewrite', '--objective', objectiveIds[0], '--dry-run']));
-console.log('\n--- compact rewrite apply ---');
-console.log(run(['compact', '--rewrite', '--objective', objectiveIds[0]]));
-const liveAfterRewrite = await readFile(join(root, '.agentos/handoff.md'), 'utf8');
-if (liveAfterRewrite.includes('Superseded narrative.')) throw new Error('superseded history must leave live context');
-if (!liveAfterRewrite.includes('Do not treat flaky CI as passing.')) throw new Error('live warnings must survive the rewrite');
+console.log(blockedDefault.stdout);
+console.log('\n--- default compact dry-run with an explicit objective ---');
+console.log(run(['compact', '--objective', objectiveIds[0], '--dry-run']));
+console.log('\n--- default compact apply ---');
+console.log(run(['compact', '--objective', objectiveIds[0]]));
+const liveAfterDefault = await readFile(join(root, '.agentos/handoff.md'), 'utf8');
+if (liveAfterDefault.includes('Superseded narrative.')) throw new Error('superseded history must leave live context');
+if (!liveAfterDefault.includes('Do not treat flaky CI as passing.')) throw new Error('live warnings must survive default compact');
 const rewriteBundles = (await readdir(join(root, '.agentos/runs'), { withFileTypes: true })).filter(entry => entry.name.startsWith('compact-rewrite-'));
 if (rewriteBundles.length !== 1) throw new Error(`expected one rewrite archive bundle, saw ${rewriteBundles.length}`);
-console.log('\n--- compact rewrite repeat is a write-free no-op ---');
-console.log(run(['compact', '--rewrite', '--objective', objectiveIds[0]]));
+console.log('\n--- default compact repeat is a write-free no-op ---');
+console.log(run(['compact', '--objective', objectiveIds[0]]));
+console.log('\n--- --rewrite compatibility alias uses the same structural planner ---');
+await writeFile(join(root, '.agentos/handoff.md'), `${liveAfterDefault}\n\n## Previous objective — compatibility alias\n\n${'Alias history. '.repeat(100)}\n`);
+console.log(run(['compact', '--rewrite']));
 console.log('\n--- run handoff dry-run from root ---');
 console.log(run(['run', 'handoff', '--engine', 'claude-code', '--role', 'implementation', '--phase', 'smoke', '--reason', 'manual-pause', '--dry-run']));
 console.log('\n--- link-obsidian dry-run from root ---');
