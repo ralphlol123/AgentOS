@@ -4,6 +4,7 @@ import { readImportSource } from './import-source.js';
 import { appendContextRecord, literalMarkdown, markdownHeadings, markdownSection } from './markdown.js';
 import { HANDOFF_ROLES, recognizeSections, resolveObjective, sectionText } from './context-sections.js';
 import { planCompactRewrite } from './compact-rewrite.js';
+import { STATE_SIZE_WARN_CHARS, largestSections, sectionSizes } from './state-size.js';
 import { renderUnifiedDiff } from './compact-report.js';
 import { resolveCompactMode } from './cli-options.js';
 import { collectRunHandoffGitState } from './git-evidence.js';
@@ -967,6 +968,7 @@ export async function statusAgentOS(options: any = {}) {
   const objective = resolveObjective(handoff);
   const ok = missing.length === 0 && objective.kind === 'resolved';
   const childSection = await childRepoStatusSection(root, options.cwd ?? process.cwd(), project);
+  const sizeWarnings = await stateSizeWarnings(root);
   return {
     ok,
     text: [
@@ -980,6 +982,7 @@ export async function statusAgentOS(options: any = {}) {
       objective.selected?.text || `- ${objective.diagnostic}`,
       '',
       missing.length ? `Missing files:\n${missing.map((f) => `- ${f}`).join('\n')}` : 'Required files: all present',
+      ...(sizeWarnings.length ? ['', 'Warnings:', ...sizeWarnings.map((warning) => `- ${warning}`)] : []),
       ...(childSection ? ['', childSection] : []),
     ].filter(Boolean).join('\n'),
   };
@@ -1190,6 +1193,47 @@ function rewriteBlockedResult(root: string, reasons: string[], candidates: any[]
   return { ok: false, rewrite: true, dryRun: Boolean(dryRun), blockedReasons: reasons, objectiveCandidates: candidates, text: lines.join('\n') };
 }
 
+const UNCLASSIFIED_REASON = 'unclassified section preserved verbatim';
+
+/**
+ * When compaction finds nothing to remove, say where the bulk is and why each large section was kept.
+ * The per-section decision and reason already exist in the plan; this only prints them next to the
+ * measured size. Read-only: it uses the plan and the source text and touches nothing.
+ */
+function noReductionSectionListing(plan: any, sources: Record<string, RewriteSource>): string[] {
+  const rows: Array<{ file: string; title: string; line: number; chars: number; decision?: string; reason?: string }> = [];
+  for (const file of ['handoff', 'tasks'] as const) {
+    const byLine = new Map<number, any>(plan.classification[file].map((entry: any) => [entry.line, entry]));
+    for (const section of sectionSizes(sources[file].text)) {
+      const entry = byLine.get(section.line);
+      rows.push({ file: `${file}.md`, ...section, decision: entry?.decision, reason: entry?.reason });
+    }
+  }
+  if (!rows.length) return [];
+  rows.sort((a, b) => b.chars - a.chars || a.line - b.line);
+  const unclassified = (['handoff', 'tasks'] as const)
+    .reduce((n, file) => n + plan.classification[file].filter((entry: any) => entry.reason === UNCLASSIFIED_REASON).length, 0);
+  const out = ['', 'Largest sections (compact archives only sections it recognises as superseded history, and none of these qualify):'];
+  for (const row of rows.slice(0, 5)) {
+    out.push(`- ${row.file}:${row.line} "${row.title}": ${row.chars} chars${row.decision ? `, ${row.decision} (${row.reason})` : ''}`);
+  }
+  if (unclassified) out.push(`- ${unclassified} section(s) kept because their heading is not a recognised role or history heading.`);
+  out.push('Compaction only archives sections whose headings it recognises as superseded history; see README "Compaction".');
+  return out;
+}
+
+/** One warning per live state file over STATE_SIZE_WARN_CHARS. Shared by doctor and status; never a problem, never a write. */
+async function stateSizeWarnings(root: string): Promise<string[]> {
+  const warnings: string[] = [];
+  for (const file of ['handoff.md', 'tasks.md']) {
+    const text = await safeRead(join(root, '.agentos', file));
+    if (text.length <= STATE_SIZE_WARN_CHARS) continue;
+    const biggest = largestSections(text, 1)[0];
+    warnings.push(`.agentos/${file} is ${text.length} chars (~${Math.round(text.length / 4000)}k tokens) and engines are told to read it first${biggest ? `; its largest section "${biggest.title}" is ${biggest.chars} chars` : ''}. Run \`agentos compact --dry-run\` to see what can be archived.`);
+  }
+  return warnings;
+}
+
 /**
  * Structural compaction archives live handoff/tasks byte-for-byte, then replaces
  * them with the planner's canonical form when the combined live text shrinks.
@@ -1273,6 +1317,7 @@ async function compactRewriteUnlocked(options: any = {}) {
   if (!safeReduction) {
     lines.push('', 'No safe reduction found; files unchanged.');
     if (options.dryRun) lines.push('Preview only: projected deltas are shown above, but no apply would occur.');
+    lines.push(...noReductionSectionListing(plan, sources));
   } else {
     if (!archivedTotal) lines.push('', 'No sections qualified for archival; this rewrite is a structural normalization only.');
     lines.push('', `${options.dryRun ? 'Would archive' : 'Archived'}: ${bundleRel}/ (handoff.md, tasks.md, manifest.json, README.md)`,
@@ -2692,6 +2737,7 @@ async function checkTasksAndHandoff(root, problems, warnings, diagnostics) {
   if (/not pushed|needs push|push pending/i.test(handoff)) {
     diagnostics.push('handoff mentions pending push; compare with git ahead/behind diagnostics below');
   }
+  warnings.push(...await stateSizeWarnings(root));
 }
 
 function duplicateMarkdownHeadings(text, names) {

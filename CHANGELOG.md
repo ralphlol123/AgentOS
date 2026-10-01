@@ -6,6 +6,8 @@ All notable changes to AgentOS for Projects are documented here.
 
 ### Added
 
+- **Oversized state files are now visible.** `agentos doctor` and `agentos status` warn when `.agentos/handoff.md` or `.agentos/tasks.md` is over 50,000 characters, naming the largest section and the next command. The warning is advisory only: `doctor` problems and exit status, and `status` OK/NEEDS ATTENTION, are unchanged, and output for workspaces under the limit is byte-identical.
+- **`compact` explains a no-op.** When no safe reduction exists, the output lists the five largest sections with their size, decision and reason, and counts sections kept only because their heading is not a recognised role or history heading. Previously it said only `No safe reduction found`. Compaction behavior itself is unchanged.
 - **`.agentos/guide.md`.** One engine-agnostic guide (managed block, repaired by `doctor --fix`) that maps jobs to `agentos` commands and covers starting from a child repo. The root bootloaders (`AGENTS.md`, `CLAUDE.md`, `.hermes.md`) point at it in one line. Coding engines found `.agentos/` files but rarely reached for the CLI. In an ablation (Claude Code and OpenCode, one run per task, synthetic fixture), engines used the intended command (`doctor`, `compact`, `skills add`) in 6 of 8 root tasks with the guide and 2 of 8 without it. `doctor` warns when the guide is missing. There is deliberately no `agentos guide` command: with and without it, 8 of 12 nested OpenCode runs gave a fully grounded answer. Samples are small, so treat these as directional.
 
 ### Changed
