@@ -16,6 +16,7 @@ All notable changes to AgentOS for Projects are documented here.
 
 ### Fixed
 
+- **`project.yaml` edits keep your formatting.** `doctor --fix`, `agents add`, `templates copy`/`import` of an agent, `link-obsidian` and `obsidian link-workspace` used to parse the file and re-dump all of it, so comments, flow style and layout were lost even when nothing needed to change. They now edit only the value that changes (and return the file byte-for-byte when nothing does). The result is re-parsed and must equal the intended data; anything the editor cannot prove it reproduced (anchors and aliases, mixed line endings, an unusual layout) falls back to the old whole-file dump, so the data is never different, only the formatting.
 - **`agentos doctor --fix --dry-run` no longer takes the workspace writer lock.** It is documented as a read-only preview, but it failed with `EACCES` on `.agentos-write.lock` in a workspace the user cannot write to and would have been blocked by an unrelated writer. A real `doctor --fix` still takes the lock.
 
 ### Removed
