@@ -2,6 +2,18 @@
 
 All notable changes to AgentOS for Projects are documented here.
 
+## [Unreleased]
+
+### Added
+
+- **`.agentos/guide.md`.** One engine-agnostic guide (managed block, repaired by `doctor --fix`) that maps jobs to `agentos` commands and covers starting from a child repo. The root bootloaders (`AGENTS.md`, `CLAUDE.md`, `.hermes.md`) point at it in one line. Coding engines found `.agentos/` files but rarely reached for the CLI. In an ablation (Claude Code and OpenCode, one run per task, synthetic fixture), engines used the intended command (`doctor`, `compact`, `skills add`) in 6 of 8 root tasks with the guide and 2 of 8 without it. `doctor` warns when the guide is missing. There is deliberately no `agentos guide` command: with and without it, 8 of 12 nested OpenCode runs gave a fully grounded answer. Samples are small, so treat these as directional.
+
+### Changed
+
+- **`agentos status` and `agentos handoff` are self-sufficient from a child repo.** `status` adds the repo name, repos in scope, that repo's verification commands and the open tasks; `handoff` prints the handoff content before the reading list. Output at the workspace root is unchanged.
+- **Child repo pointers lead with the CLI.** The file list under `..` is now conditional on file reads working, because a refused read can end an OpenCode session.
+- Existing workspaces report their root and child adapters stale until `doctor --fix` is run; roll this out manually per project.
+
 ## [0.7.0] - 2026-09-17
 
 ### Changed
