@@ -153,7 +153,8 @@ AgentOS v0.1 is a TypeScript CLI/package that supports:
 - existing single-repo and multi-repo workspace import;
 - root adapters: `AGENTS.md`, `CLAUDE.md`, and `.hermes.md` (OpenCode uses the portable `AGENTS.md` pointer);
 - child repo pointer files for parent-managed multi-repo workspaces;
-- generated `.agentos/project.yaml`, `memory.md`, `handoff.md`, `tasks.md`, `decisions.md`, `status.md`, `skills.md`, `agents/`, `engines/`, `repos/`, and `runs/`;
+- `.agentos/guide.md`, one engine-agnostic command map (which `agentos` command for which job, and what to do from a child repo), loaded on demand from the root and child pointers;
+- generated `.agentos/project.yaml`, `memory.md`, `handoff.md`, `tasks.md`, `decisions.md`, `status.md`, `skills.md`, `guide.md`, `agents/`, `engines/`, `repos/`, and `runs/`;
 - agent selection profiles: `minimal`, `detected`, and custom comma lists;
 - optional planning-only `planner` role;
 - local project skills under `.agentos/skills/`;
@@ -407,6 +408,14 @@ claude
 ```
 
 The child pointer tells OpenCode/Codex/Hermes/Claude to resolve the relative AgentOS root (`..` for immediate children, deeper paths for nested repositories), read the root `.agentos/skills.md`, and then load only the specific `../.agentos/skills/**/SKILL.md` cards relevant to the task. Commit-message requests should resolve AgentOS skills such as `commit-messages` or an explicitly indexed project-local workflow from the skills index without the user repeating the full path.
+
+The pointers lead with the CLI, not with a file list. Some engines (OpenCode run non-interactively, observed) refuse file reads outside the directory they started in, and one refused read can end the session. From a child repo:
+
+- `agentos status` finds the workspace root and prints the repo you are in, the repos in scope, that repo's verification commands, and the open tasks.
+- `agentos handoff` prints the handoff content first. The file reading list follows, marked as applying only when reads outside the directory work.
+- Both leave the workspace-root output unchanged.
+
+OpenCode's own permission settings decide whether it may read the parent directory (in testing, `--auto` or an `external_directory` entry with an absolute path allowed it). Those settings are machine-specific, so AgentOS does not generate an `opencode.json`.
 
 Run this after upgrading an older workspace so stale child pointers are repaired:
 

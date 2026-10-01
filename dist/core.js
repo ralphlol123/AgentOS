@@ -13,7 +13,7 @@ import { access, chmod, link, mkdir, open, readFile, readdir, rename, rm, stat, 
 import { execFile } from 'node:child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomBytes } from 'node:crypto';
-import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 const execFileAsync = promisify(execFile);
@@ -862,6 +862,10 @@ function rootAdapterTargets(cwd, workspaceKind, repos) {
         { path: join(cwd, 'AGENTS.md'), label: 'AGENTS.md', section: agentsBootloader({ workspaceKind, repos }) },
         { path: join(cwd, 'CLAUDE.md'), label: 'CLAUDE.md', section: claudeAdapter() },
         { path: join(cwd, '.hermes.md'), label: '.hermes.md', section: hermesAdapter() },
+        // The engine-agnostic operating guide is a managed target like the bootloaders, so it is
+        // created by init, reported stale by doctor, and refreshed by doctor --fix. `level` is explicit
+        // because the path contains a slash but the file belongs to the workspace root, not a child repo.
+        { path: join(cwd, GUIDE_PATH), label: GUIDE_PATH, section: guideMd(), level: 'root' },
     ];
 }
 function childAdapterTargets(cwd, repos) {
@@ -985,6 +989,7 @@ export async function statusAgentOS(options = {}) {
     }
     const objective = resolveObjective(handoff);
     const ok = missing.length === 0 && objective.kind === 'resolved';
+    const childSection = await childRepoStatusSection(root, options.cwd ?? process.cwd(), project);
     return {
         ok,
         text: [
@@ -998,8 +1003,46 @@ export async function statusAgentOS(options = {}) {
             objective.selected?.text || `- ${objective.diagnostic}`,
             '',
             missing.length ? `Missing files:\n${missing.map((f) => `- ${f}`).join('\n')}` : 'Required files: all present',
+            ...(childSection ? ['', childSection] : []),
         ].filter(Boolean).join('\n'),
     };
+}
+// Inside a child repo, `status` has to be enough on its own: an engine that cannot read the parent
+// directory has only the CLI. Report which repo this is, the workspace scope, that repo's verification
+// commands and the open tasks. Returns null at the workspace root, so the root output stays byte-identical.
+function currentChildRepo(root, cwd, project) {
+    const here = resolve(cwd);
+    let repos;
+    try {
+        repos = parseReposFromProjectYaml(project);
+    }
+    catch {
+        return null;
+    }
+    const current = repos
+        .map((repo) => ({ repo, abs: resolve(root, repo.path) }))
+        .filter(({ abs }) => here === abs || here.startsWith(`${abs}${sep}`))
+        .sort((a, b) => b.abs.length - a.abs.length)[0]?.repo;
+    return current ? { current, repos } : null;
+}
+async function childRepoStatusSection(root, cwd, project) {
+    const found = currentChildRepo(root, cwd, project);
+    if (!found)
+        return null;
+    const { current, repos } = found;
+    const commands = current.commands || {};
+    const shown = ['dev_command', 'build_command', 'test_command', 'test_e2e_command'].filter((key) => commands[key]).map((key) => `${key.replace('_command', '')}=${commands[key]}`);
+    const tasks = await safeRead(join(root, '.agentos/tasks.md'));
+    const now = markdownSection(tasks, 'Now');
+    const open = (now || '').split('\n').filter((line) => /^[-*] \[ \]/.test(line)).map((line) => line.trim());
+    return [
+        `You are in repo: ${current.name} (${current.path.startsWith('.') ? current.path : `./${current.path}`})`,
+        `Repos in scope: ${repos.map((repo) => repo.name).sort().join(', ')}`,
+        `Verify this repo: ${shown.length ? shown.join('; ') : 'no commands recorded in .agentos/project.yaml'}`,
+        open.length ? 'Open tasks (Now):' : 'Open tasks (Now): none',
+        ...open,
+        'More: `agentos handoff` (full handoff).',
+    ].join('\n');
 }
 export async function promptAgentOS(options = {}) {
     const root = await findAgentOSRoot(options.cwd ?? process.cwd());
@@ -2382,6 +2425,34 @@ export async function handoffAgentOS(options = {}) {
         return { ok: false, text: 'No AgentOS root found.' };
     const project = await safeRead(join(root, '.agentos/project.yaml'));
     const handoff = await safeRead(join(root, '.agentos/handoff.md'));
+    const child = currentChildRepo(root, options.cwd ?? process.cwd(), project);
+    if (child) {
+        // Started inside a child repo: print the content first. The reading list is only useful to engines
+        // that can read outside their start directory, and a refused read can end the session, so it is
+        // offered after the content and behind an explicit condition.
+        return {
+            ok: true,
+            text: [
+                `You are in repo: ${child.current.name} (${child.current.path.startsWith('.') ? child.current.path : `./${child.current.path}`}); workspace root: ${root}`,
+                `Project: ${firstYamlValue(project, 'name') ?? basename(root)}`,
+                '',
+                'Current handoff excerpt:',
+                handoff.trim() || '(empty)',
+                '',
+                'Open tasks, repo scope and verification commands for this repo: `agentos status`.',
+                '',
+                'Only if file reads outside this directory work in your engine, and the output above is not enough, read (paths are relative to the workspace root):',
+                '1. AGENTS.md',
+                '2. .agentos/project.yaml',
+                '3. .agentos/memory.md',
+                '4. .agentos/handoff.md',
+                '5. .agentos/tasks.md',
+                '6. .agentos/knowledge.md when linked notes are relevant',
+                '7. relevant .agentos/agents/<role>.md',
+                '8. relevant .agentos/engines/<engine>.md',
+            ].join('\n'),
+        };
+    }
     return {
         ok: true,
         text: [
@@ -2496,6 +2567,8 @@ async function doctorAgentOSUnlocked(options = {}) {
         warnings.push('.agentos/knowledge.md missing link-only safety rule');
     if (!await exists(join(root, '.agentos/engines/opencode.md')))
         warnings.push('.agentos/engines/opencode.md is missing; run `agentos doctor --fix` to create it');
+    if (!await exists(join(root, GUIDE_PATH)))
+        warnings.push(`${GUIDE_PATH} is missing; run \`agentos doctor --fix\` to create it (engines read it to learn the AgentOS commands)`);
     if (projectConfigError) {
         problems.push(projectConfigError.message);
     }
@@ -3139,7 +3212,7 @@ function relativePosix(from, to) {
 function adapterInventoryEntry(root, target, plan) {
     const path = relativePosix(root, target.path);
     return {
-        level: path.includes('/') ? 'child' : 'root',
+        level: target.level ?? (path.includes('/') ? 'child' : 'root'),
         label: target.label,
         path,
         classification: plan.action,
@@ -3604,7 +3677,7 @@ async function explainAdapterAgentOS(fileRaw, options = {}) {
     const lines = [
         'AgentOS adapters explain',
         `Root: ${root}`,
-        `File: ${rel} (${match ? (rel.includes('/') ? 'child adapter' : 'root adapter') : 'not an AgentOS adapter target'})`,
+        `File: ${rel} (${match ? ((match.level ?? (rel.includes('/') ? 'child' : 'root')) === 'child' ? 'child adapter' : 'root adapter') : 'not an AgentOS adapter target'})`,
         `Bytes: ${raw.length} total`,
     ];
     if (content === null) {
@@ -3841,6 +3914,8 @@ function agentsBootloader({ workspaceKind, repos }) {
         '',
         'Read first: `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`. Then load `.agentos/knowledge.md`, `.agentos/skills.md`, and only the repo/agent/engine files relevant to the assigned task.',
         '',
+        GUIDE_POINTER_LINE,
+        '',
         'Rules: declare role + repo scope before editing; edit only in scope; never touch secrets/.env/migrations/prod config without approval; do not commit/push unless explicitly asked; verify; update handoff/tasks before stopping.',
         '',
     ].join('\n');
@@ -3857,6 +3932,8 @@ function claudeAdapter() {
         '',
         'Rules: declare role + repo scope before editing; edit only in scope; backend only if in scope; no secrets/.env/migrations/prod config without approval; no commit/push unless explicitly asked; verify; update handoff/tasks before stopping.',
         '',
+        GUIDE_POINTER_LINE,
+        '',
         'If launched from a child repo, follow pointer files back to the parent AgentOS root.',
         '',
     ].join('\n');
@@ -3868,15 +3945,18 @@ function subrepoAgentsPointer(repo) {
         '',
         `AgentOS child repo: ${repo.name} (${repo.path}).`,
         '',
+        ...CHILD_CLI_FIRST_LINES,
+        '',
         'This repo is not the whole product. The parent AgentOS root is `..`; treat `../.agentos/` as the canonical workspace context.',
         '',
-        'For OpenCode, Codex, Hermes, and other AGENTS.md-based engines launched from this child repo, read in order:',
+        'Only if file reads under `..` work in your engine, and the CLI output above is not enough, read in order (OpenCode, Codex, Hermes and other AGENTS.md-based engines):',
         '- `../AGENTS.md`',
         '- `../.agentos/project.yaml`',
         '- `../.agentos/memory.md`',
         '- `../.agentos/handoff.md`',
         '- `../.agentos/tasks.md`',
         '- `../.agentos/skills.md`',
+        '- `../.agentos/guide.md` (commands and workflows; load on demand)',
         '- `../.agentos/repos/' + repo.name + '.md`',
         '- `../.agentos/engines/opencode.md` when using OpenCode',
         '- `../.agentos/engines/codex.md` when using Codex',
@@ -3895,15 +3975,18 @@ function subrepoClaudePointer(repo) {
         '',
         `AgentOS child repo: ${repo.name} (${repo.path}).`,
         '',
+        ...CHILD_CLI_FIRST_LINES,
+        '',
         'This repo is not the whole product. The parent AgentOS root is `..`; treat `../.agentos/` as the canonical workspace context.',
         '',
-        'Before acting read in order:',
+        'Only if file reads under `..` work in your engine, and the CLI output above is not enough, read in order:',
         '- `../CLAUDE.md`',
         '- `../AGENTS.md`',
         '- `../.agentos/project.yaml`',
         '- `../.agentos/handoff.md`',
         '- `../.agentos/tasks.md`',
         '- `../.agentos/skills.md`',
+        '- `../.agentos/guide.md` (commands and workflows; load on demand)',
         '- `../.agentos/repos/' + repo.name + '.md`',
         '- `../.agentos/engines/claude-code.md`',
         '- load only when relevant: the specific `../.agentos/skills/**/SKILL.md` files for the requested role/task',
@@ -3920,6 +4003,58 @@ function hermesAdapter() {
         '',
         'AgentOS for Projects. Read `AGENTS.md`, `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md` first. Then load `.agentos/skills.md`, `.agentos/knowledge.md`, and only relevant repo/agent files for the task.',
         'Hermes rules: load relevant skills; verify real file/git/terminal/browser state; do not trust subagent reports without checking; update handoff/tasks when state changes.',
+        GUIDE_POINTER_LINE,
+        '',
+    ].join('\n');
+}
+// One short line shared by every root bootloader: the commands and workflows live in the guide,
+// loaded on demand, so the always-loaded adapters stay terse.
+const GUIDE_PATH = '.agentos/guide.md';
+const GUIDE_POINTER_LINE = 'Commands and workflows: `.agentos/guide.md` (load on demand). Run `agentos status` first.';
+// Shared by the AGENTS.md and CLAUDE.md child pointers. The CLI comes first on purpose: some engines
+// (observed: OpenCode run non-interactively) refuse reads outside their start directory, and a refused
+// tool call ends the turn, so a "fall back if refused" instruction placed after the file list is never read.
+const CHILD_CLI_FIRST_LINES = [
+    'First step from this repo: run `agentos status`. It works from this directory and prints what you need, so do this before reading any other file under `..`.',
+    'Some engines refuse file reads outside the directory they started in, and a refused read can end the session on the spot. If that applies to you, rely on `agentos status` and `agentos handoff` instead of the file list below.',
+];
+// The single engine-agnostic operating guide. Every command named in backticks here must exist in
+// the CLI help; test/engine-discovery.test.js checks that, so the guide cannot drift from the binary.
+function guideMd() {
+    return [
+        '# AgentOS Guide',
+        '',
+        'How to operate an AgentOS workspace from any coding engine (Claude Code, OpenCode, Codex, Hermes). This is a command map, not project state. `agentos status` prints the current objective, open tasks and verification commands; read `.agentos/handoff.md` and `.agentos/tasks.md` for more only when file reads work.',
+        '',
+        '## Start',
+        '',
+        '- Run `agentos status`. It finds the workspace root from any subdirectory and prints the current objective, the open tasks and, from a child repo, that repo\'s verification commands.',
+        '- Declare your role (`.agentos/agents/`) and the repo scope before editing. Edit only inside that scope.',
+        '- If a command is unclear, run `agentos --help` instead of guessing flags.',
+        '',
+        '## If you started inside a child repo',
+        '',
+        '- This directory is one repo of a larger workspace. The AgentOS root is the nearest parent that has `.agentos/`.',
+        '- Run `agentos status`. It works from any subdirectory and needs no file reads.',
+        '- Some engines refuse file reads outside the directory they started in, and a refused read can end the session immediately instead of letting you continue. Use the CLI first and read parent files only if reads work.',
+        '- `agentos handoff` prints the full handoff and the reading list when you need more than the status summary.',
+        '',
+        '## Which command for which job',
+        '',
+        '- Health check: `agentos doctor` (read-only). To repair, preview with `agentos doctor --fix --dry-run`, then run `agentos doctor --fix`.',
+        '- Handoff or tasks too long: `agentos compact --dry-run`, review the report, then `agentos compact`. It archives the originals byte-for-byte and refuses ambiguous state. Do not trim these files by hand.',
+        '- Add a workflow: `agentos skills list` shows the catalog, `agentos skills list --installed` shows what is installed, `agentos templates show <id>` reads one first, then `agentos skills add <skill-id> --dry-run` and `agentos skills add <skill-id>`.',
+        '- Roles: `agentos agents list`, `agentos agents list --installed`, `agentos agents add <agent-id> --dry-run`.',
+        '- Switching engines or stopping mid-task: `agentos run handoff --dry-run` writes a continuation note without changing engines for you.',
+        '- Is this adapter file current? `agentos adapters explain <file>`.',
+        '',
+        '## Rules',
+        '',
+        '- Never hand-edit text between `agentos:managed` markers (AGENTS.md, CLAUDE.md, .hermes.md, child pointers, this guide). `agentos doctor --fix` regenerates it.',
+        '- Install skills and agents through the CLI. A SKILL.md written by hand is not listed in `.agentos/skills.md`, so other engines and `agentos skills list --installed` will not see it.',
+        '- Preview with `--dry-run` before any command that writes.',
+        '- Do not commit or push unless explicitly asked. Do not touch secrets, .env files, migrations or production config without approval.',
+        '- Verify with the commands `agentos status` lists for your repo (the same ones are in `.agentos/repos/<repo>.md` if file reads work), then update `.agentos/handoff.md` and `.agentos/tasks.md` before stopping.',
         '',
     ].join('\n');
 }
@@ -4154,6 +4289,7 @@ function renderEnginePrompt({ engine, root, project, handoff, tasks }) {
         'Follow AgentOS for Projects.',
         `Project: ${projectName}; root: ${root}; kind: ${workspaceKind}; engine: ${engine}.`,
         `Read: AGENTS.md; ${engineAdapterLine(engine)}; .agentos/project.yaml; memory.md; handoff.md; tasks.md. Then load skills.md plus only the assigned repo/agent/engine context needed for the task.`,
+        `Commands and workflows: ${GUIDE_PATH} (load on demand; run \`agentos status\` first).`,
         obsidianLine,
         'Rules: declare role + scope before editing; edit only in scope; no secrets/.env/migrations/prod config without approval; no commit/push unless asked; verify; update handoff/tasks if state changes.',
         ...engineSpecificRules(engine),
