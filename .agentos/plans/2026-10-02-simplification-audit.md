@@ -37,6 +37,10 @@ An addition must measurably help or it is net-negative. Deletions ship as "stop 
 | #28 | `208e44a` | Regenerate this repo's own adapters | Fixed red `main`: CI runs `doctor --json` on this workspace and #27 left it stale |
 | #29 | `efc260f` | `doctor`/`status` warn over 50,000 chars; `compact --dry-run` lists the largest sections | Read-only visibility |
 | #30 | `e2575c6` | Stop generating `.agentos/engines/<engine>.md` | Removes ~25 sites in `core.ts`, 5 files per workspace |
+| #31 | `52ba67c` | Record this audit; reset `handoff.md`/`tasks.md` (~44K to ~11K chars) | State only |
+| #32 | `b7dae69` | `doctor --fix --dry-run` no longer takes the writer lock | Bug fix; the preview works in a workspace the user cannot write to |
+| #33 | `8f73c30` | Stop committing `dist/`; `prepare` script builds it | 42 files / 7,706 lines out of git; generated code was 5-32% of each recent PR diff |
+| #34 | `01279dd` | Edit `project.yaml` in place instead of re-dumping it | Bug fix; six commands, comments and flow style survive, proven fallback |
 
 Net since 0.7.0 (tracked source, `dist/` excluded): source +200 lines, tests +792, README +13, CHANGELOG +19. Fresh 2-repo workspace: 29 → 25 files, but 17 KB → 21 KB because the guide adds 3 KB. **The audit has so far added more code than it removed**; the real reductions are the queue below.
 
@@ -44,7 +48,18 @@ Net since 0.7.0 (tracked source, `dist/` excluded): source +200 lines, tests +79
 
 Engine-discovery ablation, pre-registered before any run (`PREREG.md`), same scorer for both variants, variant B = the build with every guide piece removed. Archive: `/home/hermes/agentos-archive/2026-10-02-engine-discovery-ablation/` (403 files, sha256-verified, README inside). Results: root right-tool 6/8 with the guide vs 2/8 without (5/8 vs 2/8 counting only completed outcomes); nested grounded answers 8/12 with and without the `agentos guide` command, so the command was dropped and the file kept. One run per cell, free OpenCode models plus Claude Code, synthetic fixture: directional. Codex untested (not installed for the `hermes` user).
 
-## Queue
+## Findings since the first write-up
+
+- **Command merges dropped after reading the code.** Obsidian is 302 lines in two modes that write the same two files, and README and quickstart teach both. `handoff` prints a reading list and an excerpt; `run handoff` (180 lines) writes a git-grounded recovery note under `runs/`: different jobs, only the names are confusing. `templates copy`, `skills add` and `agents add` share almost no code. `agentos prompt` (43 lines) inlines the current objective and Now tasks, so it is not a pure duplicate. Removing every deprecation candidate saves about 200 of 4,595 `core.ts` lines. Not worth a deprecation cycle.
+- **The `templates/` fixture-leak advisory is closed.** On current `main`, 1, 2 and 4 concurrent test suites and 3 concurrent `bun run test` runs all pass 576/576 with the `templates/` tree hash unchanged. The only test that edits template files (`catalog-parity`) copies them into a temp directory first. The advisory (2026-09-16) predates the current suite and was never reproduced; recorded as not reproducible, not as fixed.
+- **Labahub is upgraded and clean** (see handoff). It carried no legacy migration classes.
+- **Release:** the owner decided on 2026-10-02 not to release for now. A candidate (`0.8.0-rc.2`) exists and is untouched.
+
+## Queue (status as of 2026-10-02, after PR #34)
+
+Done: items 4 (`dist/` untracking) and the `project.yaml` fidelity fix. Dropped: the command merges in item 6 and the `agentos prompt` removal (see Findings). Still open and gated on KargaX evidence: items 2, 3 and 7. Item 1 (candidate) exists; publishing is on hold.
+
+### Original queue
 
 1. **Pack a `0.8.0` candidate** for the `app` user (six unreleased CHANGELOG entries make it a minor bump). Acceptance: install the exact tarball into a throwaway prefix, `agentos --version` matches, quote the shasum, confirm the target user can read the artifact's directory chain. Publishing is the owner's call.
 2. **KargaX listing.** Owner runs `agentos compact --dry-run` with that build and sends the "Largest sections" block. Decides: recognise more heading shapes in `compact` (cheap, bounded) vs change how state is written (overwrite `handoff.md`, history to `runs/`, which is never auto-loaded).
