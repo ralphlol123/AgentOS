@@ -32,8 +32,6 @@ jobs:
       - run: npm run smoke
       - run: node dist/cli.js doctor --json
       - run: npm run test:metadata
-      - name: Verify committed runtime matches source
-        run: git diff --exit-code -- dist
 
   package:
     name: npm / pnpm / Bun packaged workflows

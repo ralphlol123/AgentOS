@@ -185,9 +185,10 @@ pnpm add -g agentos-for-projects
 bun add -g agentos-for-projects
 ```
 
-From a local checkout:
+From a local checkout (the build runs during the checkout's own dependency install, so run that first):
 
 ```bash
+bun install   # or npm ci / pnpm install: builds dist/ via the `prepare` script
 npm install -g /path/to/agentos-for-projects
 pnpm add -g /path/to/agentos-for-projects
 bun add -g /path/to/agentos-for-projects
@@ -541,8 +542,8 @@ This renames active `.claude` files to timestamped `.agentos-legacy-*` backups, 
 ## Development
 
 ```bash
-bun install
-bun run build
+bun install            # also builds dist/ (the `prepare` script)
+bun run build          # rebuild after editing src/
 bun run check
 bun run test
 bun run smoke

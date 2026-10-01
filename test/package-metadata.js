@@ -60,3 +60,24 @@ test('packed npm tarball contains only publishable runtime files', async () => {
   assert.ok(files.every((file) => !file.startsWith('.agentos/')));
   assert.ok(files.every((file) => !file.startsWith('node_modules/')));
 });
+
+// Generated runtime is not committed. 42 tracked files (710 KB) rode along in every PR (5-32% of each diff),
+// the CI "committed runtime matches source" gate only policed that duplication, and nothing in CI or the
+// published package needs the committed copy: every job builds first, and `prepack` builds for npm/bun pack.
+// `prepare` rebuilds after `bun install` / `npm ci` / `pnpm install` in a checkout, so a checkout that is
+// installed from (the README's "From a local checkout") never lacks dist/.
+test('dist/ is generated, not committed: ignored, rebuilt on install, and not policed by CI', async () => {
+  const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
+  const ignore = (await readFile(join(root, '.gitignore'), 'utf8')).split(/\r?\n/).map((line) => line.trim());
+  assert.ok(ignore.includes('dist/') || ignore.includes('/dist') || ignore.includes('/dist/'), '.gitignore must ignore dist/');
+
+  const tracked = run('git', ['ls-files', 'dist']);
+  assert.equal(tracked, '', `dist/ must not be tracked, found:\n${tracked.split('\n').slice(0, 5).join('\n')}`);
+
+  assert.equal(pkg.scripts?.prepare, pkg.scripts?.build, '`prepare` must run the same build as `build`, so installing in a checkout produces dist/');
+  assert.match(pkg.scripts?.prepack ?? '', /tsc -p tsconfig\.json/, '`prepack` must still build for pack/publish');
+  assert.ok(pkg.files.includes('dist'), 'the published package still ships dist/');
+
+  const ci = await readFile(join(root, '.github/workflows/ci.yml'), 'utf8');
+  assert.doesNotMatch(ci, /git diff --exit-code -- dist/, 'CI must not require dist/ to be committed');
+});
