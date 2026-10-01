@@ -59,7 +59,7 @@ test('nested pointers use actual depth and disabled adapter policy prevents chil
 });
 test('doctor inspects root and repairs missing owned directories', async t => {
   const root = await fixture(t); assert.match((await doctorAgentOS({ cwd: root })).warnings.join('\n'), /missing build_command/);
-  await rm(join(root, '.agentos/engines'), { recursive: true }); await rm(join(root, '.agentos/agents'), { recursive: true }); assert.equal((await doctorAgentOS({ cwd: root, fix: true })).ok, true); assert.equal(await exists(join(root, '.agentos/engines/codex.md')), true);
+  await rm(join(root, '.agentos/agents'), { recursive: true }); assert.equal((await doctorAgentOS({ cwd: root, fix: true })).ok, true); assert.equal(await exists(join(root, '.agentos/agents/developer.md')), true);
 });
 test('migration preview creates nothing and failure restores all native renames', async t => {
   const root = await fixture(t); await migrateClaudeAgentOS({ cwd: root, preserve: true, dryRun: true }); assert.equal(await exists(join(root, '.claude')), false);

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, readdir, writeFile, stat, realpath } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, writeFile, stat, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -273,7 +273,8 @@ test('existing AGENTS.md and CLAUDE.md are patched with backups, not overwritten
   assert.match(agents, /Keep this/);
   assert.match(agents, /AgentOS for Projects/);
   assert.match(claude, /Keep this too/);
-  assert.match(claude, /agentos\/engines\/claude-code.md/);
+  assert.doesNotMatch(claude, /engines\//);
+  assert.match(claude, /\.agentos\/skills\.md/);
   assert.match(claude, /\.agentos\/handoff.md/);
   assert.equal(await exists(join(root, 'AGENTS.md.agentos.bak')), true);
   assert.equal(await exists(join(root, 'CLAUDE.md.agentos.bak')), true);
@@ -318,7 +319,7 @@ test('doctor --fix refreshes stale child pointers with selective context wording
   }
 });
 
-test('child repo pointers expose parent AgentOS skills and engine adapters for subrepo-launched engines', async () => {
+test('child repo pointers expose parent AgentOS skills and repo context for subrepo-launched engines', async () => {
   const root = await tempProject();
   await mkdirp(join(root, 'kargax-fe'));
   await mkdirp(join(root, 'kargax-be'));
@@ -334,12 +335,12 @@ test('child repo pointers expose parent AgentOS skills and engine adapters for s
   assert.match(agents, /Codex|codex/);
   assert.match(agents, /parent AgentOS root/i);
   assert.match(agents, /\.\.\/\.agentos\/skills\.md/);
-  assert.match(agents, /\.\.\/\.agentos\/engines\/opencode\.md/);
+  assert.doesNotMatch(agents, /engines\//);
   assert.match(agents, /commit-messages/);
   assert.match(agents, /do not require the user to repeat/i);
 
   assert.match(claude, /\.\.\/\.agentos\/skills\.md/);
-  assert.match(claude, /\.\.\/\.agentos\/engines\/claude-code\.md/);
+  assert.doesNotMatch(claude, /engines\//);
   assert.match(claude, /parent AgentOS root/i);
 });
 
@@ -360,7 +361,7 @@ test('doctor reports and fixes child repo pointers that do not expose skills.md'
   const agents = await readFile(join(root, 'frontend/AGENTS.md'), 'utf8');
   const claude = await readFile(join(root, 'frontend/CLAUDE.md'), 'utf8');
   assert.match(agents, /\.\.\/\.agentos\/skills\.md/);
-  assert.match(agents, /\.\.\/\.agentos\/engines\/opencode\.md/);
+  assert.doesNotMatch(agents, /engines\//);
   assert.match(claude, /\.\.\/\.agentos\/skills\.md/);
 });
 
@@ -436,10 +437,11 @@ test('prompt renders engine-specific AgentOS task prefix', async () => {
   assert.equal(prompt.engine, 'opencode');
   assert.match(prompt.text, /Follow AgentOS for Projects/);
   assert.match(prompt.text, /engine: opencode/);
-  assert.match(prompt.text, /engines\/opencode.md/);
+  assert.doesNotMatch(prompt.text, /engines\//);
+  assert.match(prompt.text, /Read: AGENTS\.md;/);
   assert.match(prompt.text, /no commit\/push unless asked/);
   assert.match(prompt.text, /Now:/);
-  assert.match(prompt.text, /only the assigned repo\/agent\/engine context needed/);
+  assert.match(prompt.text, /only the assigned repo\/agent context needed/);
   assert.doesNotMatch(prompt.text, /agents\/\*/);
 });
 
@@ -601,7 +603,7 @@ test('doctor --json CLI prints parseable JSON only', async () => {
 });
 
 
-test('doctor --fix adds OpenCode engine adapter to older workspaces', async () => {
+test('doctor --fix adds opencode to engines.allowed in older workspaces without creating an engine stub', async () => {
   const root = await tempProject();
   await initAgentOS({ cwd: root, mode: 'new', yes: true });
   const projectPath = join(root, '.agentos/project.yaml');
@@ -609,7 +611,6 @@ test('doctor --fix adds OpenCode engine adapter to older workspaces', async () =
   projectYaml = projectYaml.replace('    - opencode\n', '');
   await writeFile(projectPath, projectYaml);
   const { rm } = await import('node:fs/promises');
-  await rm(join(root, '.agentos/engines/opencode.md'), { force: true });
 
   const before = await doctorAgentOS({ cwd: root });
   assert.equal(before.ok, true);
@@ -617,7 +618,7 @@ test('doctor --fix adds OpenCode engine adapter to older workspaces', async () =
 
   const fixed = await doctorAgentOS({ cwd: root, fix: true });
   assert.equal(fixed.ok, true);
-  assert.equal(await exists(join(root, '.agentos/engines/opencode.md')), true);
+  assert.equal(await exists(join(root, '.agentos/engines/opencode.md')), false, 'no stub is created');
   assert.match(await readFile(projectPath, 'utf8'), /- opencode/);
 });
 
@@ -1269,7 +1270,8 @@ test('doctor --fix fails closed and makes zero adapter/config mutations when pro
   ];
   const before = {};
   for (const rel of snapshotPaths) before[rel] = await readFile(join(root, rel), 'utf8');
-  const openCodeEngineExistedBefore = await exists(join(root, '.agentos/engines/opencode.md'));
+  await rm(join(root, '.agentos/guide.md'), { force: true });
+  const canaryExistedBefore = await exists(join(root, '.agentos/guide.md'));
 
   const fixed = await doctorAgentOS({ cwd: root, fix: true });
 
@@ -1280,7 +1282,7 @@ test('doctor --fix fails closed and makes zero adapter/config mutations when pro
     const after = await readFile(join(root, rel), 'utf8');
     assert.equal(after, before[rel], `${rel} must be byte-identical after a failed doctor --fix`);
   }
-  assert.equal(await exists(join(root, '.agentos/engines/opencode.md')), openCodeEngineExistedBefore, 'doctor --fix must not create new adapter files when config is malformed');
+  assert.equal(await exists(join(root, '.agentos/guide.md')), canaryExistedBefore, 'doctor --fix must not create new adapter files when config is malformed');
 });
 
 test('doctor (no --fix) reports malformed project.yaml as a clear problem instead of crashing or treating it as empty', async () => {
@@ -1309,7 +1311,7 @@ test('doctor --fix distinguishes a missing project.yaml from a malformed one and
 
   assert.doesNotMatch(fixed.text, /malformed/i);
   assert.match(fixed.text, /Missing \.agentos\/project\.yaml/);
-  assert.equal(await exists(join(root, '.agentos/engines/opencode.md')), true, 'doctor --fix should still create missing adapter files when project.yaml is absent rather than malformed');
+  assert.equal(await exists(join(root, '.agentos/knowledge.md')), true, 'doctor --fix should still create missing adapter files when project.yaml is absent rather than malformed');
 });
 
 test('agents add fails closed without corrupting a malformed project.yaml', async () => {
@@ -1366,7 +1368,8 @@ test('doctor --fix fails closed and makes zero adapter/config mutations when pro
   ];
   const before = {};
   for (const rel of snapshotPaths) before[rel] = await readFile(join(root, rel), 'utf8');
-  const openCodeEngineExistedBefore = await exists(join(root, '.agentos/engines/opencode.md'));
+  await rm(join(root, '.agentos/guide.md'), { force: true });
+  const canaryExistedBefore = await exists(join(root, '.agentos/guide.md'));
 
   const fixed = await doctorAgentOS({ cwd: root, fix: true });
 
@@ -1377,7 +1380,7 @@ test('doctor --fix fails closed and makes zero adapter/config mutations when pro
     const after = await readFile(join(root, rel), 'utf8');
     assert.equal(after, before[rel], `${rel} must be byte-identical after a failed doctor --fix`);
   }
-  assert.equal(await exists(join(root, '.agentos/engines/opencode.md')), openCodeEngineExistedBefore, 'doctor --fix must not create new adapter files when config is empty/malformed');
+  assert.equal(await exists(join(root, '.agentos/guide.md')), canaryExistedBefore, 'doctor --fix must not create new adapter files when config is empty/malformed');
 });
 
 test('doctor (no --fix) treats an existing empty or whitespace-only project.yaml as malformed, not missing or valid', async () => {
@@ -1464,7 +1467,8 @@ test('doctor --fix fails closed and makes zero adapter/config mutations when pro
     await writeFile(projectPath, nullYaml);
     const before = {};
     for (const rel of snapshotPaths) before[rel] = await readFile(join(root, rel), 'utf8');
-    const openCodeEngineExistedBefore = await exists(join(root, '.agentos/engines/opencode.md'));
+    await rm(join(root, '.agentos/guide.md'), { force: true });
+  const canaryExistedBefore = await exists(join(root, '.agentos/guide.md'));
 
     const fixed = await doctorAgentOS({ cwd: root, fix: true });
 
@@ -1475,7 +1479,7 @@ test('doctor --fix fails closed and makes zero adapter/config mutations when pro
       const after = await readFile(join(root, rel), 'utf8');
       assert.equal(after, before[rel], `${rel} must be byte-identical after a failed doctor --fix (content ${JSON.stringify(nullYaml)})`);
     }
-    assert.equal(await exists(join(root, '.agentos/engines/opencode.md')), openCodeEngineExistedBefore, 'doctor --fix must not create new adapter files when config is YAML null');
+    assert.equal(await exists(join(root, '.agentos/guide.md')), canaryExistedBefore, 'doctor --fix must not create new adapter files when config is YAML null');
   }
 });
 
