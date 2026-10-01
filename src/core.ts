@@ -5,6 +5,7 @@ import { appendContextRecord, literalMarkdown, markdownHeadings, markdownSection
 import { HANDOFF_ROLES, recognizeSections, resolveObjective, sectionText } from './context-sections.js';
 import { planCompactRewrite } from './compact-rewrite.js';
 import { STATE_SIZE_WARN_CHARS, largestSections, sectionSizes } from './state-size.js';
+import { dumpYaml, patchProjectYaml } from './project-yaml-edit.js';
 import { renderUnifiedDiff } from './compact-report.js';
 import { resolveCompactMode } from './cli-options.js';
 import { collectRunHandoffGitState } from './git-evidence.js';
@@ -16,7 +17,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomBytes } from 'node:crypto';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
-import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
+import { parse as parseYaml } from 'yaml';
 
 const execFileAsync = promisify(execFile);
 const AGENTOS_DIR = '.agentos';
@@ -1794,13 +1795,14 @@ async function agentsAgentOSUnlocked(options: any = {}) {
   await assertCardReplacement(join(root, relPath), content, options.replace);
   const projectPath = join(root, '.agentos/project.yaml');
   await assertProjectYamlWellFormed(projectPath);
-  const project = parseProjectYaml(await safeRead(projectPath));
+  const projectText = await safeRead(projectPath);
+  const project = parseProjectYaml(projectText);
   const agents = project.agents && typeof project.agents === 'object' ? project.agents : {};
   const enabled = new Set(Array.isArray(agents.enabled) ? agents.enabled.map((v) => normalizeAgentAlias(String(v))) : []);
   enabled.add(id);
   const capabilities = agents.capabilities && typeof agents.capabilities === 'object' ? agents.capabilities : {};
   if (id === 'planner' && !capabilities.planning) capabilities.planning = 'planner';
-  project.agents = { profile: 'custom', capabilities, enabled: [...enabled] };
+  const nextAgents = { profile: 'custom', capabilities, enabled: [...enabled] };
   const deprecation = (!isPathLike(raw) && !options.name) ? resolveAgentAlias(raw) : { id, deprecated: false };
   const lines = [
     `AgentOS agents add${dryRun ? ' dry run' : ''}`, `Root: ${root}`, `Agent: ${id}`,
@@ -1811,7 +1813,7 @@ async function agentsAgentOSUnlocked(options: any = {}) {
     await withMutationTransaction(async () => {
       await mkdirTracked(dirname(join(root, relPath)));
       await writeFileAtomic(join(root, relPath), content);
-      await writeFileAtomic(projectPath, dumpProjectYaml(project));
+      await writeFileAtomic(projectPath, patchProjectYaml(projectText, (data) => { data.agents = nextAgents; }));
     });
   }
   return { ok: true, root, id, dryRun, text: lines.join('\n') };
@@ -2051,14 +2053,15 @@ function validateTemplateContent(type, content) {
 async function registerProjectAgent(root, id) {
   const projectPath = join(root, '.agentos/project.yaml');
   await assertProjectYamlWellFormed(projectPath);
-  const project = parseProjectYaml(await safeRead(projectPath));
+  const projectText = await safeRead(projectPath);
+  const project = parseProjectYaml(projectText);
   const agents = project.agents && typeof project.agents === 'object' ? project.agents : {};
   const enabled = new Set(Array.isArray(agents.enabled) ? agents.enabled.map((v) => normalizeAgentAlias(String(v))) : []);
   enabled.add(normalizeAgentAlias(id));
   const capabilities = agents.capabilities && typeof agents.capabilities === 'object' ? agents.capabilities : {};
   if (id === 'planner' && !capabilities.planning) capabilities.planning = 'planner';
-  project.agents = { profile: 'custom', capabilities, enabled: [...enabled] };
-  await writeFileAtomic(projectPath, dumpProjectYaml(project));
+  const nextAgents = { profile: 'custom', capabilities, enabled: [...enabled] };
+  await writeFileAtomic(projectPath, patchProjectYaml(projectText, (data) => { data.agents = nextAgents; }));
 }
 
 function skillInstallFiles(skill: SkillDefinition, mode: 'summary' | 'full') {
@@ -4092,19 +4095,19 @@ function repoMd(repo) { return `# ${title(repo.name)} Repo\n\nPath: \`${repo.pat
 async function ensureProjectYamlEngine(path, engine) {
   if (!await exists(path)) return;
   const content = await readFile(path, 'utf8');
-  const data = parseProjectYaml(content);
-  data.engines = data.engines && typeof data.engines === 'object' ? data.engines : {};
-  data.engines.allowed = Array.isArray(data.engines.allowed) ? data.engines.allowed : [];
-  if (!data.engines.allowed.includes(engine)) data.engines.allowed.push(engine);
-  await writeFileAtomic(path, dumpProjectYaml(data));
+  const patched = patchProjectYaml(content, (data) => {
+    data.engines = data.engines && typeof data.engines === 'object' ? data.engines : {};
+    data.engines.allowed = Array.isArray(data.engines.allowed) ? data.engines.allowed : [];
+    if (!data.engines.allowed.includes(engine)) data.engines.allowed.push(engine);
+  });
+  if (patched !== content) await writeFileAtomic(path, patched);
 }
 
 async function ensureProjectYamlAgents(path, agentSelection) {
   if (!await exists(path)) return;
   const content = await readFile(path, 'utf8');
-  const data = parseProjectYaml(content);
-  data.agents = agentConfigObject(agentSelection);
-  await writeFileAtomic(path, dumpProjectYaml(data));
+  const patched = patchProjectYaml(content, (data) => { data.agents = agentConfigObject(agentSelection); });
+  if (patched !== content) await writeFileAtomic(path, patched);
 }
 
 async function writeIfMissing(path, content) { if (!await exists(path)) await writeFileAtomic(path, content); }
@@ -4302,21 +4305,21 @@ function obsidianNoteTemplate(note, projectName, linked) {
 }
 
 function ensureObsidianProjectConfig(project, { vault, destination, linked, mode = 'link-only' }) {
-  const data = parseProjectYaml(project);
-  data.knowledge = data.knowledge && typeof data.knowledge === 'object' ? data.knowledge : {};
-  data.knowledge.obsidian = {
-    mode,
-    vault,
-    destination,
-    linked,
-  };
-  if (mode === 'workspace-folder') {
-    data.knowledge.obsidian.rules = {
-      no_bulk_vault_access: true,
-      writes_confined_to_destination: true,
+  return patchProjectYaml(String(project || ''), (data) => {
+    data.knowledge = data.knowledge && typeof data.knowledge === 'object' ? data.knowledge : {};
+    data.knowledge.obsidian = {
+      mode,
+      vault,
+      destination,
+      linked,
     };
-  }
-  return dumpProjectYaml(data);
+    if (mode === 'workspace-folder') {
+      data.knowledge.obsidian.rules = {
+        no_bulk_vault_access: true,
+        writes_confined_to_destination: true,
+      };
+    }
+  });
 }
 
 function obsidianConfigFromProject(project) {
@@ -4409,7 +4412,7 @@ async function assertProjectYamlWellFormed(path) {
 }
 
 function dumpProjectYaml(data) {
-  return stringifyYaml(data, { indent: 2, lineWidth: 0 }).replace(/\n*$/, '\n');
+  return dumpYaml(data);
 }
 
 function stringValue(value, fallback = '') {
