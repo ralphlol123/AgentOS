@@ -35,7 +35,7 @@ const REQUIRED_FILES = [
 // --- Atomic state writes -------------------------------------------------
 //
 // Every critical AgentOS text file (project.yaml, handoff/tasks/knowledge/
-// skills.md, managed agent/engine/repo markdown, root/child adapter files,
+// skills.md, managed agent/repo markdown, root/child adapter files,
 // and the .agentos.bak backups made when patching them) is replaced through
 // writeFileAtomic: the new content lands in a uniquely named temp file in
 // the SAME directory, is written, fsync'd, and closed, then rename()'d over
@@ -894,7 +894,6 @@ async function initAgentOSUnlocked(options: any = {}) {
   const planned = [...new Set([
     ...plannedFiles(mode, workspaceKind, repos),
     ...agentSelection.agents.map(agent => `.agentos/agents/${agent.id}.md`),
-    ...defaultEngines().map(engine => `.agentos/engines/${engine.id}.md`),
     ...repos.map(repo => `.agentos/repos/${repo.name}.md`),
     ...adapterTargets.map(target => relative(cwd, target.path)),
     ...adapterPlans.filter(entry => entry.plan.needsBackup).map(entry => `${relative(cwd, entry.target.path)}.agentos.bak`),
@@ -908,7 +907,7 @@ async function initAgentOSUnlocked(options: any = {}) {
   if (options.dryRun) return { mode, workspaceKind, repos, planned, plan, agents: agentSelection, text: renderDryRun({ cwd, mode, workspaceKind, repos, agentSelection }) + '\n' + plan.map(item => `- ${item.action}: ${item.path}`).join('\n') + (existing ? '' : '\n' + collectAgentDeprecationNotices(options.agents).map((n) => `Note: ${n}`).join('\n')) };
 
   // Every filesystem mutation init makes - the .agentos scaffold directories
-  // and files, per-agent/engine/repo files, root/child adapters, their
+  // and files, per-agent/repo files, root/child adapters, their
   // one-time backups, and child .gitignore blocks - runs inside a single
   // transaction, so a fault anywhere in that sequence (an injected fault, a
   // permission error, disk-full) rolls the whole command back to its exact
@@ -916,7 +915,6 @@ async function initAgentOSUnlocked(options: any = {}) {
   await withMutationTransaction(async () => {
     await mkdirTracked(join(cwd, AGENTOS_DIR));
     await mkdirTracked(join(cwd, AGENTOS_DIR, 'agents'));
-    await mkdirTracked(join(cwd, AGENTOS_DIR, 'engines'));
     await mkdirTracked(join(cwd, AGENTOS_DIR, 'runs'));
     await mkdirTracked(join(cwd, AGENTOS_DIR, 'repos'));
 
@@ -938,9 +936,6 @@ async function initAgentOSUnlocked(options: any = {}) {
 
     for (const agent of agentSelection.agents) {
       await writeIfMissing(join(cwd, AGENTOS_DIR, 'agents', `${agent.id}.md`), agentMd(agent));
-    }
-    for (const engine of defaultEngines()) {
-      await writeIfMissing(join(cwd, AGENTOS_DIR, 'engines', `${engine.id}.md`), engineMd(engine));
     }
     for (const repo of repos) {
       await writeIfMissing(join(cwd, AGENTOS_DIR, 'repos', `${repo.name}.md`), repoMd(repo));
@@ -1647,7 +1642,7 @@ async function ensureClaudeCanonicalBlock(path) {
 }
 
 function claudeCanonicalBlock() {
-  return `# AgentOS canonical Claude Code context\n\nUse AgentOS as the source of truth for this workspace. Read \`AGENTS.md\`, \`.agentos/project.yaml\`, \`.agentos/memory.md\`, \`.agentos/handoff.md\`, \`.agentos/tasks.md\`, \`.agentos/skills.md\`, and only the relevant repo/agent/engine/skill files for the assigned task.\n\nDo not use \`.claude/agents*\` or \`.claude/settings*.json*\` as canonical project instructions. Those files are preserved legacy fallback/reference only.\n`;
+  return `# AgentOS canonical Claude Code context\n\nUse AgentOS as the source of truth for this workspace. Read \`AGENTS.md\`, \`.agentos/project.yaml\`, \`.agentos/memory.md\`, \`.agentos/handoff.md\`, \`.agentos/tasks.md\`, \`.agentos/skills.md\`, and only the relevant repo/agent/skill files for the assigned task.\n\nDo not use \`.claude/agents*\` or \`.claude/settings*.json*\` as canonical project instructions. Those files are preserved legacy fallback/reference only.\n`;
 }
 
 async function skillsAgentOSUnlocked(options: any = {}) {
@@ -2337,7 +2332,7 @@ Rules:
 - Continue from the existing worktree; do not restart from scratch.
 - Preserve existing diffs unless clearly wrong.
 - Do not reset, clean, delete, commit, push, merge, or remove worktrees unless the user explicitly approves.
-- If switching engines, read the relevant \`.agentos/engines/<engine>.md\` adapter first.
+- If switching engines, the next engine reads \`AGENTS.md\` (or its own bootloader) and \`.agentos/handoff.md\` first.
 `;
 }
 
@@ -2404,7 +2399,6 @@ export async function handoffAgentOS(options: any = {}) {
         '5. .agentos/tasks.md',
         '6. .agentos/knowledge.md when linked notes are relevant',
         '7. relevant .agentos/agents/<role>.md',
-        '8. relevant .agentos/engines/<engine>.md',
       ].join('\n'),
     };
   }
@@ -2419,7 +2413,6 @@ export async function handoffAgentOS(options: any = {}) {
       '5. .agentos/tasks.md',
       '6. .agentos/knowledge.md when linked notes are relevant',
       '7. relevant .agentos/agents/<role>.md',
-      '8. relevant .agentos/engines/<engine>.md',
       '',
       `Project: ${firstYamlValue(project, 'name') ?? basename(root)}`,
       '',
@@ -2512,7 +2505,6 @@ async function doctorAgentOSUnlocked(options: any = {}) {
   if (!claude.includes('.agentos/handoff.md')) problems.push('CLAUDE.md does not point to .agentos/handoff.md');
   if (!hermes.includes('AgentOS for Projects')) warnings.push('Optional .hermes.md adapter is missing or does not mention AgentOS');
   if (!knowledge.includes('Do not bulk-load')) warnings.push('.agentos/knowledge.md missing link-only safety rule');
-  if (!await exists(join(root, '.agentos/engines/opencode.md'))) warnings.push('.agentos/engines/opencode.md is missing; run `agentos doctor --fix` to create it');
   if (!await exists(join(root, GUIDE_PATH))) warnings.push(`${GUIDE_PATH} is missing; run \`agentos doctor --fix\` to create it (engines read it to learn the AgentOS commands)`);
 
   if (projectConfigError) {
@@ -2533,11 +2525,9 @@ async function doctorAgentOSUnlocked(options: any = {}) {
     const subClaude = await safeRead(claudePath);
     if (!subAgents.includes(`${parent}/.agentos/project.yaml`)) problems.push(`${repo.path}/AGENTS.md does not point to parent AgentOS project.yaml`);
     if (!subAgents.includes(`${parent}/.agentos/skills.md`)) problems.push(`${repo.path}/AGENTS.md does not point to parent AgentOS skills.md`);
-    if (!subAgents.includes(`${parent}/.agentos/engines/opencode.md`)) problems.push(`${repo.path}/AGENTS.md does not point to OpenCode engine adapter`);
     if (!subAgents.includes(`${parent}/.agentos/repos/${repo.name}.md`)) problems.push(`${repo.path}/AGENTS.md does not point to its repo context`);
     if (!subClaude.includes(`${parent}/CLAUDE.md`) || !subClaude.includes(`${parent}/.agentos/handoff.md`)) problems.push(`${repo.path}/CLAUDE.md does not point to parent Claude/AgentOS context`);
     if (!subClaude.includes(`${parent}/.agentos/skills.md`)) problems.push(`${repo.path}/CLAUDE.md does not point to parent AgentOS skills.md`);
-    if (!subClaude.includes(`${parent}/.agentos/engines/claude-code.md`)) problems.push(`${repo.path}/CLAUDE.md does not point to Claude engine adapter`);
   }
 
   // Every diagnostic below derives the canonical adapter sections (and which
@@ -2926,7 +2916,6 @@ async function fixAgentOSAdapters(root, options: { allowAdopt?: boolean } = {}) 
   const adapterPlans = await planAdapterFiles(adapterTargets, { allowAdopt: options.allowAdopt });
 
   await mkdirTracked(join(root, '.agentos/agents'));
-  await mkdirTracked(join(root, '.agentos/engines'));
   await mkdirTracked(join(root, '.agentos/repos'));
   for (const repo of allRepos) await writeIfMissing(join(root, '.agentos/repos', `${repo.name}.md`), repoMd(repo));
   await ensureProjectYamlEngine(projectPath, 'opencode');
@@ -2936,9 +2925,6 @@ async function fixAgentOSAdapters(root, options: { allowAdopt?: boolean } = {}) 
   await writeIfMissing(join(root, '.agentos/skills.md'), skillsMd(agentSelection));
   for (const agent of agentSelection.agents) {
     await writeIfMissing(join(root, '.agentos/agents', `${agent.id}.md`), agentMd(agent));
-  }
-  for (const engine of defaultEngines()) {
-    await writeIfMissing(join(root, '.agentos/engines', `${engine.id}.md`), engineMd(engine));
   }
   await applyAdapterPlans(adapterPlans);
   if (policy.gitignore === 'ignore') for (const repo of childRepos) await ensureChildRepoGitignore(join(root, repo.path));
@@ -3806,7 +3792,7 @@ function agentsBootloader({ workspaceKind, repos }) {
     `Workspace: ${workspaceKind}`,
     `Repos: ${repoSummary(repos)}`,
     '',
-    'Read first: `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`. Then load `.agentos/knowledge.md`, `.agentos/skills.md`, and only the repo/agent/engine files relevant to the assigned task.',
+    'Read first: `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`. Then load `.agentos/knowledge.md`, `.agentos/skills.md`, and only the repo/agent files relevant to the assigned task.',
     '',
     GUIDE_POINTER_LINE,
     '',
@@ -3824,7 +3810,7 @@ function claudeAdapter() {
   return [
     '# CLAUDE.md',
     '',
-    'AgentOS for Projects. Read `AGENTS.md`, `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`, and `.agentos/engines/claude-code.md` first. Then load `.agentos/knowledge.md`, `.agentos/skills.md`, and only relevant repo/agent files for the task.',
+    'AgentOS for Projects. Read `AGENTS.md`, `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, and `.agentos/tasks.md` first. Then load `.agentos/knowledge.md`, `.agentos/skills.md`, and only relevant repo/agent files for the task.',
     '',
     'Rules: declare role + repo scope before editing; edit only in scope; backend only if in scope; no secrets/.env/migrations/prod config without approval; no commit/push unless explicitly asked; verify; update handoff/tasks before stopping.',
     '',
@@ -3855,8 +3841,6 @@ function subrepoAgentsPointer(repo) {
     '- `../.agentos/skills.md`',
     '- `../.agentos/guide.md` (commands and workflows; load on demand)',
     '- `../.agentos/repos/' + repo.name + '.md`',
-    '- `../.agentos/engines/opencode.md` when using OpenCode',
-    '- `../.agentos/engines/codex.md` when using Codex',
     '- load only when relevant: the specific `../.agentos/skills/**/SKILL.md` files for the requested role/task',
     '',
     'If the user asks for a commit message or mentions a project skill such as `commit-messages`, use `../.agentos/skills.md` to locate that AgentOS skill and load its `SKILL.md`; do not require the user to repeat the AgentOS skill path every time.',
@@ -3886,7 +3870,6 @@ function subrepoClaudePointer(repo) {
     '- `../.agentos/skills.md`',
     '- `../.agentos/guide.md` (commands and workflows; load on demand)',
     '- `../.agentos/repos/' + repo.name + '.md`',
-    '- `../.agentos/engines/claude-code.md`',
     '- load only when relevant: the specific `../.agentos/skills/**/SKILL.md` files for the requested role/task',
     '',
     'If the user asks for a commit message or mentions a project skill such as `commit-messages`, use `../.agentos/skills.md` to locate that AgentOS skill and load its `SKILL.md`; do not require the user to repeat the AgentOS skill path every time.',
@@ -4103,8 +4086,6 @@ function agentMd(agent) {
   return `# ${title(agent.id)}\n\nMandate: ${agent.mandate}\n\n## Responsibilities in\n\n- Work only inside declared task scope.\n- Read AgentOS project, memory, handoff, and tasks first; then load only relevant skills, repo, role, and engine context.\n- Report files changed, verification run, failures, and next action before stopping.\n\n## Responsibilities out\n\n- Do not touch secrets, .env files, production config, migrations, or unrelated repos without explicit approval.\n- Do not commit or push unless explicitly assigned.\n\n## Skills\n\nUse .agentos/skills.md as an on-demand index. Load only skills relevant to this role and task.\n`;
 }
 
-function defaultEngines() { return ['claude-code', 'codex', 'opencode', 'hermes', 'chatgpt'].map((id) => ({ id })); }
-function engineMd(engine) { return `# ${title(engine.id)} Adapter\n\nRead AGENTS.md + .agentos context first. Before stopping: handoff current state, files changed, tests, failures, next action.\n`; }
 function repoMd(repo) { return `# ${title(repo.name)} Repo\n\nPath: \`${repo.path}\`; type: ${repo.type}; framework: ${repo.framework}; package manager: ${repo.packageManager}.\nCommands: dev=\`${repo.devCommand || repo.commands?.dev_command || 'unknown'}\`; build=\`${repo.buildCommand || repo.commands?.build_command || 'unknown'}\`; test=\`${repo.testCommand || repo.commands?.test_command || 'unknown'}\`${repo.testE2eCommand ? `; e2e=\`${repo.testE2eCommand}\`` : ''}${repo.generateCommand ? `; generate=\`${repo.generateCommand}\`` : ''}${repo.previewCommand ? `; preview=\`${repo.previewCommand}\`` : ''}.\nScope: edit only when task includes \`${repo.name}\`.\n`; }
 
 
@@ -4163,7 +4144,7 @@ function renderEnginePrompt({ engine, root, project, handoff, tasks }) {
   return [
     'Follow AgentOS for Projects.',
     `Project: ${projectName}; root: ${root}; kind: ${workspaceKind}; engine: ${engine}.`,
-    `Read: AGENTS.md; ${engineAdapterLine(engine)}; .agentos/project.yaml; memory.md; handoff.md; tasks.md. Then load skills.md plus only the assigned repo/agent/engine context needed for the task.`,
+    `Read: AGENTS.md${engineAdapterLine(engine) ? `; ${engineAdapterLine(engine)}` : ''}; .agentos/project.yaml; memory.md; handoff.md; tasks.md. Then load skills.md plus only the assigned repo/agent context needed for the task.`,
     `Commands and workflows: ${GUIDE_PATH} (load on demand; run \`agentos status\` first).`,
     obsidianLine,
     'Rules: declare role + scope before editing; edit only in scope; no secrets/.env/migrations/prod config without approval; no commit/push unless asked; verify; update handoff/tasks if state changes.',
@@ -4187,11 +4168,10 @@ function obsidianPromptLine(project) {
 }
 
 function engineAdapterLine(engine) {
-  if (engine === 'claude-code') return 'CLAUDE.md + engines/claude-code.md';
-  if (engine === 'codex') return 'engines/codex.md';
-  if (engine === 'opencode') return 'engines/opencode.md';
-  if (engine === 'hermes') return '.hermes.md + engines/hermes.md';
-  return 'matching engines/<engine>.md if present';
+  // The bootloader each engine auto-loads. Codex and OpenCode read AGENTS.md, which is already the first file.
+  if (engine === 'claude-code') return 'CLAUDE.md';
+  if (engine === 'hermes') return '.hermes.md';
+  return null;
 }
 
 function engineSpecificRules(engine) {
