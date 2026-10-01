@@ -4588,5 +4588,7 @@ export async function runHandoffAgentOS(options: any = {}) {
 export async function doctorAgentOS(options: any = {}) {
   const root = await findAgentOSRoot(options.cwd ?? process.cwd());
   const action = () => doctorAgentOSUnlocked(options);
-  return root && (options.fix) ? withWorkspaceWriter(root, action) : action();
+  // `--fix --dry-run` is a read-only preview, like every other dry run: it must not take the writer lock
+  // (it would fail in a workspace the user cannot write to, and be blocked by an unrelated writer).
+  return root && options.fix && !options.dryRun ? withWorkspaceWriter(root, action) : action();
 }
