@@ -11,6 +11,7 @@
     "test": "tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/cli.js',0o755)\" && node --test test/*.test.js",
     "smoke": "tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/cli.js',0o755)\" && node ./test/smoke.js",
     "test:package-managers": "tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/cli.js',0o755)\" && node ./test/package-managers.js",
+    "prepare": "tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/cli.js',0o755)\"",
     "prepack": "tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/cli.js',0o755)\"",
     "check": "tsc -p tsconfig.json --noEmit",
     "pack:dry-run": "npm pack --dry-run",

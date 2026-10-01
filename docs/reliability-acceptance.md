@@ -48,6 +48,6 @@ Obsidian relinking preserves custom knowledge prose and replaces only its marked
 
 ## Verification procedure
 
-Run `bun run release:check`, `bun run test:metadata`, `bun pm pack --dry-run`, `node dist/cli.js doctor --json`, and `git diff --check`. Keep committed `dist/` synchronized with `src/`. Package verification requires all three managers and network access for their isolated installs. Run `bun run benchmark:history` for an advisory 500-file, 57-MB history fixture; timings are machine-dependent and are not a performance guarantee.
+Run `bun run release:check`, `bun run test:metadata`, `bun pm pack --dry-run`, `node dist/cli.js doctor --json`, and `git diff --check`.  `dist/` is generated (ignored by git, rebuilt by `prepare`/`prepack`), so there is nothing to keep in sync. Package verification requires all three managers and network access for their isolated installs. Run `bun run benchmark:history` for an advisory 500-file, 57-MB history fixture; timings are machine-dependent and are not a performance guarantee.
 
 For each supported external engine, perform an owner-observed smoke in a disposable initialized workspace, first from the root and then a nested child: ask it to identify the root, assigned repo scope, allowed engine, selected agent card and one on-demand skill; verify actual cited paths and that unassigned repo/vault content was not loaded. Record engine version and pass/fail evidence. This manual gate has not been executed by automated CLI tests. Windows behavior is not covered by the current matrix.
