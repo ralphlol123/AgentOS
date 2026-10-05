@@ -1,6 +1,6 @@
 # Tasks
 
-Active scope: AgentOS simplification audit. Plan, findings, decisions, evidence and queue: `.agentos/plans/2026-10-02-simplification-audit.md`. PRs #27–#39 are merged on `main` (CI green); `0.8.0` and `0.8.1` are published (npm latest `0.8.1`). The long 0.4–0.7 delivery history that used to live here is in git: `git show e2575c6:.agentos/tasks.md`.
+Active scope: AgentOS simplification audit. Plan, findings, decisions, evidence and queue: `.agentos/plans/2026-10-02-simplification-audit.md`. PRs #27–#42 are merged on `main` (CI green); `0.8.0`, `0.8.1` and `0.9.0` are published (npm latest `0.9.0`). The long 0.4–0.7 delivery history that used to live here is in git: `git show e2575c6:.agentos/tasks.md`.
 
 ## Done
 
@@ -21,15 +21,16 @@ Active scope: AgentOS simplification audit. Plan, findings, decisions, evidence 
 - [x] Size listing sums to the whole file (PR #37): 0.8.0 hid level-1 blocks, about 70% of a real `tasks.md`.
 - [x] Adapters, guide and agent cards say what "update handoff/tasks" means (PR #38). Directional ablation: disciplined handoff with history kept 2/8 vs 7/8 (details in `handoff.md` and the skill reference).
 - [x] KargaX upgraded to 0.8.1 by the owner; its `doctor --json` migration inventory was empty. Its oversized state files (404K and 342K chars) were cleaned once with the owner-run `state_cleanup.py`: the dry run said 34,205 and 26,619 chars, everything moved verbatim to `.agentos/runs/state-cleanup-e22aa1b515cb/`.
+- [x] KargaX cleanup verified from the owner's output (2026-10-05, on 0.9.0): `doctor` OK, size warnings gone, `handoff.md` 34,423 and `tasks.md` 26,633 bytes, both `~/` backups identical to the archived originals.
+- [x] Read-only sizing of the legacy upgrade code (about 970 of 7,317 source lines, roughly 1,100 dedicated test lines) and the staged plan: PR #41 deprecates four paths for removal in 0.10.0 (nothing removed), released as `0.9.0` (PR #42, shasum `d368c87b…`, registry-verified).
 
 ## Now
 
-- [ ] Owner's post-cleanup check in KargaX: `agentos doctor`, `wc -c .agentos/handoff.md .agentos/tasks.md`, `cmp` of the `~/` backups against `.agentos/runs/state-cleanup-e22aa1b515cb/original/`. The cleanup is applied but not yet confirmed from output.
-- [ ] Size the legacy upgrade-code deletion, read-only: `src/core.ts` lines and tests that pin it, and what an old-version upgrader would lose. Gate met (both migration inventories empty). Propose a deprecation step before any removal.
+- [ ] Nothing queued that needs code. Waiting on the owner for two things: (a) what the first real engine session in KargaX does with the shorter handoff under the new wording, the real test of PR #38; (b) when, if ever, to schedule 0.10.0 (the deletion), after 0.9.0 has been out for a few weeks.
 
 ## Next
 
-- [ ] Upgrade-machinery deletion, after the read-only sizing in Now: keep every path the owner's workspaces have passed through (both inventories are empty, so the gate is met); deprecate before removing.
+- [ ] Upgrade-machinery deletion (0.10.0), not scheduled: 0.9.0 deprecates the four paths and names the way out (`npx agentos-for-projects@0.9 doctor --fix`). Delete only after 0.9.0 has been out for a few weeks, re-check the npm download split, and keep the read-only `migration` inventory.
 - [ ] `agentos prompt` (43 lines): not a pure duplicate, since it inlines the current objective and Now tasks into a paste-ready prefix. Leave it unless the owner wants it gone; if so, deprecate for one release first.
 - [ ] **Follow-up, pre-existing and not a regression:** `refilterCarriedBlock` is line-based, so a fenced code sample inside `## Preserved context` that quotes `### Constraints carried forward from archived history` loses its heading and its bullet. Byte-identical to the shipped 0.5.1 build, recoverable from the run archive, and now documented as a known limit in `docs/compaction.md`.
 - [ ] **Recorded decision (considered, rejected, not a defect):** archiving a block archives whatever is nested inside it — ride-along — mirroring the shipped level-2 rule. Per-descendant `## History` entries were considered and rejected: they would either bloat History with an entry per nested heading or block archival whenever a history block contains subheadings. Independent review accepted this after failing to construct material harm (412 adversarial unchecked-task cases, 0 leaks).
