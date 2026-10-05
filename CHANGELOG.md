@@ -4,6 +4,12 @@ All notable changes to AgentOS for Projects are documented here.
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-10-05
+
+A patch release: two fixes to behavior 0.8.0 introduced or left unclear. Nothing new, and no command changes.
+
+Known gaps carried over from 0.8.0: the Codex engine is untested; nested-repo discovery with OpenCode grounded 8 of 12 runs on a synthetic fixture; `project.yaml` edits fall back to a whole-file rewrite for anchors, aliases and unusual layouts; the legacy upgrade code is kept. The new state-file wording is evidenced by a small synthetic fixture only, and it does not shrink a file that is already large.
+
 ### Changed
 
 - **"Update handoff/tasks" now says what update means.** The root and child adapters, the Hermes adapter, `.agentos/guide.md` and the generated agent cards used to say only "update handoff/tasks before stopping", which engines read as "add an entry". One real workspace's `handoff.md` reached 404K characters and `tasks.md` 342K, and every engine is told to read both first. They now say: rewrite `.agentos/handoff.md` to the current state and never append to it; delete finished tasks from `.agentos/tasks.md`; before an older entry leaves either file, copy it into a note under `.agentos/runs/`, and never discard history. The guide no longer tells engines not to trim these files by hand. In a synthetic two-repo fixture (8 runs per variant, Claude Code and OpenCode), the old wording kept the handoff disciplined in 2 of 8 runs and the new wording in 7 of 8, with all planted history preserved in 8 of 8; this is directional evidence only (small sample, one task, free OpenCode model). Existing workspaces see their adapters as stale until `agentos doctor --fix`; this does not shrink a file that is already large.
