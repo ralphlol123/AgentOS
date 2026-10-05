@@ -21,6 +21,10 @@ import { STATE_SIZE_WARN_CHARS, sectionSizes, largestSections } from '../dist/st
 //     biggest section and the next command. It is a warning only: problems, exit status and
 //     `status` OK/NEEDS ATTENTION are unchanged, and nothing is written.
 //   * Output for workspaces under the threshold is byte-identical to before.
+//   * The section listing accounts for the whole file: text before the first heading is reported as
+//     "start of file", and each level-1 block as its own entry, so the sizes sum to the file length.
+//     A real tasks.md was 341,843 chars: two `# Tasks` blocks (169,060 + 68,955) and `## Now`
+//     (99,102). The old listing named "Now" as the largest section and never mentioned 70% of the file.
 
 const CLI = resolve('dist/cli.js');
 
@@ -45,6 +49,25 @@ const HUGE_CURRENT_STATE = `## Current state\n\n${lines('shipped', 600)}`;
 
 const runCli = (args, cwd) => spawnSync(process.execPath, [CLI, ...args], { cwd, encoding: 'utf8' });
 
+const total = (sections) => sections.reduce((n, s) => n + s.chars, 0);
+
+// A block of exactly `chars` characters: the heading line, then filler list lines (never headings).
+function sized(heading, chars) {
+  const head = `${heading}\n\n`;
+  const unit = '- carried over: verified build and tests, reviewed by tester, no regressions found.\n';
+  return `${head}${unit.repeat(Math.ceil(chars / unit.length)).slice(0, chars - head.length - 1)}\n`;
+}
+
+// Shaped like the reported tasks.md: two stacked `# Tasks` level-1 blocks, one big `## Now`, and
+// small sections. 169,060 + 68,955 + 99,102 + 4,726 = 341,843.
+const REPORTED_TASKS = [
+  sized('# Tasks', 169_060),
+  sized('# Tasks', 68_955),
+  sized('## Now', 99_102),
+  sized('## Next', 2_000),
+  sized('## Later', 2_726),
+].join('');
+
 async function snapshot(root) {
   const out = {};
   async function walk(dir) {
@@ -61,12 +84,12 @@ async function snapshot(root) {
 
 // --- the pure helper ---------------------------------------------------------------------------------
 
-test('sectionSizes reports every level-2 section with its line, title and size, fence-aware', () => {
+test('sectionSizes reports every level-1 and level-2 block with its line, title and size, fence-aware', () => {
   const text = ['# Doc', '', '## A', 'aaa', '', '```md', '## not a heading', '```', '', '## B', 'b', ''].join('\n');
   const sections = sectionSizes(text);
-  assert.deepEqual(sections.map((s) => [s.title, s.line]), [['A', 3], ['B', 10]]);
-  assert.ok(sections[0].chars > sections[1].chars, 'A contains the fenced block, so it is the larger one');
-  assert.equal(sections[0].chars + sections[1].chars, text.length - text.indexOf('## A'), 'sizes cover the text from the first section on, with no gaps or overlap');
+  assert.deepEqual(sections.map((s) => [s.title, s.line]), [['Doc', 1], ['A', 3], ['B', 10]]);
+  assert.ok(sections[1].chars > sections[2].chars, 'A contains the fenced block, so it is larger than B');
+  assert.equal(total(sections), text.length, 'sizes cover the whole text, with no gaps or overlap');
 });
 
 test('largestSections returns the biggest first and respects the limit', () => {
@@ -200,4 +223,100 @@ test('doctor and status stay read-only with an oversized state file', async (t) 
   await statusAgentOS({ cwd: root });
   runCli(['doctor', '--json'], root);
   assert.deepEqual(await snapshot(root), before);
+});
+
+// --- the listing accounts for the whole file --------------------------------------------------------------
+
+test('sectionSizes accounts for every character of a tasks.md shaped like the reported one', () => {
+  assert.equal(REPORTED_TASKS.length, 341_843);
+  const sections = sectionSizes(REPORTED_TASKS);
+  assert.deepEqual(
+    sections.map((s) => [s.title, s.chars]),
+    [['Tasks', 169_060], ['Tasks', 68_955], ['Now', 99_102], ['Next', 2_000], ['Later', 2_726]],
+  );
+  assert.equal(total(sections), REPORTED_TASKS.length, 'the listed sections sum to the file length');
+  const rows = REPORTED_TASKS.split('\n');
+  for (const s of sections) assert.match(rows[s.line - 1], /^#{1,2} (Tasks|Now|Next|Later)$/, `line ${s.line} is the heading of "${s.title}"`);
+  assert.equal(sections[0].line, 1);
+});
+
+test('largestSections names the 169K level-1 block, not the 99K "Now", as the largest', () => {
+  assert.deepEqual(
+    largestSections(REPORTED_TASKS, 3).map((s) => [s.title, s.chars]),
+    [['Tasks', 169_060], ['Now', 99_102], ['Tasks', 68_955]],
+  );
+});
+
+test('sectionSizes keeps a huge handoff container whole and the entries still sum to the file', () => {
+  const notes = (tag) => `### Notes ${tag}\n\n${lines(tag, 300)}\n\n`;
+  const text = `# Handoff\n\n## Current objective\n\nShip it.\n\n## Current state\n\nGreen.\n\n## Preserved context\n\n${notes('a')}${notes('b')}## Next exact action\n\nVerify.\n`;
+  const sections = sectionSizes(text);
+  assert.deepEqual(sections.map((s) => s.title), ['Handoff', 'Current objective', 'Current state', 'Preserved context', 'Next exact action']);
+  assert.equal(total(sections), text.length);
+  const container = sections.find((s) => s.title === 'Preserved context');
+  assert.equal(container.chars, text.indexOf('## Next exact action') - text.indexOf('## Preserved context'), 'level-3 headings stay inside the container');
+  assert.equal(largestSections(text, 1)[0].title, 'Preserved context');
+});
+
+test('text before the first heading is reported as "start of file" so the sizes still sum', () => {
+  const text = 'Intro written before any heading.\n\nMore intro.\n\n## A\nx\n\n## B\ny\n';
+  const sections = sectionSizes(text);
+  assert.deepEqual(sections.map((s) => [s.title, s.line]), [['start of file', 1], ['A', 5], ['B', 8]]);
+  assert.equal(sections[0].chars, text.indexOf('## A'));
+  assert.equal(total(sections), text.length);
+});
+
+test('a file with no headings is one "start of file" entry, an empty file has none, and a leading heading adds no entry', () => {
+  assert.deepEqual(sectionSizes('just words\nand more\n').map((s) => [s.title, s.line, s.chars]), [['start of file', 1, 20]]);
+  assert.deepEqual(sectionSizes(''), []);
+  assert.ok(!sectionSizes('## A\nx\n').some((s) => s.title === 'start of file'), 'nothing precedes the first heading, so nothing is invented');
+});
+
+test('a level-1 block after level-2 sections ends the section before it, with no overlap', () => {
+  const text = '## A\naaa\n\n# Appendix\nbbb\n\n## B\nc\n';
+  const sections = sectionSizes(text);
+  assert.deepEqual(sections.map((s) => [s.title, s.line]), [['A', 1], ['Appendix', 4], ['B', 7]]);
+  assert.equal(sections[0].chars, text.indexOf('# Appendix'));
+  assert.equal(total(sections), text.length);
+});
+
+test('sectionSizes sums to the file length with fenced pseudo-headings and CRLF line endings', () => {
+  const text = ['# T', '', '```md', '# not a heading', '```', '', '## A', 'x', ''].join('\r\n');
+  const sections = sectionSizes(text);
+  assert.deepEqual(sections.map((s) => s.title), ['T', 'A']);
+  assert.equal(total(sections), text.length);
+});
+
+test('doctor and status name the largest block even when it is a level-1 block', async (t) => {
+  const root = await workspace(t);
+  await writeFile(join(root, '.agentos/tasks.md'), REPORTED_TASKS);
+  const warning = (await doctorAgentOS({ cwd: root })).warnings.find((w) => /tasks\.md is \d+ chars/.test(w));
+  assert.ok(warning);
+  assert.match(warning, /tasks\.md is 341843 chars/);
+  assert.match(warning, /its largest section "Tasks" is 169060 chars/);
+  assert.doesNotMatch(warning, /"Now"/);
+  assert.match((await statusAgentOS({ cwd: root })).text, /its largest section "Tasks" is 169060 chars/);
+});
+
+test('doctor names "start of file" when the bulk sits before the first heading', async (t) => {
+  const root = await workspace(t);
+  await writeFile(join(root, '.agentos/tasks.md'), `${lines('preamble', 600)}\n\n${TASKS_OK}`);
+  const warning = (await doctorAgentOS({ cwd: root })).warnings.find((w) => /tasks\.md is \d+ chars/.test(w));
+  assert.ok(warning);
+  assert.match(warning, /its largest section "start of file" is \d+ chars/);
+});
+
+test('compact --dry-run lists the level-1 blocks, keeps the level-2 decisions, and plans exactly what it planned before', async (t) => {
+  const root = await workspace(t);
+  await writeFile(join(root, '.agentos/tasks.md'), REPORTED_TASKS);
+  const before = await snapshot(root);
+  const r = runCli(['compact', '--dry-run'], root);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /No safe reduction found; files unchanged\./);
+  assert.match(r.stdout, /- tasks\.md: 0 archived, 3 live, 0 preserved/, 'the plan is unchanged: only reporting differs');
+  const rows = r.stdout.slice(r.stdout.indexOf('Largest sections')).split('\n').filter((l) => /^- \w+\.md:\d+ /.test(l));
+  assert.match(rows[0], /^- tasks\.md:1 "Tasks": 169060 chars/, 'the largest block is named first');
+  assert.match(rows[1], /^- tasks\.md:\d+ "Now": 99102 chars, live \(canonical live section\)$/, 'level-2 rows keep their decision and reason');
+  assert.match(rows[2], /^- tasks\.md:\d+ "Tasks": 68955 chars/);
+  assert.deepEqual(await snapshot(root), before, 'still write-free');
 });

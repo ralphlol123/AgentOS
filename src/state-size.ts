@@ -13,24 +13,34 @@ import { markdownHeadings } from './markdown.js';
  */
 export const STATE_SIZE_WARN_CHARS = 50_000;
 
+/** Title of the entry for any text that precedes the first heading. */
+const START_OF_FILE = 'start of file';
+
 export interface SectionSize {
   title: string;
-  /** 1-based line of the `## ` heading. */
+  /** 1-based line of the `# ` or `## ` heading, or 1 for the start-of-file entry. */
   line: number;
-  /** Characters from the start of the heading to the start of the next level-2 heading (or EOF). */
+  /** Characters from the start of the block to the start of the next block (or EOF). */
   chars: number;
 }
 
-/** Level-2 sections of a Markdown document, fence-aware, with exact sizes. Text before the first section is not counted. */
+/**
+ * Blocks of a Markdown document, fence-aware, with exact sizes that sum to `text.length`.
+ * A block runs from a level-1 or level-2 heading to the next one. Deeper headings stay inside their
+ * block, and text before the first heading is its own "start of file" block.
+ */
 export function sectionSizes(text: string): SectionSize[] {
-  const headings = markdownHeadings(text).filter((heading) => heading.level === 2);
+  const blocks = markdownHeadings(text)
+    .filter((heading) => heading.level <= 2)
+    .map((heading) => ({ title: heading.title, start: heading.start }));
+  if ((blocks[0]?.start ?? text.length) > 0) blocks.unshift({ title: START_OF_FILE, start: 0 });
   const sections: SectionSize[] = [];
   let line = 1;
   let cursor = 0;
-  headings.forEach((heading, index) => {
-    for (let i = cursor; i < heading.start; i++) if (text.charCodeAt(i) === 10) line++;
-    cursor = heading.start;
-    sections.push({ title: heading.title, line, chars: (headings[index + 1]?.start ?? text.length) - heading.start });
+  blocks.forEach((block, index) => {
+    for (let i = cursor; i < block.start; i++) if (text.charCodeAt(i) === 10) line++;
+    cursor = block.start;
+    sections.push({ title: block.title, line, chars: (blocks[index + 1]?.start ?? text.length) - block.start });
   });
   return sections;
 }
