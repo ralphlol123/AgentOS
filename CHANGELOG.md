@@ -4,6 +4,10 @@ All notable changes to AgentOS for Projects are documented here.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Section sizes now add up to the whole file.** The `doctor`/`status` size warning and the `compact --dry-run` "Largest sections" listing counted only `## ` sections and skipped everything before the first one. In a real `tasks.md` (341,843 chars) that hid two stacked `# Tasks` blocks (169,060 and 68,955 chars, 70% of the file) and named `Now` (99,102 chars) as the largest section. Each `# ` block, and any text before the first heading (listed as `start of file`), is now its own entry, so the listed sizes sum to the file length. Reporting only: compaction behavior is unchanged. The new entries show no decision or reason in the `compact` listing, because the planner classifies `## ` sections only.
+
 ## [0.8.0] - 2026-10-05
 
 Known gaps in this release: the Codex engine was not tested (not installed where the acceptance runs happen); nested-repo discovery with OpenCode grounded 8 of 12 runs on a synthetic fixture and needs the owner's OpenCode config (`continue_loop_on_deny`, `external_directory`) to be reliable; `doctor --fix` falls back to a whole-file `project.yaml` rewrite for anchors/aliases and unusual layouts; and the legacy upgrade code is kept because only one real workspace's migration inventory has been seen.
