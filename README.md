@@ -72,6 +72,19 @@ Limitations:
 - The plan-vs-apply staleness check (above) assumes non-hostile, non-concurrent use, same as the rest of this section: it catches accidental drift and defends in depth, but AgentOS still assumes a single writer per checkout, not protection against an adversarial concurrent process.
 
 
+## Deprecation: legacy upgrade paths (removal planned for 0.10.0)
+
+0.9.0 deprecates four ways of upgrading a workspace that was set up by an old release. **Nothing is removed in 0.9.0 and no behavior changes.** The paths are:
+
+- recognising and migrating adapter files written before the managed-block format, including `doctor --fix --adopt-custom-adapters`;
+- detecting, migrating and pruning retired pre-0.4.0 agent and skill cards, including `doctor --fix --prune-retired`;
+- `doctor --fix --normalize-repo-ids`;
+- `agentos migrate claude`.
+
+`doctor` (text and `--json`) prints a `Deprecations` section, and `migration.deprecations` lists it, only when one of these paths applies to the workspace or when you use one of the flags or commands. A workspace with nothing legacy gets exactly the output it got before. A deprecation never changes `ok`, `problems` or the exit code, and `migration.summary.action_required` still counts work, not notices.
+
+**If your workspace is old, migrate it before 0.10.0.** Run `npx agentos-for-projects@0.9 doctor --fix` once (add `--adopt-custom-adapters`, `--prune-retired` or `--normalize-repo-ids` as the report says), then upgrade. From 0.10.0 an adapter in an old format is reported as ambiguous and must be fixed by hand, and the removed flags are rejected with a message that names the release above. The read-only `migration` inventory is not deprecated.
+
 ## Migration inventory
 
 `doctor` and `doctor --json` include a read-only **migration inventory**: the workspace's adapter files, unsafe repository IDs, and retired catalog cards, classified before anyone approves a fix. It is reporting only — it never writes, never changes doctor's exit status (problems and warnings still do), and stays silent on a clean workspace.
