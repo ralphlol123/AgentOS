@@ -6,6 +6,7 @@ import { HANDOFF_ROLES, recognizeSections, resolveObjective, sectionText } from 
 import { planCompactRewrite } from './compact-rewrite.js';
 import { STATE_SIZE_WARN_CHARS, largestSections, sectionSizes } from './state-size.js';
 import { dumpYaml, patchProjectYaml } from './project-yaml-edit.js';
+import { deprecation, mergeDeprecations, noticeLine, renderDeprecations, type Deprecation } from './legacy-deprecation.js';
 import { renderUnifiedDiff } from './compact-report.js';
 import { resolveCompactMode } from './cli-options.js';
 import { collectRunHandoffGitState } from './git-evidence.js';
@@ -2460,6 +2461,7 @@ async function doctorAgentOSUnlocked(options: any = {}) {
   const projectPath = join(root, '.agentos/project.yaml');
   let projectConfigError: any = null;
   const migrationNotes: string[] = [];
+  const preFixLegacy: Deprecation[] = options.fix ? await legacyStateBeforeFix(root) : [];
   if (options.fix) {
     try {
       await withMutationTransaction(async () => {
@@ -2599,6 +2601,7 @@ async function doctorAgentOSUnlocked(options: any = {}) {
       + migration.repoIds.length
       + migration.retiredCards.length,
   };
+  migration.deprecations = mergeDeprecations(options.fix ? preFixLegacy : inventoryDeprecations(migration), flagDeprecations(options));
 
   // A non-canonical repository ID is a fixable *problem*, not a parse failure:
   // it keeps doctor honest (the workspace is not OK yet) while leaving every
@@ -2654,6 +2657,7 @@ function renderDoctorText({ status, fix, problems, warnings, diagnostics, migrat
     problems.length ? `Problems:\n${problems.map((p) => `✗ ${p}`).join('\n')}` : '✓ Required files and adapter pointers are present',
     warnings.length ? `\nWarnings:\n${warnings.map((w) => `- ${w}`).join('\n')}` : '',
     renderMigrationSection(migration),
+    renderDeprecations(migration.deprecations ?? []),
     diagnostics.length ? `\nDiagnostics:\n${diagnostics.map((d) => `- ${d}`).join('\n')}` : '',
   ].filter(Boolean).join('\n').trim();
 }
@@ -3113,11 +3117,56 @@ const MIGRATION_NEXT: Record<string, string> = {
   conflict: 'resolve manually, then re-run `agentos doctor --fix`',
 };
 
+// 0.9.0 deprecation of the legacy upgrade paths (removal planned for 0.10.0). Reporting only: no
+// behavior changes, and a clean workspace gets no notice at all. See src/legacy-deprecation.ts.
+const WHY_DETECTED = {
+  adapters: 'This workspace has an adapter file in a pre-managed-block format.',
+  'retired-cards': 'This workspace has retired pre-0.4.0 agent or skill cards.',
+  'repo-ids': 'This workspace has a repository ID that is not lowercase-hyphen safe.',
+};
+const WHY_FLAG = {
+  adapters: 'You used `--adopt-custom-adapters`.',
+  'retired-cards': 'You used `--prune-retired`.',
+};
+
+function inventoryDeprecations(migration: any): Deprecation[] {
+  const out: Deprecation[] = [];
+  if (migration.adapters.some((entry: any) => entry.classification === 'migrate' || entry.classification === 'adopt')) out.push(deprecation('adapters', WHY_DETECTED.adapters));
+  if (migration.retiredCards.length) out.push(deprecation('retired-cards', WHY_DETECTED['retired-cards']));
+  if (migration.repoIds.length) out.push(deprecation('repo-ids', WHY_DETECTED['repo-ids']));
+  return out;
+}
+
+function flagDeprecations(options: any): Deprecation[] {
+  const out: Deprecation[] = [];
+  if (options.adoptCustomAdapters) out.push(deprecation('adapters', WHY_FLAG.adapters));
+  if (options.pruneRetired) out.push(deprecation('retired-cards', WHY_FLAG['retired-cards']));
+  return out;
+}
+
+// What `doctor --fix` is about to migrate. Read before the repair runs: afterwards the inventory is
+// clean, and the owner still needs to be told that a deprecated path just did the work.
+async function legacyStateBeforeFix(root: string): Promise<Deprecation[]> {
+  const inventory: any = { adapters: [], retiredCards: [], repoIds: [] };
+  try {
+    const project = await safeRead(join(root, '.agentos/project.yaml'));
+    const policy = adapterPolicy(project);
+    const allRepos = parseReposFromProjectYaml(project, { includeRoot: true });
+    const workspaceKind = firstYamlValue(project, 'workspace_kind') ?? 'unknown';
+    const targets = [...rootAdapterTargets(root, workspaceKind, allRepos), ...childAdapterTargets(root, policy.pointers ? allRepos.filter((repo) => repo.path !== '.') : [])];
+    for (const target of targets) inventory.adapters.push({ classification: (await planAdapterReconciliation(target.path, target.section)).action });
+    inventory.repoIds = buildRepoIdInventory(project);
+  } catch { /* config problems are reported by the normal doctor path */ }
+  try { inventory.retiredCards = await buildRetiredCardInventory(root); } catch { /* same */ }
+  return inventoryDeprecations(inventory);
+}
+
 function emptyMigrationInventory() {
   return {
     adapters: [] as any[],
     repoIds: [] as any[],
     retiredCards: [] as any[],
+    deprecations: [] as Deprecation[],
     summary: { adapter_count: 0, repo_id_count: 0, retired_card_count: 0, action_required: 0 },
   };
 }
@@ -3479,6 +3528,7 @@ async function previewAdapterPlans(root, options: { adoptCustomAdapters?: boolea
   const retired = options.pruneRetired ? await buildRetiredCardInventory(root) : [];
   const wouldPrune = retired.filter((card) => card.eligibility === 'prunable' || card.eligibility === 'already-canonical');
   const wouldKeep = retired.filter((card) => card.eligibility !== 'prunable' && card.eligibility !== 'already-canonical');
+  const deprecations = mergeDeprecations(inventoryDeprecations({ adapters: entries, retiredCards: [], repoIds: [] }), flagDeprecations(options));
   return {
     ok: true,
     dry_run: true,
@@ -3486,6 +3536,7 @@ async function previewAdapterPlans(root, options: { adoptCustomAdapters?: boolea
     fix: true,
     adopt_custom_adapters: Boolean(options.adoptCustomAdapters),
     prune_retired: Boolean(options.pruneRetired),
+    deprecations,
     adapters: entries,
     retired_cards: { would_prune: wouldPrune, manual_review: wouldKeep },
     summary: {
@@ -3514,7 +3565,7 @@ async function previewAdapterPlans(root, options: { adoptCustomAdapters?: boolea
         : []),
       'No files were written.',
       'This preview covers adapter changes and (with --prune-retired) retired-card pruning. Re-run without --dry-run to apply.',
-    ].join('\n'),
+    ].join('\n') + (deprecations.length ? `\n${renderDeprecations(deprecations)}` : ''),
   };
 }
 
@@ -4532,7 +4583,8 @@ export async function adaptersAgentOS(options: any = {}) {
 export async function normalizeRepoIdsAgentOS(options: any = {}) {
   const root = await findAgentOSRoot(options.cwd ?? process.cwd());
   const action = () => normalizeRepoIdsUnlocked(options);
-  return root && !options.dryRun ? withWorkspaceWriter(root, action) : action();
+  const result = await (root && !options.dryRun ? withWorkspaceWriter(root, action) : action());
+  return { ...result, text: `${result.text}\n\n${noticeLine('repo-ids', 'You used `--normalize-repo-ids`.')}` };
 }
 
 export async function compactAgentOS(options: any = {}) {
@@ -4573,7 +4625,8 @@ export async function obsidianAgentOS(options: any = {}) {
 export async function migrateClaudeAgentOS(options: any = {}) {
   const root = await findAgentOSRoot(options.cwd ?? process.cwd());
   const action = () => migrateClaudeAgentOSUnlocked(options);
-  return root && (!options.dryRun && options.preserve) ? withWorkspaceWriter(root, action) : action();
+  const result = await (root && (!options.dryRun && options.preserve) ? withWorkspaceWriter(root, action) : action());
+  return { ...result, text: `${result.text}\n\n${noticeLine('migrate-claude', 'You used `agentos migrate claude`.')}` };
 }
 
 export async function skillsAgentOS(options: any = {}) {
