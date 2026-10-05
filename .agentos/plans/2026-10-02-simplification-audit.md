@@ -64,8 +64,11 @@ Engine-discovery ablation, pre-registered before any run (`PREREG.md`), same sco
 | #37 | `2157f34` | Size listing sums to the whole file | Bug fix in a 0.8.0 reporting feature |
 | #38 | `a730c5f` | State-file wording | Engines told to rewrite the handoff, drop finished tasks, copy history to `runs/`; 2/8 to 7/8 on a directional ablation |
 | #39 | `d8924c1` | Release 0.8.1 | Published and registry-verified |
+| #40 | `7793aef` | State record | State only |
+| #41 | `5de0159` | Deprecate the legacy upgrade paths | Notices only; about 970 source lines and about 1,100 test lines are now scheduled for 0.10.0, not yet removed |
+| #42 | `ed36d1e` | Release 0.9.0 | Published and registry-verified |
 
-KargaX evidence arrived: its migration inventory was empty, so the support-horizon gate for deleting legacy upgrade code is met (one real workspace's `doctor --json` after `doctor --fix`, and the pre-fix dry run of plain updates). Its state files were cleaned once, outside the product, with an owner-run script. Honest score so far: this audit added code (the YAML editor, the size listing, the wording line) and removed files and repo noise (`dist/`, five engine stubs per workspace, a command that did not earn its place); the largest remaining reduction is the legacy upgrade machinery.
+KargaX evidence arrived: its migration inventory was empty, so the support-horizon gate for deleting legacy upgrade code is met (one real workspace's `doctor --json` after `doctor --fix`, and the pre-fix dry run of plain updates). Its state files were cleaned once, outside the product, with an owner-run script. KargaX's cleanup was verified from the owner's output (sizes, `doctor`, backups identical). Honest score so far: this audit added code (the YAML editor, the size listing, the wording line) and removed files and repo noise (`dist/`, five engine stubs per workspace, a command that did not earn its place); the largest remaining reduction is the legacy upgrade machinery.
 
 ## Queue (status as of 2026-10-02, after PR #34)
 
