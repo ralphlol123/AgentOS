@@ -55,6 +55,18 @@ Engine-discovery ablation, pre-registered before any run (`PREREG.md`), same sco
 - **Labahub is upgraded and clean** (see handoff). It carried no legacy migration classes.
 - **Release:** the owner decided on 2026-10-02 not to release for now. A candidate (`0.8.0-rc.2`) exists and is untouched.
 
+## Progress since PR #34 (2026-10-05)
+
+| PR | Merge | What | Effect |
+|---|---|---|---|
+| #35 | `38d548a` | Audit state | State only |
+| #36 | `0536fc6` | Release 0.8.0 | Published and registry-verified |
+| #37 | `2157f34` | Size listing sums to the whole file | Bug fix in a 0.8.0 reporting feature |
+| #38 | `a730c5f` | State-file wording | Engines told to rewrite the handoff, drop finished tasks, copy history to `runs/`; 2/8 to 7/8 on a directional ablation |
+| #39 | `d8924c1` | Release 0.8.1 | Published and registry-verified |
+
+KargaX evidence arrived: its migration inventory was empty, so the support-horizon gate for deleting legacy upgrade code is met (one real workspace's `doctor --json` after `doctor --fix`, and the pre-fix dry run of plain updates). Its state files were cleaned once, outside the product, with an owner-run script. Honest score so far: this audit added code (the YAML editor, the size listing, the wording line) and removed files and repo noise (`dist/`, five engine stubs per workspace, a command that did not earn its place); the largest remaining reduction is the legacy upgrade machinery.
+
 ## Queue (status as of 2026-10-02, after PR #34)
 
 Done: items 4 (`dist/` untracking) and the `project.yaml` fidelity fix. Dropped: the command merges in item 6 and the `agentos prompt` removal (see Findings). Still open and gated on KargaX evidence: items 2, 3 and 7. Item 1 (candidate) exists; publishing is on hold.
