@@ -29,7 +29,7 @@ test('package metadata is ready for public npm publishing', async () => {
   const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
 
   assert.equal(pkg.name, 'agentos-for-projects');
-  assert.equal(pkg.version, '0.7.0');
+  assert.equal(pkg.version, '0.8.0');
   assert.equal(pkg.license, 'MIT');
   assert.equal(pkg.publishConfig?.access, 'public');
   assert.equal(pkg.bin?.agentos, 'dist/cli.js');

@@ -4,6 +4,10 @@ All notable changes to AgentOS for Projects are documented here.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-05
+
+Known gaps in this release: the Codex engine was not tested (not installed where the acceptance runs happen); nested-repo discovery with OpenCode grounded 8 of 12 runs on a synthetic fixture and needs the owner's OpenCode config (`continue_loop_on_deny`, `external_directory`) to be reliable; `doctor --fix` falls back to a whole-file `project.yaml` rewrite for anchors/aliases and unusual layouts; and the legacy upgrade code is kept because only one real workspace's migration inventory has been seen.
+
 ### Added
 
 - **Oversized state files are now visible.** `agentos doctor` and `agentos status` warn when `.agentos/handoff.md` or `.agentos/tasks.md` is over 50,000 characters, naming the largest section and the next command. The warning is advisory only: `doctor` problems and exit status, and `status` OK/NEEDS ATTENTION, are unchanged, and output for workspaces under the limit is byte-identical.

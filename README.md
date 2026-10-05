@@ -145,9 +145,9 @@ Many repos inside it.
 Each task declares which repo(s) are in scope.
 ```
 
-## What v0.1 does
+## What it does
 
-AgentOS v0.1 is a TypeScript CLI/package that supports:
+AgentOS is a TypeScript CLI/package that supports:
 
 - new project initialization;
 - existing single-repo and multi-repo workspace import;
