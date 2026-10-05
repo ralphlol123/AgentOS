@@ -1,6 +1,6 @@
 # Tasks
 
-Active scope: AgentOS simplification audit. Plan, findings, decisions, evidence and queue: `.agentos/plans/2026-10-02-simplification-audit.md`. Eight slices are merged on `main` (PRs #27–#34, CI green); nothing is released (`main` is 0.7.0 with unreleased CHANGELOG entries). **Owner decision 2026-10-02: do not release for now.** The long 0.4–0.7 delivery history that used to live here is in git: `git show e2575c6:.agentos/tasks.md`.
+Active scope: AgentOS simplification audit. Plan, findings, decisions, evidence and queue: `.agentos/plans/2026-10-02-simplification-audit.md`. PRs #27–#39 are merged on `main` (CI green); `0.8.0` and `0.8.1` are published (npm latest `0.8.1`). The long 0.4–0.7 delivery history that used to live here is in git: `git show e2575c6:.agentos/tasks.md`.
 
 ## Done
 
@@ -13,25 +13,29 @@ Active scope: AgentOS simplification audit. Plan, findings, decisions, evidence 
 - [x] `agentos doctor --fix --dry-run` no longer takes the writer lock (PR #32, `b7dae69`); found while previewing the release candidate against a real workspace as another Unix user.
 - [x] `dist/` is no longer committed; a `prepare` script builds it on install (PR #33, `8f73c30`). 42 files / 7,706 lines out of git.
 - [x] `project.yaml` is edited in place by all six commands that write it, instead of re-dumping the whole file (PR #34, `01279dd`); the old whole-file dump remains the proven fallback.
-- [x] Labahub (`/home/app/www/laundry-pos`) upgraded with the `0.8.0-rc.2` candidate: 7 adapters rewritten, `guide.md` created, 98 other files byte-identical, `doctor` exit 0. KargaX untouched.
+- [x] Labahub (`/home/app/www/laundry-pos`) upgraded with the `0.8.0-rc.2` candidate: 7 adapters rewritten, `guide.md` created, 98 other files byte-identical, `doctor` exit 0.
 - [x] Closed: the `templates/` fixture-leak advisory. Not reproducible on current `main` with 1, 2 and 4 concurrent suites or 3 concurrent `bun run test` runs (576/576 each, `templates/` hash identical before and after); the only test that mutates template files already copies them into a temp directory (`catalog-parity`).
 - [x] Read the code behind the proposed command merges and dropped them: Obsidian is 302 lines in two modes that write the same two files and both are taught in the README; `handoff` prints a reading list while `run handoff` writes a git-grounded recovery note (different jobs, only the names are confusing); `templates copy`, `skills add` and `agents add` share almost no code. Removing every deprecation candidate would save about 200 of 4,595 `core.ts` lines.
 
+- [x] Released `0.8.0` (PR #36, published 2026-10-05, shasum `244a44c7…`) and `0.8.1` (PR #39, shasum `20baa702…`); both verified on the registry and installed from it with npm and Bun; the 0.8.0 to 0.8.1 workspace upgrade path tested.
+- [x] Size listing sums to the whole file (PR #37): 0.8.0 hid level-1 blocks, about 70% of a real `tasks.md`.
+- [x] Adapters, guide and agent cards say what "update handoff/tasks" means (PR #38). Directional ablation: disciplined handoff with history kept 2/8 vs 7/8 (details in `handoff.md` and the skill reference).
+- [x] KargaX upgraded to 0.8.1 by the owner; its `doctor --json` migration inventory was empty. Its oversized state files (404K and 342K chars) were cleaned once with the owner-run `state_cleanup.py`: the dry run said 34,205 and 26,619 chars, everything moved verbatim to `.agentos/runs/state-cleanup-e22aa1b515cb/`.
+
 ## Now
 
-- [ ] **Waiting on the owner, not on code.** The remaining reductions (compaction/state growth, legacy upgrade machinery) need real-workspace evidence. When the owner chooses, run in KargaX with the `0.8.0-rc.2` build (`/home/hermes/agentos-archive/releases/agentos-for-projects-0.8.0-rc.2.tgz`, sha256 `6e26c54a…`): `agentos compact --dry-run` for the "Largest sections" block (titles and sizes) and `agentos doctor --json` for the `migration` block. Nothing in KargaX has been touched.
+- [ ] Owner's post-cleanup check in KargaX: `agentos doctor`, `wc -c .agentos/handoff.md .agentos/tasks.md`, `cmp` of the `~/` backups against `.agentos/runs/state-cleanup-e22aa1b515cb/original/`. The cleanup is applied but not yet confirmed from output.
+- [ ] Size the legacy upgrade-code deletion, read-only: `src/core.ts` lines and tests that pin it, and what an old-version upgrader would lose. Gate met (both migration inventories empty). Propose a deprecation step before any removal.
 
 ## Next
 
-- [ ] State-growth fix, once the KargaX section titles are known: either recognise more heading shapes in `compact` or change how state is written (overwrite `handoff.md`, history to `runs/`, which is never auto-loaded). No new heuristics before that evidence.
-- [ ] Upgrade-machinery deletion, gated on the support-horizon decision (keep every path the owner's workspaces have passed through; the owner runs `agentos doctor --json` in KargaX and Labahub first).
+- [ ] Upgrade-machinery deletion, after the read-only sizing in Now: keep every path the owner's workspaces have passed through (both inventories are empty, so the gate is met); deprecate before removing.
 - [ ] `agentos prompt` (43 lines): not a pure duplicate, since it inlines the current objective and Now tasks into a paste-ready prefix. Leave it unless the owner wants it gone; if so, deprecate for one release first.
-- [ ] Release `0.8.0` when the owner decides: version bump and CHANGELOG date, `bun run release:check`, `npm whoami`, then publish from a clean worktree of `origin/main` and verify the registry before reporting live. A packed candidate already exists (`rc.2`).
 - [ ] **Follow-up, pre-existing and not a regression:** `refilterCarriedBlock` is line-based, so a fenced code sample inside `## Preserved context` that quotes `### Constraints carried forward from archived history` loses its heading and its bullet. Byte-identical to the shipped 0.5.1 build, recoverable from the run archive, and now documented as a known limit in `docs/compaction.md`.
 - [ ] **Recorded decision (considered, rejected, not a defect):** archiving a block archives whatever is nested inside it — ride-along — mirroring the shipped level-2 rule. Per-descendant `## History` entries were considered and rejected: they would either bloat History with an entry per nested heading or block archival whenever a history block contains subheadings. Independent review accepted this after failing to construct material harm (412 adversarial unchecked-task cases, 0 leaks).
 - [ ] **Documented limits of the slice C carry rule** (all deliberate, all pinned by tests in `test/compact-rewrite-carry-fragments.test.js`, all stated in `docs/compaction.md`): a line that opens on a code span reads as a continuation of the previous line; a line ending on a conjunction reads as truncated; the subject-before-modal window is six words, so `Accounts, locations and trips in the production database must not be modified without approval` (modal at token 9) stays in the archive. Widening the window past six words was measured to buy 3 more constructed obligations at the cost of admitting narrative, and the accepted false-positive class is a line that opens as an obligation and then continues as reported speech (`Guards must not be relied on here, the ticket explained …`) — carried, and harmless in a heuristic safety net.
 - [ ] Non-blocking doc nit from review: in the repeat-run sentence, the example "a deeper block above a later sibling" is attached to the "shallowest nested block is not itself archivable" condition, though in that shape the shallowest block *is* archivable and the later-pass archival is covered by the lead clause. Every asserted behaviour is true; the reviewer supplied exact tightening text if the sentence is touched again.
-- [ ] Resume `agentos run` Phase 2 after release.
+- [ ] Resume `agentos run` Phase 2 (the release it waited on has shipped; still on hold until the owner asks).
 - [ ] Add richer local skill authoring/import UX.
 
 ## Later
