@@ -4,6 +4,12 @@ All notable changes to AgentOS for Projects are documented here.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-05
+
+A minor release: it announces that the legacy upgrade paths will be removed in 0.10.0, and changes nothing else. Nothing is removed here, no command changes behavior, and a workspace with nothing legacy sees the same `doctor` text output as 0.8.1. If you maintain a workspace set up by an old release, this is the last version that migrates it: run `npx agentos-for-projects@0.9 doctor --fix` once, then upgrade.
+
+Known gaps carried over: the Codex engine is untested; nested-repo discovery with OpenCode grounded 8 of 12 runs on a synthetic fixture; `project.yaml` edits fall back to a whole-file rewrite for anchors, aliases and unusual layouts. The state-file wording from 0.8.1 is evidenced by a small synthetic fixture only, and it does not shrink a file that is already large. Whether anyone outside two known workspaces still needs the deprecated paths is unknown, which is why 0.10.0 waits.
+
 ### Deprecated
 
 - **The legacy upgrade paths are deprecated and will be removed in 0.10.0.** Nothing is removed and no behavior changes in this release. The paths: recognising and migrating adapter files from before the managed-block format (including `doctor --fix --adopt-custom-adapters`); detecting, migrating and pruning retired pre-0.4.0 agent and skill cards (including `--prune-retired`); `doctor --fix --normalize-repo-ids`; and `agentos migrate claude`. `doctor` prints a `Deprecations` section and `--json` gains `migration.deprecations` only when one of them applies to the workspace or a deprecated flag or command is used, so a workspace with nothing legacy sees the same output as before apart from an empty `migration.deprecations` list in `--json`. A deprecation never changes `ok`, `problems`, `summary.action_required` or an exit code. To migrate an older workspace first, run `npx agentos-for-projects@0.9 doctor --fix` once, then upgrade. The read-only migration inventory stays.
