@@ -3799,7 +3799,9 @@ function agentsBootloader({ workspaceKind, repos }) {
     '',
     GUIDE_POINTER_LINE,
     '',
-    'Rules: declare role + repo scope before editing; edit only in scope; never touch secrets/.env/migrations/prod config without approval; do not commit/push unless explicitly asked; verify; update handoff/tasks before stopping.',
+    'Rules: declare role + repo scope before editing; edit only in scope; never touch secrets/.env/migrations/prod config without approval; do not commit/push unless explicitly asked; verify.',
+    '',
+    STATE_RULE_LINE,
     '',
   ].join('\n');
 }
@@ -3815,7 +3817,9 @@ function claudeAdapter() {
     '',
     'AgentOS for Projects. Read `AGENTS.md`, `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, and `.agentos/tasks.md` first. Then load `.agentos/knowledge.md`, `.agentos/skills.md`, and only relevant repo/agent files for the task.',
     '',
-    'Rules: declare role + repo scope before editing; edit only in scope; backend only if in scope; no secrets/.env/migrations/prod config without approval; no commit/push unless explicitly asked; verify; update handoff/tasks before stopping.',
+    'Rules: declare role + repo scope before editing; edit only in scope; backend only if in scope; no secrets/.env/migrations/prod config without approval; no commit/push unless explicitly asked; verify.',
+    '',
+    STATE_RULE_LINE,
     '',
     GUIDE_POINTER_LINE,
     '',
@@ -3848,7 +3852,9 @@ function subrepoAgentsPointer(repo) {
     '',
     'If the user asks for a commit message or mentions a project skill such as `commit-messages`, use `../.agentos/skills.md` to locate that AgentOS skill and load its `SKILL.md`; do not require the user to repeat the AgentOS skill path every time.',
     '',
-    'Rules: do not treat this repo as the whole product; declare scope; edit only in scope; no commit/push unless asked; update parent handoff/tasks.',
+    'Rules: do not treat this repo as the whole product; declare scope; edit only in scope; no commit/push unless asked.',
+    '',
+    STATE_RULE_LINE.replaceAll('`.agentos/', '`../.agentos/'),
     '',
   ].join('\n').replaceAll('../', `${parent}/`).replaceAll('`..`', `\`${parent}\``);
 }
@@ -3877,7 +3883,9 @@ function subrepoClaudePointer(repo) {
     '',
     'If the user asks for a commit message or mentions a project skill such as `commit-messages`, use `../.agentos/skills.md` to locate that AgentOS skill and load its `SKILL.md`; do not require the user to repeat the AgentOS skill path every time.',
     '',
-    'Declare scope; edit only in scope; no commit/push unless asked; update parent handoff/tasks.',
+    'Declare scope; edit only in scope; no commit/push unless asked.',
+    '',
+    STATE_RULE_LINE.replaceAll('`.agentos/', '`../.agentos/'),
     '',
   ].join('\n').replaceAll('../', `${parent}/`).replaceAll('`..`', `\`${parent}\``);
 }
@@ -3887,7 +3895,8 @@ function hermesAdapter() {
     '# Hermes Agent Adapter',
     '',
     'AgentOS for Projects. Read `AGENTS.md`, `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md` first. Then load `.agentos/skills.md`, `.agentos/knowledge.md`, and only relevant repo/agent files for the task.',
-    'Hermes rules: load relevant skills; verify real file/git/terminal/browser state; do not trust subagent reports without checking; update handoff/tasks when state changes.',
+    'Hermes rules: load relevant skills; verify real file/git/terminal/browser state; do not trust subagent reports without checking.',
+    STATE_RULE_LINE,
     GUIDE_POINTER_LINE,
     '',
   ].join('\n');
@@ -3896,6 +3905,9 @@ function hermesAdapter() {
 // One short line shared by every root bootloader: the commands and workflows live in the guide,
 // loaded on demand, so the always-loaded adapters stay terse.
 const GUIDE_PATH = '.agentos/guide.md';
+// What "update handoff/tasks" means. Without this, engines read it as "add an entry": a real
+// workspace's handoff.md reached 404K chars and tasks.md 342K, and every engine reads both first.
+const STATE_RULE_LINE = 'State files: rewrite `.agentos/handoff.md` to the current state, never append to it; delete finished tasks from `.agentos/tasks.md`. Before an older entry leaves either file, copy it into a note under `.agentos/runs/`; never discard history.';
 const GUIDE_POINTER_LINE = 'Commands and workflows: `.agentos/guide.md` (load on demand). Run `agentos status` first.';
 
 // Shared by the AGENTS.md and CLAUDE.md child pointers. The CLI comes first on purpose: some engines
@@ -3930,7 +3942,7 @@ function guideMd() {
     '## Which command for which job',
     '',
     '- Health check: `agentos doctor` (read-only). To repair, preview with `agentos doctor --fix --dry-run`, then run `agentos doctor --fix`.',
-    '- Handoff or tasks too long: `agentos compact --dry-run`, review the report, then `agentos compact`. It archives the originals byte-for-byte and refuses ambiguous state. Do not trim these files by hand.',
+    '- Handoff or tasks too long: `agentos compact --dry-run`, review the report, then `agentos compact`. It archives recognised history byte-for-byte and refuses ambiguous state. If it reports nothing to archive, rewrite the file as the rule below says instead of leaving it to grow.',
     '- Add a workflow: `agentos skills list` shows the catalog, `agentos skills list --installed` shows what is installed, `agentos templates show <id>` reads one first, then `agentos skills add <skill-id> --dry-run` and `agentos skills add <skill-id>`.',
     '- Roles: `agentos agents list`, `agentos agents list --installed`, `agentos agents add <agent-id> --dry-run`.',
     '- Switching engines or stopping mid-task: `agentos run handoff --dry-run` writes a continuation note without changing engines for you.',
@@ -3942,7 +3954,7 @@ function guideMd() {
     '- Install skills and agents through the CLI. A SKILL.md written by hand is not listed in `.agentos/skills.md`, so other engines and `agentos skills list --installed` will not see it.',
     '- Preview with `--dry-run` before any command that writes.',
     '- Do not commit or push unless explicitly asked. Do not touch secrets, .env files, migrations or production config without approval.',
-    '- Verify with the commands `agentos status` lists for your repo (the same ones are in `.agentos/repos/<repo>.md` if file reads work), then update `.agentos/handoff.md` and `.agentos/tasks.md` before stopping.',
+    '- Verify with the commands `agentos status` lists for your repo (the same ones are in `.agentos/repos/<repo>.md` if file reads work), then update state before stopping: rewrite `.agentos/handoff.md` to the current state (objective, scope, what changed, tests run, next action), never append to it; delete finished tasks from `.agentos/tasks.md`. Before an older entry leaves either file, copy it into a note under `.agentos/runs/`; never discard history.',
     '',
   ].join('\n');
 }

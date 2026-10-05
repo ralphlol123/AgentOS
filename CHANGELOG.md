@@ -4,6 +4,10 @@ All notable changes to AgentOS for Projects are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- **"Update handoff/tasks" now says what update means.** The root and child adapters, the Hermes adapter, `.agentos/guide.md` and the generated agent cards used to say only "update handoff/tasks before stopping", which engines read as "add an entry". One real workspace's `handoff.md` reached 404K characters and `tasks.md` 342K, and every engine is told to read both first. They now say: rewrite `.agentos/handoff.md` to the current state and never append to it; delete finished tasks from `.agentos/tasks.md`; before an older entry leaves either file, copy it into a note under `.agentos/runs/`, and never discard history. The guide no longer tells engines not to trim these files by hand. In a synthetic two-repo fixture (8 runs per variant, Claude Code and OpenCode), the old wording kept the handoff disciplined in 2 of 8 runs and the new wording in 7 of 8, with all planted history preserved in 8 of 8; this is directional evidence only (small sample, one task, free OpenCode model). Existing workspaces see their adapters as stale until `agentos doctor --fix`; this does not shrink a file that is already large.
+
 ### Fixed
 
 - **Section sizes now add up to the whole file.** The `doctor`/`status` size warning and the `compact --dry-run` "Largest sections" listing counted only `## ` sections and skipped everything before the first one. In a real `tasks.md` (341,843 chars) that hid two stacked `# Tasks` blocks (169,060 and 68,955 chars, 70% of the file) and named `Now` (99,102 chars) as the largest section. Each `# ` block, and any text before the first heading (listed as `start of file`), is now its own entry, so the listed sizes sum to the file length. Reporting only: compaction behavior is unchanged. The new entries show no decision or reason in the `compact` listing, because the planner classifies `## ` sections only.
