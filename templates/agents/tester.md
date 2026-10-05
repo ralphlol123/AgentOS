@@ -27,4 +27,4 @@ Use `.agentos/skills.md` as an on-demand index. Load only skills relevant to thi
 
 - State the exact verification command/check before running it.
 - Report real command output or inspected state, not assumptions.
-- Update `.agentos/handoff.md` and `.agentos/tasks.md` when project state changes.
+- When project state changes, rewrite `.agentos/handoff.md` to the current state (never append) and delete finished tasks from `.agentos/tasks.md`. Before an older entry leaves either file, copy it into a note under `.agentos/runs/`; never discard history.

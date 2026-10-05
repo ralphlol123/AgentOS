@@ -19,7 +19,7 @@ How to operate an AgentOS workspace from any coding engine (Claude Code, OpenCod
 ## Which command for which job
 
 - Health check: `agentos doctor` (read-only). To repair, preview with `agentos doctor --fix --dry-run`, then run `agentos doctor --fix`.
-- Handoff or tasks too long: `agentos compact --dry-run`, review the report, then `agentos compact`. It archives the originals byte-for-byte and refuses ambiguous state. Do not trim these files by hand.
+- Handoff or tasks too long: `agentos compact --dry-run`, review the report, then `agentos compact`. It archives recognised history byte-for-byte and refuses ambiguous state. If it reports nothing to archive, rewrite the file as the rule below says instead of leaving it to grow.
 - Add a workflow: `agentos skills list` shows the catalog, `agentos skills list --installed` shows what is installed, `agentos templates show <id>` reads one first, then `agentos skills add <skill-id> --dry-run` and `agentos skills add <skill-id>`.
 - Roles: `agentos agents list`, `agentos agents list --installed`, `agentos agents add <agent-id> --dry-run`.
 - Switching engines or stopping mid-task: `agentos run handoff --dry-run` writes a continuation note without changing engines for you.
@@ -31,5 +31,5 @@ How to operate an AgentOS workspace from any coding engine (Claude Code, OpenCod
 - Install skills and agents through the CLI. A SKILL.md written by hand is not listed in `.agentos/skills.md`, so other engines and `agentos skills list --installed` will not see it.
 - Preview with `--dry-run` before any command that writes.
 - Do not commit or push unless explicitly asked. Do not touch secrets, .env files, migrations or production config without approval.
-- Verify with the commands `agentos status` lists for your repo (the same ones are in `.agentos/repos/<repo>.md` if file reads work), then update `.agentos/handoff.md` and `.agentos/tasks.md` before stopping.
+- Verify with the commands `agentos status` lists for your repo (the same ones are in `.agentos/repos/<repo>.md` if file reads work), then update state before stopping: rewrite `.agentos/handoff.md` to the current state (objective, scope, what changed, tests run, next action), never append to it; delete finished tasks from `.agentos/tasks.md`. Before an older entry leaves either file, copy it into a note under `.agentos/runs/`; never discard history.
 <!-- agentos:managed:end -->
