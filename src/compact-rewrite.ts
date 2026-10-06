@@ -783,9 +783,9 @@ function demoteDescendantHeadings(body: string, nl: string): string {
  * blank line, and a container with nothing to archive is returned unchanged. A
  * repeat run therefore rewrites nothing once no further block becomes archivable;
  * a hand-edited container whose shallowest nested block is not itself archivable
- * (a deeper block above a later sibling, or a generated constraints block that
- * re-filtering removes) can expose one on a later pass, or never, and every
- * removal is still planned and reported.
+ * (for example one beneath a generated constraints block that re-filtering
+ * removes) can expose one on a later pass, or never, and every removal is still
+ * planned and reported.
  */
 function archiveNestedHistory(
   section: SourceSection,

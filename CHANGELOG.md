@@ -4,6 +4,10 @@ All notable changes to AgentOS for Projects are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- **`docs/compaction.md` states the confident rule's subject-before-modal window correctly.** It said "six words"; the rule allows the first word plus up to six more (seven subject words), and the window only decides lines with no terminal punctuation. A terminated line qualifies at any subject length. The long-subject example is carried by the uncertain-obligation tier. No behavior changed: two new boundary tests (they fail if the window moves by one word in either direction) and a reported-speech test now pin what the docs say, and one misleading source comment about repeat runs was tightened. Documentation and comments only; `docs/` is not part of the npm package.
+
 ## [0.9.0] - 2026-10-05
 
 A minor release: it announces that the legacy upgrade paths will be removed in 0.10.0, and changes nothing else. Nothing is removed here, no command changes behavior, and a workspace with nothing legacy sees the same `doctor` text output as 0.8.1. If you maintain a workspace set up by an old release, this is the last version that migrates it: run `npx agentos-for-projects@0.9 doctor --fix` once, then upgrade.
