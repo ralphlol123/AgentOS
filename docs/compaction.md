@@ -73,11 +73,12 @@ archive.
   uppercase character; must be either an explicit obligation or a sentence ending in `.`/`!`/`?`;
   and must not trail off on a function word (`… and the note said the`) or an unclosed
   parenthesis. An explicit obligation is a line that opens on the directive, or that states a
-  subject followed within six words by `must`, `must not`, `must never`, `do not`, `don't`,
+  subject followed within seven words (the first word plus up to six more) by `must`, `must not`, `must never`, `do not`, `don't`,
   `requires`, `is required`, `are required`, `without approval` or `only with approval` — as in
   `Migrations must not be edited in place` or `The production database in staging must never be
-  synced from dumps`. That window is a heuristic, not a parser: an obligation phrased after its
-  subject is capped at the prose length rather than the directive length, and a line that opens
+  synced from dumps`. That window is a heuristic, not a parser, and it only decides lines with no terminal
+  punctuation: a line ending in `.`, `!` or `?` qualifies at any subject length. An obligation
+  phrased after its subject is capped at the prose length rather than the directive length, and a line that opens
   as an obligation and then continues as reported speech (`Guards must not be relied on here,
   the ticket explained …`) will be carried. A line that ends on a conjunction is read as
   truncated and stays in the archive. A line a following blank line continues is refused too: it is
@@ -148,9 +149,9 @@ archive.
   tier, which lifts the **complete joined statement** instead of carrying half of it.
   This is what keeps the presentation variants the confident rule cannot take — a lowercase
   directive (`never push to main`), a code-span subject (`` `migration.sql` must never be edited
-  after being applied ``), wrapping emphasis (`**never push to main**`), a subject longer than the
-  six-word window (`Accounts, locations and trips in the production database must not be modified
-  without approval`), a soft-wrapped obligation (the sentence continued on the next line, with no
+  after being applied ``), wrapping emphasis (`**never push to main**`), an unterminated line whose
+  subject is longer than the seven-word window (`Accounts, locations and trips in the production
+  database must not be modified without approval`: an eight-word subject), a soft-wrapped obligation (the sentence continued on the next line, with no
   blank line between: `… must not be modified without` / `approval`), and an obligation with no
   terminal punctuation. Each of those is a bounded, complete statement that states a modal, so the
   same obligation survives with or without emphasis, a bullet marker, or a line break in the middle
@@ -184,7 +185,7 @@ archive.
     against HEAD gives the same 43,725 → 62,488, so this residual predates the statement tier.
 
   A separate ad hoc probe (not part of the suite) found a third residual in the confident rule's
-  six-word `SUBJECT_MODAL` window. It generated 150 history blocks, each with two unterminated
+  seven-word `SUBJECT_MODAL` window. It generated 150 history blocks, each with two unterminated
   bullets shaped like `The staging migration log from March must not have been updated …` and
   `The production audit snapshot from deployment must never have been copied …`, plus unique marker
   text. Both the current `/tmp` build and HEAD archived **150/150** blocks, preserved **0**, carried

@@ -265,3 +265,43 @@ test('fenced samples are still never treated as constraints', () => {
   assert.deepEqual(plan.carriedForward, [DIRECTIVES[2]], 'only the real directive is carried');
   assert.equal(plan.handoff.includes('never deploy without approval'), false, 'fenced text is not carried');
 });
+
+// --- Pinning the documented limits of the confident rule (docs/compaction.md) -------------------
+// The confident rule takes a line that opens on a directive, OR ends a sentence (`.`/`!`/`?`), OR states a
+// subject followed by a modal within the SUBJECT_MODAL window. The window only decides lines with no terminal
+// punctuation: a terminated line qualifies at any length up to the prose limit.
+
+const subjectOf = (words) => Array.from({ length: words }, (_, i) => `Word${i + 1}`).join(' ');
+const carriedBy = (line) => {
+  const plan = planCompactRewrite({ handoff: withHistory('Previous objective — 2026-08-01', [line]), tasks: TASKS });
+  assert.equal(plan.ok, true);
+  assert.deepEqual(plan.carriedForward, [line], `carried verbatim: ${line}`);
+  const reason = plan.classification.handoff.find((section) => section.role === 'history').reason;
+  return /constraint line\(s\) carried forward verbatim/.test(reason) ? 'confident' : /uncertain obligation\(s\) carried forward verbatim/.test(reason) ? 'uncertain' : `other: ${reason}`;
+};
+
+test('the subject-before-modal window is seven subject words: an unterminated line past it moves to the uncertain tier', () => {
+  const modal = 'must not be modified without approval';
+  for (const words of [1, 5, 7]) assert.equal(carriedBy(`${subjectOf(words)} ${modal}`), 'confident', `${words} subject words, no final punctuation`);
+  for (const words of [8, 9, 12]) assert.equal(carriedBy(`${subjectOf(words)} ${modal}`), 'uncertain', `${words} subject words, no final punctuation`);
+});
+
+test('a terminated line qualifies at any subject length, so the window does not apply to it', () => {
+  const modal = 'must not be modified without approval.';
+  for (const words of [7, 8, 12]) assert.equal(carriedBy(`${subjectOf(words)} ${modal}`), 'confident', `${words} subject words, ends with a period`);
+});
+
+test('the documented long-subject example is exactly one word past the window, and is still carried', () => {
+  const line = 'Accounts, locations and trips in the production database must not be modified without approval';
+  assert.equal(line.slice(0, line.indexOf(' must')).split(/\s+/).length, 8, 'eight subject words: the first length the confident rule does not take');
+  assert.equal(carriedBy(line), 'uncertain');
+});
+
+test('an obligation that continues as reported speech is carried whole: the documented false positive', () => {
+  const line = 'Guards must not be relied on here, the ticket explained that the old path was kept for one release.';
+  assert.equal(carriedBy(line), 'confident');
+  const unterminated = line.slice(0, -1);
+  assert.equal(carriedBy(unterminated), 'confident', 'terminal punctuation is not what carries it');
+  const plan = planCompactRewrite({ handoff: withHistory('Previous objective — 2026-08-01', [line]), tasks: TASKS });
+  assert.ok(plan.handoff.includes('the ticket explained that the old path was kept'), 'the narrative tail is carried with the obligation, as the docs say');
+});
