@@ -4,7 +4,7 @@ import { readImportSource } from './import-source.js';
 import { appendContextRecord, literalMarkdown, markdownHeadings, markdownSection } from './markdown.js';
 import { HANDOFF_ROLES, recognizeSections, resolveObjective, sectionText } from './context-sections.js';
 import { planCompactRewrite } from './compact-rewrite.js';
-import { STATE_SIZE_WARN_CHARS, largestSections, sectionSizes } from './state-size.js';
+import { STATE_SIZE_WARN_CHARS, largestSections, sectionSizes, tasksShapeWarnings } from './state-size.js';
 import { dumpYaml, patchProjectYaml } from './project-yaml-edit.js';
 import { deprecation, mergeDeprecations, noticeLine, renderDeprecations, type Deprecation } from './legacy-deprecation.js';
 import { renderUnifiedDiff } from './compact-report.js';
@@ -2735,6 +2735,7 @@ async function checkTasksAndHandoff(root, problems, warnings, diagnostics) {
     diagnostics.push('handoff mentions pending push; compare with git ahead/behind diagnostics below');
   }
   warnings.push(...await stateSizeWarnings(root));
+  warnings.push(...tasksShapeWarnings(tasks));
 }
 
 function duplicateMarkdownHeadings(text, names) {
