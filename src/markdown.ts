@@ -5,21 +5,29 @@ export function literalMarkdown(content: string, language = 'markdown'): string 
   const fence = '`'.repeat(longest + 1);
   return `${fence}${language}\n${content}\n${fence}`;
 }
-export function markdownHeadings(text: string): Array<{ level: number; title: string; start: number; end: number }> {
-  const headings = [];
+/** Lines outside fenced code blocks (fence marker lines excluded), with 1-based line numbers and offsets. */
+export function unfencedLines(text: string): Array<{ text: string; line: number; start: number; end: number }> {
+  const lines = [];
   let fence: { char: string; length: number } | undefined;
   let offset = 0;
+  let number = 0;
   for (const raw of text.match(/[^\n]*\n|[^\n]+$/g) || []) {
+    number++;
     const line = raw.replace(/\r?\n$/, '');
     const marker = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
     if (fence) {
       if (marker && marker[1][0] === fence.char && marker[1].length >= fence.length && !marker[2].trim()) fence = undefined;
     } else if (marker) fence = { char: marker[1][0], length: marker[1].length };
-    else {
-      const heading = line.match(/^ {0,3}(#{1,6})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/);
-      if (heading) headings.push({ level: heading[1].length, title: heading[2], start: offset, end: offset + raw.length });
-    }
+    else lines.push({ text: line, line: number, start: offset, end: offset + raw.length });
     offset += raw.length;
+  }
+  return lines;
+}
+export function markdownHeadings(text: string): Array<{ level: number; title: string; start: number; end: number; line: number }> {
+  const headings = [];
+  for (const { text: line, line: number, start, end } of unfencedLines(text)) {
+    const heading = line.match(/^ {0,3}(#{1,6})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$/);
+    if (heading) headings.push({ level: heading[1].length, title: heading[2], start, end, line: number });
   }
   return headings;
 }
