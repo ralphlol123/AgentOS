@@ -12,13 +12,49 @@ Deliver a working v1 of the five AgentOS priorities — context builder, checkpo
 |---|---|---|
 | 1 | Baseline, review findings, correctness fixes + cleanup (section A) | Done; reviewed, pushed to `origin/feat/v1-cleanup` (`78638c0`), PR #46 open, not merged |
 | 2 | Context builder (`agentos context`, section B) | Done; reviewed, pushed to `origin/feat/v1-context` (`ca527fb`), PR #47 (stacked on #46), not merged |
-| 3 | Checkpoints and resume (section C) | Done on `feat/v1-checkpoint` (stacked on `feat/v1-context`), awaiting review; not pushed |
-| 4 | Managed Project Brain | Next |
+| 3 | Checkpoints and resume (section C) | Done; reviewed, pushed to `origin/feat/v1-checkpoint` (`2e3374b`), PR #48 (stacked on #47), not merged |
+| 4 | Managed Project Brain (section D) | Done on `feat/v1-brain` (stacked on `feat/v1-checkpoint`), awaiting review; not pushed |
 | 5 | Agent management | Not started |
 | 6 | Optional Obsidian | Not started |
 | 7 | v1 end-to-end validation (title assumed; confirm against the slice 7 card) | Not started |
 
-**Next exact action: slice 4, managed Project Brain** (after slice 3 review). Slice 2 left `buildContextBundle()` / `assertContextBundle()` (`src/context-builder.ts`); slice 3 left `assertCheckpoint()`, `loadCurrent()` and `workspaceState()` (`src/checkpoint.ts`) for later slices.
+**Next exact action: review slice 4, then slice 5 (agent management).** Slice 2 left `buildContextBundle()` / `assertContextBundle()` (`src/context-builder.ts`); slice 3 left `assertCheckpoint()`, `loadCurrent()` and `workspaceState()` (`src/checkpoint.ts`); slice 4 left `loadBrain()`, `parseRecord()`, `patchFrontmatter()`, `brainContextRecords()` (`src/brain.ts`) and the shared matcher `taskTerms()` / `termHits()` / `subjectOf()` (`src/context-builder.ts`). Slice 6 (Obsidian) can build on `loadBrain`/`patchFrontmatter`: storage is plain Markdown + frontmatter with workspace-relative paths, no engine-specific code.
+
+## Slice 4 — managed Project Brain
+
+`agentos brain init|register|list|show|search|propose|preview|validate|apply|check|verify`. Module `src/brain.ts`; `core.ts` gained only wiring (`brainAgentOS`, `BRAIN_USAGE`, `brainScopes`, Brain records into `contextInputFor`, the doctor check) and an export of `removeTracked`. `context-builder.ts` exports its matcher (`taskTerms`, `termHits`, `subjectOf`) instead of having `brain search` fork it, and accepts `brain` records as candidates. `checkpoint.ts` lists included Brain records as `knowledge_refs`. Contract and limits: `docs/brain.md`.
+
+Decisions taken in this slice (assumptions, revisit in review):
+
+- Records are discovered by a bounded workspace walk for `.md` files whose frontmatter has `id: brain:…`; the frontmatter is authoritative and `index.json` is derived (regenerated on every brain write, never read). No separate registry file.
+- `source_hash` = sha256 of the body only (bytes after the closing `---`), so frontmatter edits never change it; an unclosed or unparsable block makes the record `invalid`.
+- Allowed frontmatter keys: the metadata set plus `title`, `date`, `tags`, `aliases` (descriptive, common in ADR/Obsidian notes). Everything else is refused (register) or `invalid` (check).
+- `id` = `brain:<file-name slug>`, falling back to the path slug on a clash; an existing `id` is kept. `sources` must include the file itself (a moved/copied file is `invalid`).
+- `register` default status `accepted` (an existing project-owned file), `--status proposed` or `--by <name>` (→ `verified`). Conflicts are reported only for values given explicitly or for `sources`/`source_hash`; existing values are always kept and the command exits 0.
+- `init` refuses (exit 1, zero writes) when any template file exists; templates are `status: proposed`; glossary uses kind `note`.
+- Proposals: `mode: replace|append` (`--append`), content without frontmatter, `--supersedes` takes one or more ids. `propose` runs `validate` and does not write a rejected proposal. Proposal files are `<ISO-ts>-<slug>.md`, written exclusively.
+- Stale = `base_hash` ≠ target `source_hash`, **or** target body ≠ its `source_hash` (a human edit since verification) — otherwise apply would silently overwrite the human edit.
+- Duplicate = whitespace-normalized proposal text equals the target body (replace) / is contained in it (append) / equals another record's body.
+- Conflict flag = another `accepted`/`verified` record of the same kind with the same `subjectOf(title)`; title = frontmatter `title`, else first H1, else file name.
+- Context renders Brain records by reference (no body text) with `Source: <path>`; proposed records get a 0.5 rank penalty so they sort below accepted/verified records with the same matches.
+- `doctor`: `changed` → warning, `invalid` → problem. `brain check` exits 1 only on `invalid`.
+- `verify` sets `status: verified` unless the record is superseded; `apply` leaves an earlier `verified_at/by` in place (history shows the newer apply).
+
+## Slice 4 — acceptance evidence
+
+| Command | Where | Exit | Result |
+|---|---|---|---|
+| `npm test` | `feat/v1-brain` start (= `2e3374b`) | 0 | 664 / 664 (slice 3 final) |
+| `node --test test/v1-slice4-brain.test.js` (RED, no `brain` command) | before implementation | 1 | 16 tests, 0 pass, 16 fail (`Unknown command: brain` / `Unknown option: --kind`) |
+| same, stale check disabled in dist | fault injection | 1 | 2 fail: stale after first apply, stale after human edit |
+| same, duplicate check disabled in dist | fault injection | 1 | 1 fail: duplicate test |
+| same, `apply` ignoring rejections in dist (no-write-on-invalid) | fault injection | 1 | 2 fail: both stale tests (tree snapshot changed) |
+| `test/boundaries.test.js` with two `.agentos/brain` cases (init, register), boundary check removed from dist | fault injection | 1 | 1 fail |
+| `npm run check` | final | 0 | |
+| `npm test` | final | 0 | 680 / 680 (664 + 16 in `test/v1-slice4-brain.test.js`; two boundary cases added to an existing test) |
+| `npm run smoke` | final | 0 | |
+| `node dist/cli.js doctor --json` | final | 0 | `"ok": true`, `problems: []` |
+| dogfood on a fresh fixture (`/tmp/s4-dogfood`): init, register ×2, propose ×2, preview, apply, re-apply, validate/apply the stale one, duplicate propose, check, list, context, status, compact --dry-run, doctor | `/tmp/s4-dogfood` | 0 / 1 as expected | re-register and re-apply print no-op; stale validate/apply exit 1 printing both hashes, "Nothing was written."; duplicate propose exit 1; context lists `## Brain (adr, accepted): …` with `Source: docs/adr/…`; frontmatter on `.agentos/decisions.md` leaves status/compact/context working; doctor ok |
 
 ## Slice 3 — checkpoints and resume
 
@@ -140,3 +176,10 @@ The developer sandbox has no `bun` on PATH (bun is installed on the host); every
 - Checkpoints: the start marker line sits at the end of the previous handoff section's body, so that section's text (e.g. in `agentos context`) ends with the marker comment. Cosmetic.
 - Checkpoints: `--check` has no shell (no pipes/`&&`); `execFile` of `npm` on Windows needs `npm.cmd`. Untested on Windows.
 - Checkpoints: `.agentos/guide.md` does not list `checkpoint`/`resume` yet (same generator constraint as `context`).
+- Brain: semantic dedup and conflict detection (today exact normalized text and the heading-subject heuristic).
+- Brain: cross-file refactor of `.agentos/decisions.md` into per-record files (today it is one record; the context builder still reads it per heading).
+- Brain: automatic proposals (e.g. from checkpoints or run notes); today an engine writes every proposal by hand.
+- Brain: every read walks the workspace; use `index.json` as a validated cache if large monorepos make it slow.
+- Brain: `apply` keeps an earlier `verified_at/by` after new content is accepted; consider clearing them (history already shows the order).
+- Brain: `.agentos/guide.md` does not list `brain` yet (same generator constraint as `context`).
+- Brain: record files are discovered only directly by frontmatter; a Markdown file with `id: brain:` copied from elsewhere becomes a record (reported `invalid` if its `sources` does not list it).

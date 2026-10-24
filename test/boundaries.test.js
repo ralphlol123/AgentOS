@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile, readdir, lstat, symlink, rm, readlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { initAgentOS, checkpointAgentOS, doctorAgentOS, linkObsidianAgentOS, obsidianAgentOS, skillsAgentOS, templatesAgentOS, compactAgentOS, agentsAgentOS, migrateClaudeAgentOS, normalizeRepoIdsAgentOS } from '../dist/core.js';
+import { initAgentOS, brainAgentOS, checkpointAgentOS, doctorAgentOS, linkObsidianAgentOS, obsidianAgentOS, skillsAgentOS, templatesAgentOS, compactAgentOS, agentsAgentOS, migrateClaudeAgentOS, normalizeRepoIdsAgentOS } from '../dist/core.js';
 
 async function snapshot(dir) {
   const result = {};
@@ -44,6 +44,8 @@ test('boundary: symlinked managed targets fail before writes or deletions', asyn
     ['.agentos/runs', root => compactAgentOS({ cwd: root, rewrite: true })],
     ['.agentos/repos', root => normalizeRepoIdsAgentOS({ cwd: root })],
     ['.agentos/checkpoints', root => checkpointAgentOS({ cwd: root, task: 'boundary', progress: 'p' })],
+    ['.agentos/brain', root => brainAgentOS({ cwd: root, subcommand: 'init' })],
+    ['.agentos/brain', root => brainAgentOS({ cwd: root, subcommand: 'register', args: ['.agentos/decisions.md'] })],
     ['AGENTS.md', root => doctorAgentOS({ cwd: root, fix: true })],
   ];
   for (const [target, action] of cases) {

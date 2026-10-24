@@ -5,6 +5,7 @@ import { appendContextRecord, literalMarkdown, markdownHeadings, markdownSection
 import { HANDOFF_ROLES, recognizeSections, resolveObjective, sectionText } from './context-sections.js';
 import { assertRelativeBoundaryPath, validateTaskScope } from './task-scope.js';
 import { buildContextBundle, findAcceptance } from './context-builder.js';
+import { applyBrain, brainContextRecords, brainDoctor, checkBrain, initBrain, listBrain, previewBrain, proposeBrain, registerBrain, searchBrain, showBrain, validateBrain, verifyBrain, type BrainCtx } from './brain.js';
 import { checkpointContextRecord, checkpointProblems, listCheckpoints, resolveTask, resumeCheckpoint, showCheckpoint, writeCheckpoint, type CheckpointContext } from './checkpoint.js';
 import { planCompactRewrite } from './compact-rewrite.js';
 import { STATE_SIZE_WARN_CHARS, largestSections, sectionSizes, tasksShapeWarnings } from './state-size.js';
@@ -163,7 +164,7 @@ export async function mkdirTracked(path: string) {
   return mkdir(path, { recursive: true });
 }
 
-async function removeTracked(path: string) {
+export async function removeTracked(path: string) {
   const tx = currentMutationTransaction();
   if (tx) await tx.track(path);
   return rm(path, { recursive: true, force: true });
@@ -2620,6 +2621,9 @@ async function doctorAgentOSUnlocked(options: any = {}) {
   for (const note of migrationNotes) diagnostics.push(`migrated: ${note}`);
   await checkTasksAndHandoff(root, problems, warnings, diagnostics);
   problems.push(...await checkpointProblems(root));
+  const brain = await brainDoctor(root, brainScopes(await safeRead(join(root, '.agentos/project.yaml'))));
+  problems.push(...brain.problems);
+  warnings.push(...brain.warnings);
   await checkRepoCommands(repos, warnings, diagnostics);
   await checkGitState(root, repos, warnings, diagnostics);
   await checkPorts(repos, warnings, diagnostics);
@@ -4212,6 +4216,7 @@ async function contextInputFor(root: string, engine: string, options: any) {
     header: promptHeaderLines(engine, root, projectText),
     rules: [PROMPT_RULES, ...engineSpecificRules(engine), obsidianPromptLine(projectText)].filter(Boolean),
     task: options.task, role: options.role ? normalizeAgentAlias(String(options.role)) : undefined, scope: options.scope, budget: options.budget, includeSuperseded: Boolean(options.includeSuperseded),
+    brain: await brainContextRecords(root, brainScopes(projectText)),
   };
 }
 
@@ -4709,6 +4714,47 @@ export async function checkpointAgentOS(options: any = {}) {
   const action = async () => { await assertWorkspaceBoundaries(root); return writeCheckpoint(await checkpointContextFor(root, options), options); };
   return options.dryRun ? action() : withWorkspaceWriter(root, action);
 }
+
+const brainScopes = (projectText: string) => parseReposFromProjectYaml(projectText, { includeRoot: true }).map((repo) => repo.name);
+const BRAIN_WRITES = new Set(['init', 'register', 'propose', 'apply', 'verify']);
+
+/** `agentos brain`: writes (init/register/propose/apply/verify) take the workspace lock unless --dry-run; the rest are read-only. */
+export async function brainAgentOS(options: any = {}) {
+  const cwd = options.cwd ?? process.cwd();
+  const root = await findAgentOSRoot(cwd);
+  if (!root) return { ok: false, text: 'AgentOS brain: FAIL\nNo .agentos directory found here or in parent directories.' };
+  const ctx: BrainCtx = { root, cwd, repos: brainScopes(await safeRead(join(root, '.agentos/project.yaml'))) };
+  const [ref] = options.args ?? [];
+  const run = () => {
+    switch (options.subcommand) {
+      case 'init': return initBrain(ctx, options);
+      case 'register': return registerBrain(ctx, ref, options);
+      case 'list': return listBrain(ctx, options);
+      case 'show': return showBrain(ctx, ref, options);
+      case 'search': return searchBrain(ctx, (options.args ?? []).join(' '), options);
+      case 'propose': return proposeBrain(ctx, ref, options);
+      case 'preview': return previewBrain(ctx, ref, options);
+      case 'validate': return validateBrain(ctx, ref, options);
+      case 'apply': return applyBrain(ctx, ref, options);
+      case 'check': return checkBrain(ctx, options);
+      case 'verify': return verifyBrain(ctx, ref, options);
+      default: return { ok: false, text: BRAIN_USAGE };
+    }
+  };
+  if (!BRAIN_WRITES.has(options.subcommand)) return run();
+  const action = async () => { await assertWorkspaceBoundaries(root); return run(); };
+  return options.dryRun ? action() : withWorkspaceWriter(root, action);
+}
+
+export const BRAIN_USAGE = [
+  'Usage: agentos brain init [--dry-run]',
+  '       agentos brain register <path> [--kind architecture|decision|adr|convention|feature|note] [--scope <repo-id|.>] [--status proposed|accepted] [--by <name>] [--dry-run]',
+  '       agentos brain list [--status <s>] [--kind <k>] | show <id-or-path> | search <terms…> | check   (read-only; all take --json)',
+  '       agentos brain propose <id-or-path> --from <file|-> [--summary "<text>"] [--supersedes <id>[,<id>]] [--append] [--by <name>] [--dry-run]',
+  '       agentos brain preview <proposal> | validate <proposal>   (read-only)',
+  '       agentos brain apply <proposal> [--dry-run]',
+  '       agentos brain verify <id-or-path> [--by <name>] [--dry-run]',
+].join('\n');
 
 /** `agentos resume`: read-only. */
 export async function resumeAgentOS(options: any = {}) {

@@ -175,6 +175,7 @@ AgentOS is a TypeScript CLI/package that supports:
 - reusable repository templates under `templates/`;
 - guarded import of useful web/file agents or skills;
 - Obsidian workspace-folder knowledge/output setup;
+- a managed Project Brain: existing Markdown knowledge registered by reference, changed through validated proposals;
 - deterministic live-context compaction;
 - engine-neutral run handoff notes with read-only Git grounding;
 - doctor/status/handoff checks and JSON health output;
@@ -283,6 +284,13 @@ agentos checkpoint --recover [--task <id>] [--dry-run]
 agentos checkpoint list [--task <id>] [--json]
 agentos checkpoint show <id> [--json]
 agentos resume [--task <id>] [--engine <e>] [--json]
+agentos brain init [--dry-run]
+agentos brain register <path> [--kind architecture|decision|adr|convention|feature|note] [--scope <repo-id|.>] [--status proposed|accepted] [--by <name>] [--dry-run]
+agentos brain list [--status <s>] [--kind <k>] [--json] | show <id-or-path> [--json] | search <terms...> [--json] | check [--json]
+agentos brain propose <id-or-path> --from <file|-> [--summary "<text>"] [--supersedes <id>] [--append] [--by <name>] [--dry-run]
+agentos brain preview <proposal> | validate <proposal> [--json]
+agentos brain apply <proposal> [--dry-run]
+agentos brain verify <id-or-path> [--by <name>] [--dry-run]
 ```
 
 ## Task-specific context
@@ -320,6 +328,27 @@ agentos checkpoint --recover --task token-rotation   # the engine died without a
 - One active writer per workspace; concurrent engines are not supported. Each file is written atomically, but several files are not one crash-safe transaction.
 
 Schema, receipt vocabulary, reconciliation states and limits: [`docs/checkpoints.md`](docs/checkpoints.md).
+
+## Project Brain
+
+`agentos brain` keeps durable project knowledge (architecture, decisions, ADRs, conventions, feature notes) in ordinary Markdown files, registered by reference:
+
+```bash
+agentos brain init                                   # templates for a project without knowledge files
+agentos brain register docs/adr/0003-use-postgres.md --kind adr
+agentos brain propose brain:0003-use-postgres --from new-text.md --summary "pin Postgres 16"   # an engine writes the text
+agentos brain preview <proposal>   &&   agentos brain apply <proposal>
+agentos brain check                                  # changed / invalid records
+agentos brain verify brain:0003-use-postgres --by ralph
+```
+
+- A record is the file itself plus a small validated frontmatter (`id: brain:<slug>`, `kind`, `scope`, `status`, `sources`, `source_hash`, …). `register` adds only that block; the body stays byte-identical. Unknown keys such as `task_scope`, rules or permissions are refused: Brain content is data, not instructions. `.agentos/brain/index.json` is derived, never authoritative.
+- Lifecycle `proposed → accepted → verified → superseded`. Changes go through proposals under `.agentos/brain/proposals/`; `apply` validates identity, scope, schema, references, exact duplicates and stale writes (a proposal whose `base_hash` no longer matches is refused with both hashes, zero writes), flags ambiguous same-subject records, then updates the target, supersession links and the index in one transaction and keeps the proposal under `applied/`. Applying twice is a no-op.
+- A different `source_hash` means "source changed since verification — recheck", not "wrong". Humans may edit bodies freely; `brain check` and `doctor` report it, `brain verify` refreshes the hash explicitly. Invalid frontmatter is reported with `file:line` and the file is left alone (`doctor` problem).
+- `agentos context` lists Brain records by reference: superseded ones omitted by default, proposed ones labelled and ranked lower, changed ones labelled.
+- One writer per workspace; no database, embeddings or vault ingestion.
+
+Metadata keys, validation table and limits: [`docs/brain.md`](docs/brain.md).
 
 ## Compaction
 

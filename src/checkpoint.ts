@@ -204,7 +204,7 @@ export async function buildRecord(ctx: CheckpointContext, options: CheckpointOpt
     progress: options.recover ? UNKNOWN_PROGRESS : options.progress?.trim() || '(none recorded)',
     blockers: options.recover || !options.blocker?.trim() ? [] : [options.blocker.trim()],
     next: options.recover ? UNKNOWN_NEXT : options.next?.trim() || '(none recorded)',
-    knowledge_refs: (ctx.bundle?.included ?? []).filter((item) => item.kind === 'decision' || item.kind === 'knowledge').map((item) => ({ id: item.id, source: item.source })),
+    knowledge_refs: (ctx.bundle?.included ?? []).filter((item) => item.kind === 'decision' || item.kind === 'knowledge' || item.kind === 'brain').map((item) => ({ id: item.id, source: item.source })),
     receipts,
   };
   // The id is content-addressed: the same content at the same instant is the same record (and is refused).

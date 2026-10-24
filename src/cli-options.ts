@@ -1,6 +1,6 @@
 export type FlagValue = string | boolean;
-const booleans = new Set(['new', 'existing', 'dry-run', 'yes', 'y', 'detected', 'replace', 'preserve', 'fix', 'json', 'create', 'refresh', 'installed', 'normalize-repo-ids', 'adopt-custom-adapters', 'prune-retired', 'rewrite', 'checkpoint', 'diff', 'include-superseded', 'recover']);
-const values = new Set(['agents', 'engine', 'role', 'repo', 'worktree', 'phase', 'reason', 'vault', 'dest', 'link', 'mode', 'name', 'type', 'expected-sha256', 'objective', 'expect-state', 'task', 'scope', 'budget', 'progress', 'blocker', 'next', 'check', 'cwd', 'claim']);
+const booleans = new Set(['new', 'existing', 'dry-run', 'yes', 'y', 'detected', 'replace', 'preserve', 'fix', 'json', 'create', 'refresh', 'installed', 'normalize-repo-ids', 'adopt-custom-adapters', 'prune-retired', 'rewrite', 'checkpoint', 'diff', 'include-superseded', 'recover', 'append']);
+const values = new Set(['agents', 'engine', 'role', 'repo', 'worktree', 'phase', 'reason', 'vault', 'dest', 'link', 'mode', 'name', 'type', 'expected-sha256', 'objective', 'expect-state', 'task', 'scope', 'budget', 'progress', 'blocker', 'next', 'check', 'cwd', 'claim', 'kind', 'status', 'by', 'from', 'summary', 'supersedes']);
 /** `--check` and `--claim` repeat; each `--cwd` belongs to the `--check` right before it. */
 export function parseFlagsAndPositionals(args: string[]): { flags: Record<string, FlagValue>; positionals: string[]; checks: Array<{ command: string; cwd?: string }>; claims: string[] } {
   const flags: Record<string, FlagValue> = {}, positionals: string[] = [], checks: Array<{ command: string; cwd?: string }> = [], claims: string[] = [];
@@ -15,7 +15,7 @@ export function parseFlagsAndPositionals(args: string[]): { flags: Record<string
       flags[key] = explicit === undefined || explicit === 'true';
     } else if (values.has(key)) {
       const value = explicit ?? args[++i];
-      if (!value || value.startsWith('-')) throw new Error(`--${key} requires a value.`);
+      if (!value || (value !== '-' && value.startsWith('-'))) throw new Error(`--${key} requires a value.`);
       flags[key] = value;
       if (key === 'check') checks.push({ command: value });
       if (key === 'claim') claims.push(value);
@@ -34,6 +34,7 @@ export function validateCommandFlags(command: string, flags: Record<string, Flag
     context: ['task', 'role', 'scope', 'budget', 'json', 'include-superseded'],
     checkpoint: ['task', 'engine', 'role', 'progress', 'blocker', 'next', 'check', 'cwd', 'claim', 'json', 'dry-run', 'recover'],
     resume: ['task', 'engine', 'json'],
+    brain: ['kind', 'scope', 'status', 'by', 'from', 'summary', 'supersedes', 'append', 'json', 'dry-run'],
     run: ['engine', 'role', 'repo', 'worktree', 'phase', 'reason', 'dry-run'], doctor: ['fix', 'json', 'normalize-repo-ids', 'adopt-custom-adapters', 'prune-retired', 'dry-run'], compact: ['dry-run', 'rewrite', 'checkpoint', 'objective', 'expect-state', 'diff'],
     'link-obsidian': ['vault', 'dest', 'link', 'create', 'dry-run'], obsidian: ['vault', 'dest', 'create', 'dry-run'], adapters: [],
     skills: ['detected', 'mode', 'dry-run', 'replace', 'installed'], agents: ['name', 'dry-run', 'replace', 'installed'],
