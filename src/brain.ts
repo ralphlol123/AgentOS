@@ -453,7 +453,7 @@ function validateProposal(ctx: BrainCtx, records: BrainRecord[], proposal: Propo
   return { rejections, flags, target, newBody, supersede };
 }
 
-function diffLines(before: string, after: string) {
+export function diffLines(before: string, after: string) {
   const a = before.split('\n'), b = after.split('\n');
   let start = 0;
   while (start < a.length && start < b.length && a[start] === b[start]) start++;

@@ -23,7 +23,10 @@ test('every public agent uses the same role contract for init, add and copy', as
     await agentsAgentOS({ cwd: added, add: entry.name, replace: true });
     assert.equal((await templatesAgentOS({ cwd: copied, command: 'copy', id: entry.id, replace: true })).ok, true);
     const path = `.agentos/agents/${entry.name}.md`;
-    assert.equal(await readFile(join(added, path), 'utf8'), source);
+    // agents add prepends the validated manifest (slice 5); the body stays the canonical card byte for byte.
+    const installed = await readFile(join(added, path), 'utf8');
+    assert.match(installed, new RegExp(`^---\nid: ${entry.name}\n[\\s\\S]*?\n  installed_from: catalog:${entry.name}\n[\\s\\S]*?\n---\n`));
+    assert.equal(installed.replace(/^---\n[\s\S]*?\n---\n/, ''), source);
     assert.equal(await readFile(join(copied, path), 'utf8'), source);
     assert.match(source, /explicit approval/);
     assert.match(source, /verification/i);

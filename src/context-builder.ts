@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { recognizeSections, resolveObjective, sectionText, type SectionRole } from './context-sections.js';
 import { markdownHeadings } from './markdown.js';
 import { assertRelativeBoundaryPath, validateTaskScope } from './task-scope.js';
+import { effectiveEditScope, parseAgentCard, ROLE_ID } from './agents.js';
 
 export const TOKEN_LABEL = 'estimate (chars/4)';
 export const DEFAULT_BUDGET = 24000;
@@ -102,9 +103,15 @@ export async function buildContextBundle(input: ContextInput): Promise<ContextBu
 
   // --- role ---------------------------------------------------------------------------------------
   if (input.role && !input.enabledAgents.includes(input.role)) {
+    if (ROLE_ID.test(input.role) && await exists(join(root, '.agentos/agents', `${input.role}.md`))) {
+      throw new Error(`--role ${input.role} is disabled (the card exists but ${input.role} is not in agents.enabled); run \`agentos agents enable ${input.role}\` first.`);
+    }
     throw new Error(`--role ${input.role} is not an enabled agent (agents.enabled: ${input.enabledAgents.join(', ') || 'none'}).`);
   }
   const role = input.role ?? input.defaultRole ?? input.enabledAgents[0] ?? null;
+  const cardPath = role ? `.agentos/agents/${role}.md` : '';
+  const card = role ? parseAgentCard(role, await readText(join(root, cardPath))) : null;
+  if (card?.state === 'invalid') warnings.push(`agent card manifest is invalid, so it narrows nothing: ${card.problems.join('; ')}`);
 
   // --- scope: explicit --scope narrows project.yaml task_scope; edit is never widened ---------------
   let projectScope;
@@ -133,6 +140,10 @@ export async function buildContextBundle(input: ContextInput): Promise<ContextBu
     scopeSource = '(default: no task_scope declared)';
     warnings.push('No task_scope declared: read scope is the whole workspace and edit scope is empty until project.yaml task_scope or --scope declares it.');
   }
+  // The task decides the scope; the role manifest can only narrow it (src/agents.ts).
+  const narrowed = effectiveEditScope(edit, card?.manifest ?? null, covers);
+  edit = narrowed.edit;
+  warnings.push(...narrowed.warnings);
   const repoNames = new Set(input.repos.map((repo) => repo.name));
   const repoPaths = new Set(input.repos.map((repo) => repoPath(repo.name)));
   for (const entry of read) {
@@ -184,10 +195,10 @@ export async function buildContextBundle(input: ContextInput): Promise<ContextBu
     ].join('\n'),
   });
   if (role) {
-    const cardPath = `.agentos/agents/${role}.md`;
-    const card = await readText(join(root, cardPath));
-    if (!card) { missing.push(`agent card ${cardPath} (role ${role}) is missing`); warnings.push(`agent card ${cardPath} is missing`); }
-    add({ id: `role:${role}`, kind: 'role', title: `Role: ${role}`, source: cardPath, text: card.trim() || '(agent card missing)', mandatory: true });
+    const text = card!.body.trim();
+    if (!text) { missing.push(`agent card ${cardPath} (role ${role}) is missing`); warnings.push(`agent card ${cardPath} is missing`); }
+    const intent = card!.manifest ? `Permission intent: ${card!.manifest.permission_intent} (narrows the task scope only; see Scope).\n` : '';
+    add({ id: `role:${role}`, kind: 'role', title: `Role: ${role}`, source: cardPath, text: text ? `${intent}${text}` : '(agent card missing)', mandatory: true });
   } else {
     missing.push('no agent role: agents.enabled is empty and no --role was given');
     warnings.push('no agent role selected');

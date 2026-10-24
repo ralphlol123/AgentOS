@@ -5,13 +5,15 @@ import { appendContextRecord, literalMarkdown, markdownHeadings, markdownSection
 import { HANDOFF_ROLES, recognizeSections, resolveObjective, sectionText } from './context-sections.js';
 import { assertRelativeBoundaryPath, validateTaskScope } from './task-scope.js';
 import { buildContextBundle, findAcceptance } from './context-builder.js';
-import { applyBrain, brainContextRecords, brainDoctor, checkBrain, initBrain, listBrain, previewBrain, proposeBrain, registerBrain, searchBrain, showBrain, validateBrain, verifyBrain, type BrainCtx } from './brain.js';
+import { applyBrain, splitFrontmatter, brainContextRecords, brainDoctor, checkBrain, initBrain, listBrain, previewBrain, proposeBrain, registerBrain, searchBrain, showBrain, validateBrain, verifyBrain, type BrainCtx } from './brain.js';
 import { checkpointContextRecord, checkpointProblems, listCheckpoints, resolveTask, resumeCheckpoint, showCheckpoint, writeCheckpoint, type CheckpointContext } from './checkpoint.js';
 import { planCompactRewrite } from './compact-rewrite.js';
 import { STATE_SIZE_WARN_CHARS, largestSections, sectionSizes, tasksShapeWarnings } from './state-size.js';
 import { dumpYaml, patchProjectYaml } from './project-yaml-edit.js';
 import { deprecation, mergeDeprecations, noticeLine, renderDeprecations, type Deprecation } from './legacy-deprecation.js';
 import { renderUnifiedDiff } from './compact-report.js';
+import { agentCardDoctor, diffSummary, manifestAgent, PACKAGE_VERSION, parseAgentCard, planCardInstall, removeAgent, ROLE_ID, setAgentEnabled, showAgent } from './agents.js';
+import { advisories, engineAdapter, mergeAddKeysOnly, ROLE_BLOCK_END, ROLE_BLOCK_START } from './engines.js';
 import { resolveCompactMode } from './cli-options.js';
 import { collectRunHandoffGitState } from './git-evidence.js';
 import { canonicalAgentId, resolveAgentAlias, resolveSkillAlias, RETIRED_AGENT_IDS, RETIRED_SKILL_IDS, SKILL_ALIASES, agentDeprecationNotice, skillDeprecationNotice } from './aliases.js';
@@ -1710,7 +1712,8 @@ async function installedCards(root: string, type: 'agent' | 'skill') {
     .filter(name => name.endsWith('.md')).map(name => ({ id: basename(name, '.md'), abs: join(root, '.agentos/agents', name), relPath: `.agentos/agents/${name}` }));
   const entries = [];
   for (const item of local) {
-    const content = await safeRead(item.abs);
+    const raw = await safeRead(item.abs);
+    const content = type === 'agent' ? parseAgentCard(item.id, raw).body : raw;
     const skill = type === 'skill' ? SKILL_BY_ID[item.id] : undefined;
     const agent = type === 'agent' ? AGENT_DEFINITIONS[item.id] : undefined;
     const candidates = skill ? [renderSkillTemplate(skill, 'summary'), renderSkillTemplate(skill, 'full')] : agent ? [agentMd(agent)] : [];
@@ -1803,14 +1806,25 @@ async function agentsAgentOSUnlocked(options: any = {}) {
   if (!root) return { ok: false, text: 'AgentOS agents: FAIL\nNo .agentos directory found.' };
   await assertWorkspaceBoundaries(root);
   if (options.list) return options.installed ? installedCards(root, 'agent') : listAgentTemplates(root);
+  const actx = { root, catalog: Object.fromEntries(Object.values(AGENT_DEFINITIONS).map((agent: any) => [agent.id, { content: agentMd(agent) }])), repos: brainScopes(await safeRead(join(root, '.agentos/project.yaml'))) };
+  const lifecycleId = options.id === undefined ? undefined : String(options.id);
+  if (options.command === 'show') return showAgent(actx, lifecycleId, options);
+  if (options.command === 'enable' || options.command === 'disable') return setAgentEnabled(actx, lifecycleId, options.command === 'enable', options);
+  if (options.command === 'remove') return removeAgent(actx, lifecycleId, options);
+  if (options.command === 'manifest') return manifestAgent(actx, lifecycleId, options);
+  if (options.command === 'sync') return syncAgentsUnlocked(root, options);
   const raw = String(options.add || '').trim();
   if (!raw) throw new Error('agentos agents add requires an agent id or template file.');
   const dryRun = Boolean(options.dryRun);
   const id = normalizeAgentAlias(options.name || (isPathLike(raw) ? basename(raw, extname(raw)) : raw));
+  if (!ROLE_ID.test(id)) throw new Error(`Invalid agent id: ${id} (expected lowercase letters, digits and hyphens).`);
   const content = await agentTemplateContent(raw);
   validateAgentTemplate(content, id);
+  if (splitFrontmatter(content).has) throw new Error(`Agent template ${raw} already starts with frontmatter; AgentOS writes the manifest itself. Remove the frontmatter from the template and retry.`);
   const relPath = `.agentos/agents/${id}.md`;
-  await assertCardReplacement(join(root, relPath), content, options.replace);
+  const existingCard = await exists(join(root, relPath)) ? await safeRead(join(root, relPath)) : null;
+  const installedFrom = isPathLike(raw) ? `template:${raw}` : `catalog:${normalizeAgentAlias(raw)}`;
+  const install = planCardInstall(id, existingCard, content, installedFrom, { catalog: !isPathLike(raw) && Boolean(AGENT_DEFINITIONS[normalizeAgentAlias(raw)]), replace: Boolean(options.replace), raw });
   const projectPath = join(root, '.agentos/project.yaml');
   await assertProjectYamlWellFormed(projectPath);
   const projectText = await safeRead(projectPath);
@@ -1822,19 +1836,91 @@ async function agentsAgentOSUnlocked(options: any = {}) {
   if (id === 'planner' && !capabilities.planning) capabilities.planning = 'planner';
   const nextAgents = { profile: 'custom', capabilities, enabled: [...enabled] };
   const deprecation = (!isPathLike(raw) && !options.name) ? resolveAgentAlias(raw) : { id, deprecated: false };
+  const backup = install.action === 'replace' ? `.agentos/runs/replaced-agents/${new Date().toISOString().replace(/[:.]/g, '-')}-${id}.md` : null;
+  const verb = { create: dryRun ? 'Would write' : 'Wrote', upgrade: dryRun ? 'Would upgrade' : 'Upgraded', replace: dryRun ? 'Would replace' : 'Replaced', noop: 'Already installed (unchanged)' }[install.action];
   const lines = [
     `AgentOS agents add${dryRun ? ' dry run' : ''}`, `Root: ${root}`, `Agent: ${id}`,
     ...(deprecation.deprecated ? [`Note: ${agentDeprecationNotice(deprecation.from!, id)}`] : []),
-    '', `${dryRun ? 'Would write' : 'Wrote'}: ${relPath}`, `${dryRun ? 'Would patch' : 'Patched'}: .agentos/project.yaml`,
+    '', `${verb}: ${relPath} (manifest: installed_from ${installedFrom}, version ${PACKAGE_VERSION}; ${install.reason})`,
+    ...(install.action === 'replace' || install.action === 'upgrade' ? diffSummary(install.diff) : []),
+    ...(backup ? [`${dryRun ? 'Would keep' : 'Kept'} the old card: ${backup}`] : []),
+    `${dryRun ? 'Would patch' : 'Patched'}: .agentos/project.yaml`,
   ];
   if (!dryRun) {
     await withMutationTransaction(async () => {
       await mkdirTracked(dirname(join(root, relPath)));
-      await writeFileAtomic(join(root, relPath), content);
+      if (backup) {
+        await mkdirTracked(join(root, '.agentos/runs/replaced-agents'));
+        await writeFileExclusiveAtomic(join(root, backup), Buffer.from(existingCard!, 'utf8'));
+      }
+      if (install.action !== 'noop') await writeFileAtomic(join(root, relPath), install.content);
       await writeFileAtomic(projectPath, patchProjectYaml(projectText, (data) => { data.agents = nextAgents; }));
     });
   }
-  return { ok: true, root, id, dryRun, text: lines.join('\n') };
+  return { ok: true, root, id, dryRun, action: install.action, text: lines.join('\n') };
+}
+
+/** `agentos agents sync <engine>`: the only path that writes engine-native agent config. Preflights every target;
+ *  any conflict refuses the whole sync with zero writes. Never called by context/checkpoint. */
+async function syncAgentsUnlocked(root: string, options: any) {
+  const engine = normalizeEngine(options.engine);
+  const adapter = engineAdapter(engine);
+  if (!adapter.nativeConfig) return { ok: false, text: `AgentOS agents sync: UNSUPPORTED\n${engine} has no native agent config (native_agent_config: ${adapter.capabilities.native_agent_config.status}). Supported: claude-code, codex.` };
+  const input = await contextInputFor(root, engine, { role: options.role, scope: options.scope });
+  const bundle = await buildContextBundle(input);
+  const role = bundle.role;
+  if (!role) throw new Error('No role: pass --role <agent-id>.');
+  const card = parseAgentCard(role, await safeRead(join(root, '.agentos/agents', `${role}.md`)));
+  if (!card.manifest) return { ok: false, text: `AgentOS agents sync: REFUSED\n.agentos/agents/${role}.md has ${card.state === 'invalid' ? 'an invalid manifest' : 'no manifest'}; native config is generated from the manifest. Run \`agentos agents manifest ${role} --from-catalog\` (or --custom) first.\nNothing was written.` };
+  const repoPath = (entry: string) => (input.repos.find((repo) => repo.name === entry)?.path ?? entry).replace(/^\.\/(?=.)/, '').replace(/\/+$/, '') || '.';
+  const edit = [];
+  for (const entry of bundle.scope.edit) {
+    const path = repoPath(entry);
+    edit.push({ path, dir: path === '.' || (await stat(join(root, path)).then((info) => info.isDirectory()).catch(() => true)) });
+  }
+  const childRepos = input.repos.map((repo) => repoPath(repo.name)).filter((path) => path !== '.');
+  const owners = [...new Set(edit.map(({ path }) => childRepos.find((repo) => path === repo || path.startsWith(`${repo}/`)) ?? '.'))];
+  const files = adapter.nativeConfig({ role, manifest: card.manifest, body: card.body, edit, repoDir: owners.length === 1 ? owners[0] : '.' });
+  const plans = [];
+  const conflicts = [];
+  for (const file of files) {
+    await assertBoundaryTarget(root, file.path);
+    const abs = join(root, file.path);
+    const current = await exists(abs) ? await readFile(abs, 'utf8') : null;
+    let next = file.content;
+    if (current !== null && file.merge === 'whole-file' && current !== file.content) conflicts.push(`${file.path}: exists with different content; delete or move it, then sync again`);
+    if (current !== null && file.merge === 'json-add-keys') {
+      let existing;
+      try { existing = JSON.parse(current); } catch (error) { conflicts.push(`${file.path}: not valid JSON (${error.message})`); continue; }
+      if (!existing || typeof existing !== 'object' || Array.isArray(existing)) { conflicts.push(`${file.path}: not a JSON object`); continue; }
+      const merged = mergeAddKeysOnly(existing, JSON.parse(file.content));
+      conflicts.push(...merged.conflicts.map((conflict) => `${file.path}: ${conflict}`));
+      next = JSON.stringify(merged.merged, null, 2) + '\n';
+      if (JSON.stringify(merged.merged) === JSON.stringify(existing)) next = current;
+    }
+    if (current !== null && file.merge === 'managed-block') {
+      const block = locateManagedBlock(current, ROLE_BLOCK_START, ROLE_BLOCK_END);
+      if (block.kind === 'conflict') { conflicts.push(`${file.path}: ${block.reason}`); continue; }
+      if (block.kind === 'valid') {
+        const lineEnd = current.indexOf('\n', block.endIdx);
+        next = current.slice(0, block.startIdx) + file.content + (lineEnd < 0 ? '' : current.slice(lineEnd + 1));
+      } else next = current + (current.endsWith('\n') ? '\n' : '\n\n') + file.content;
+    }
+    plans.push({ path: file.path, abs, next, action: current === null ? 'create' : next === current ? 'unchanged' : 'update' });
+  }
+  const head = [`AgentOS agents sync ${engine}${options.dryRun ? ' dry run' : ''}`, `Role: ${role}; edit scope: ${bundle.scope.edit.join(', ') || '(none; read-only)'}`];
+  const caveat = `Generated configuration is not proof of enforcement: permission_enforcement is ${adapter.capabilities.permission_enforcement.status} for ${engine} (agentos engines).`;
+  if (conflicts.length) return { ok: false, conflicts, text: [...head, 'REFUSED (existing values conflict; add-keys-only):', ...conflicts.map((c) => `- ${c}`), 'Nothing was written.'].join('\n') };
+  if (!options.dryRun) {
+    await withMutationTransaction(async () => {
+      for (const plan of plans.filter((p) => p.action !== 'unchanged')) {
+        await mkdirTracked(dirname(plan.abs));
+        await writeFileAtomic(plan.abs, plan.next);
+      }
+    });
+  }
+  const verb = (action: string) => action === 'unchanged' ? 'Unchanged' : options.dryRun ? `Would ${action}` : action === 'create' ? 'Created' : 'Updated';
+  return { ok: true, dryRun: Boolean(options.dryRun), files: plans.map(({ path, action }) => ({ path, action })), text: [...head, ...plans.flatMap((plan) => [`${verb(plan.action)}: ${plan.path}`, ...(options.dryRun && plan.action !== 'unchanged' ? files.find((f) => f.path === plan.path)!.content.trimEnd().split('\n').map((line) => `  | ${line}`) : [])]), caveat].join('\n') };
 }
 
 function listAgentTemplates(root) {
@@ -1844,9 +1930,6 @@ function listAgentTemplates(root) {
   return { ok: true, root, agents: Object.keys(AGENT_DEFINITIONS), text: lines.join('\n') };
 }
 
-async function assertCardReplacement(path: string, content: string, replace: boolean = false) {
-  if (!replace && await exists(path) && await safeRead(path) !== content) throw new Error(`Existing card differs: ${path}. Review it and use --replace to overwrite local content.`);
-}
 async function agentTemplateContent(raw) {
   if (isPathLike(raw)) return await readFile(resolve(raw), 'utf8');
   const agent = AGENT_DEFINITIONS[normalizeAgentAlias(raw)];
@@ -2621,6 +2704,9 @@ async function doctorAgentOSUnlocked(options: any = {}) {
   for (const note of migrationNotes) diagnostics.push(`migrated: ${note}`);
   await checkTasksAndHandoff(root, problems, warnings, diagnostics);
   problems.push(...await checkpointProblems(root));
+  const cards = await agentCardDoctor(root, Object.fromEntries(Object.values(AGENT_DEFINITIONS).map((agent: any) => [agent.id, { content: agentMd(agent) }])));
+  problems.push(...cards.problems);
+  diagnostics.push(...cards.diagnostics);
   const brain = await brainDoctor(root, brainScopes(await safeRead(join(root, '.agentos/project.yaml'))));
   problems.push(...brain.problems);
   warnings.push(...brain.warnings);
@@ -4225,15 +4311,21 @@ export async function contextAgentOS(options: any = {}) {
   const root = await findAgentOSRoot(options.cwd ?? process.cwd());
   if (!root) return { ok: false, text: 'AgentOS context: FAIL\nNo .agentos directory found here or in parent directories.' };
   const engine = normalizeEngine(options.engine ?? 'generic');
+  const adapter = engineAdapter(engine);
+  const enforcement = adapter.capabilities.permission_enforcement;
+  if (options.requireEnforcement && enforcement.status !== 'verified') {
+    return { ok: false, text: `AgentOS context: UNSUPPORTED\n--require-enforcement: permission_enforcement is ${enforcement.status} for ${engine}. ${enforcement.evidence}\nNo context was rendered. Without the flag, the edit scope is delivered as instructions only (see \`agentos engines\`).` };
+  }
   const input = await contextInputFor(root, engine, options);
   const objective = resolveObjective(await safeRead(join(root, '.agentos/handoff.md')));
   let checkpointTask: string | null = null;
   try { checkpointTask = resolveTask(options.task, objective.selected ?? null).id; } catch { /* no task id: no checkpoint record */ }
   const checkpoint = checkpointTask ? await checkpointContextRecord(root, checkpointTask) : null;
   const bundle = await buildContextBundle({ ...input, checkpoint: checkpoint ?? undefined });
-  if (options.json) return { ok: bundle.ok, bundle, text: JSON.stringify(bundle, null, 2) };
+  const advisoryLines = bundle.ok ? advisories(adapter) : [];
+  if (options.json) return { ok: bundle.ok, bundle, text: JSON.stringify({ ...bundle, advisories: advisoryLines }, null, 2) };
   const footer = `\n\nBudget: ${bundle.budget.estimate} of ${bundle.budget.limit} tokens, ${bundle.budget.label}, including ${bundle.budget.overhead} assumed engine overhead.`;
-  return { ok: bundle.ok, bundle, text: `${bundle.text}${bundle.ok ? footer : ''}` };
+  return { ok: bundle.ok, bundle, text: `${adapter.render(bundle)}${bundle.ok ? footer : ''}` };
 }
 
 function renderEnginePrompt({ engine, root, project, objective, tasks, scope }) {
@@ -4439,7 +4531,7 @@ function firstYamlValue(text, key) {
   return value === undefined || value === null ? undefined : String(value);
 }
 
-function parseProjectYaml(text) {
+export function parseProjectYaml(text) {
   try {
     const parsed = parseYaml(String(text || ''));
     return parsed && typeof parsed === 'object' ? parsed : {};
@@ -4455,7 +4547,7 @@ class ProjectConfigError extends Error {}
 // treated as `{}` and serialized back as a partial/empty config. A missing file is not an error
 // here — callers that create project.yaml from scratch (or skip patching an absent file) still
 // get to do that; only an *existing* file held to empty/invalid content is treated as malformed.
-async function assertProjectYamlWellFormed(path) {
+export async function assertProjectYamlWellFormed(path) {
   let text;
   try {
     text = await readFile(path, 'utf8');
@@ -4672,7 +4764,7 @@ export async function skillsAgentOS(options: any = {}) {
 export async function agentsAgentOS(options: any = {}) {
   const root = await findAgentOSRoot(options.cwd ?? process.cwd());
   const action = () => agentsAgentOSUnlocked(options);
-  return root && (!options.dryRun && !options.list) ? withWorkspaceWriter(root, action) : action();
+  return root && (!options.dryRun && !options.list && options.command !== 'show') ? withWorkspaceWriter(root, action) : action();
 }
 
 export async function templatesAgentOS(options: any = {}) {

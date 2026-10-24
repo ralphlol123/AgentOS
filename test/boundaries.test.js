@@ -39,6 +39,8 @@ test('boundary: symlinked managed targets fail before writes or deletions', asyn
   const cases = [
     ['.agentos/skills', root => skillsAgentOS({ cwd: root, add: 'core-pack' })],
     ['.agentos/agents', root => agentsAgentOS({ cwd: root, add: 'planner' })],
+    ['.agentos/runs', root => agentsAgentOS({ cwd: root, command: 'remove', id: 'reviewer' })],
+    ['.agentos/agents', root => agentsAgentOS({ cwd: root, command: 'manifest', id: 'developer', fromCatalog: true })],
     ['.agentos/skills.md', root => templatesAgentOS({ cwd: root, command: 'copy', id: 'skill:core/debugging', replace: true })],
     ['.agentos/runs', root => compactAgentOS({ cwd: root, checkpoint: true })],
     ['.agentos/runs', root => compactAgentOS({ cwd: root, rewrite: true })],

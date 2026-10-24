@@ -270,7 +270,13 @@ agentos skills list
 agentos skills add [--detected] [skill-id|category-pack,...] [--mode summary|full] [--dry-run]
 agentos skills remove <skill-id> [--dry-run]
 agentos agents list
-agentos agents add <agent-id|template-file> [--name id] [--dry-run]
+agentos agents add <agent-id|template-file> [--name id] [--replace] [--dry-run]
+agentos agents show <id> [--json]
+agentos agents enable|disable <id> [--dry-run]
+agentos agents remove <id> [--dry-run]
+agentos agents manifest <id> --from-catalog|--custom [--dry-run]
+agentos agents sync claude-code|codex [--role <id>] [--scope <repo-or-path>,...] [--dry-run]
+agentos engines [--json]
 agentos templates list
 agentos templates show <id>
 agentos templates copy <id> [--dry-run] [--replace]
@@ -278,7 +284,7 @@ agentos templates validate <file> --type agent|skill
 agentos templates import <url-or-file> --type agent|skill --name <id> [--mode summary|full] [--dry-run] [--yes] [--replace]
 agentos migrate claude --preserve [--dry-run]
 agentos prompt [claude|codex|opencode|hermes]
-agentos context [claude|codex|opencode|hermes] [--task "<text>"] [--role <agent-id>] [--scope <repo-or-path>,...] [--budget <tokens>] [--json] [--include-superseded]
+agentos context [claude|codex|opencode|hermes] [--task "<text>"] [--role <agent-id>] [--scope <repo-or-path>,...] [--budget <tokens>] [--json] [--include-superseded] [--require-enforcement]
 agentos checkpoint [--task <id>] [--engine <e>] [--role <r>] [--progress "<text>"] [--blocker "<text>"] [--next "<text>"] [--check "<cmd>" [--cwd <dir>]]... [--claim "<text>"]... [--json] [--dry-run]
 agentos checkpoint --recover [--task <id>] [--dry-run]
 agentos checkpoint list [--task <id>] [--json]
@@ -432,6 +438,33 @@ task_scope:
 ```bash
 agentos agents add planner
 ```
+
+## Agents
+
+An agent card `.agentos/agents/<id>.md` is readable instructions; its YAML frontmatter, when present, is a validated manifest (`id`, `name`, `purpose`, `responsibilities`, `knowledge_selectors`, `skills`, `tools_requested`, `permission_intent: read-only|edit-in-scope|release`, `expected_output`, `provenance`, `custom`, optional `edit_request`). Unknown keys and any other `permission_intent` are rejected; `doctor` fails on an invalid manifest.
+
+```bash
+agentos agents add developer                  # writes the manifest: installed_from catalog:developer, package version, source_hash
+agentos agents show developer --json
+agentos agents disable tester                 # edits agents.enabled only; the card stays on disk
+agentos agents remove tester --dry-run        # refuses while anything still references tester
+agentos agents manifest reviewer --from-catalog   # legacy card that byte-matches the catalog
+```
+
+- The task decides the scope (`task_scope` / `--scope`). A manifest can only narrow it: `read-only` empties the edit scope; `edit_request` entries outside the task's edit scope are ignored with a warning.
+- `agents add` and `doctor --fix` never overwrite a card marked `custom: true` or whose body changed since install (`provenance.source_hash`). `agents add <id> --replace --dry-run` prints a diff and writes nothing; `--replace` keeps the old card under `.agentos/runs/replaced-agents/`.
+- Cards written by `init` have no frontmatter (legacy). They keep working; `doctor` lists them with the command that adds a manifest. Provenance is never inferred for a card that does not byte-match its source: use `agents manifest <id> --custom` (provenance `unknown`).
+- `disable` leaves the card; `context`/`checkpoint --role <disabled>` exit 1 naming `agentos agents enable <id>`. `remove` refuses while `agents.enabled`, `agents.capabilities`, a current checkpoint role or a Brain record (`scope`, or a tag `<id>`/`agent:<id>`) points at the id, and moves the card to `.agentos/runs/removed-agents/<ts>-<id>.md` instead of deleting it.
+
+Keys, lifecycle and preservation rules: [`docs/agents.md`](docs/agents.md).
+
+## Engines
+
+`agentos engines [--json]` prints what AgentOS can make each engine (`claude-code`, `codex`, `opencode`, `hermes`, `generic`) do, per row `context_rendering`, `native_agent_config`, `tool_restrictions`, `permission_enforcement`, `launch`, `native_session_resume`, with status `verified | advisory | unsupported | unverified` and the evidence. **No row is `verified` today**: no engine trial has been recorded. `agentos context <engine>` ends with one `ADVISORY: edit scope is instruction-only for <engine>` line; `--require-enforcement` makes it exit 1 with `UNSUPPORTED` instead.
+
+`agentos agents sync claude-code [--dry-run]` writes `.claude/agents/<role>.md` and merges a proposed `.claude/settings.local.json` permission fragment (`Edit(/<path>/**)` allow rules for the edit scope, or deny `Edit`/`Write` for a read-only role) by adding keys only; a conflicting existing value refuses the whole sync with zero writes. `agentos agents sync codex` writes a managed role block (`<!-- agentos:role:start/end -->`) into the in-scope repo's `AGENTS.md`. Only `agents sync` writes these files; `context` and `checkpoint` never do. Generated configuration is not proof of enforcement.
+
+Matrix, evidence and the trial that will fill the verified column: [`docs/engines.md`](docs/engines.md).
 
 ## Local skills
 

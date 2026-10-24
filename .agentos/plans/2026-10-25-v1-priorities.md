@@ -13,12 +13,44 @@ Deliver a working v1 of the five AgentOS priorities — context builder, checkpo
 | 1 | Baseline, review findings, correctness fixes + cleanup (section A) | Done; reviewed, pushed to `origin/feat/v1-cleanup` (`78638c0`), PR #46 open, not merged |
 | 2 | Context builder (`agentos context`, section B) | Done; reviewed, pushed to `origin/feat/v1-context` (`ca527fb`), PR #47 (stacked on #46), not merged |
 | 3 | Checkpoints and resume (section C) | Done; reviewed, pushed to `origin/feat/v1-checkpoint` (`2e3374b`), PR #48 (stacked on #47), not merged |
-| 4 | Managed Project Brain (section D) | Done on `feat/v1-brain` (stacked on `feat/v1-checkpoint`), awaiting review; not pushed |
-| 5 | Agent management | Not started |
+| 4 | Managed Project Brain (section D) | Done; reviewed, pushed to `origin/feat/v1-brain` (`bfd97d8`), PR #49 (stacked on #48), not merged |
+| 5 | Agent manifests, lifecycle + engine capability matrix (section E) | Done on `feat/v1-agents` (stacked on `feat/v1-brain`), awaiting review; not pushed |
 | 6 | Optional Obsidian | Not started |
 | 7 | v1 end-to-end validation (title assumed; confirm against the slice 7 card) | Not started |
 
-**Next exact action: review slice 4, then slice 5 (agent management).** Slice 2 left `buildContextBundle()` / `assertContextBundle()` (`src/context-builder.ts`); slice 3 left `assertCheckpoint()`, `loadCurrent()` and `workspaceState()` (`src/checkpoint.ts`); slice 4 left `loadBrain()`, `parseRecord()`, `patchFrontmatter()`, `brainContextRecords()` (`src/brain.ts`) and the shared matcher `taskTerms()` / `termHits()` / `subjectOf()` (`src/context-builder.ts`). Slice 6 (Obsidian) can build on `loadBrain`/`patchFrontmatter`: storage is plain Markdown + frontmatter with workspace-relative paths, no engine-specific code.
+**Next exact action: review slice 5, then slice 6 (optional Obsidian).** Slice 5 left `parseAgentCard()` / `validateAgentManifest()` / `effectiveEditScope()` (`src/agents.ts`) and `ENGINE_ADAPTERS` / `engineAdapter()` / `advisories()` (`src/engines.ts`); a recorded engine trial changes a row there. Earlier: slice 2 left `buildContextBundle()` / `assertContextBundle()` (`src/context-builder.ts`); slice 3 left `assertCheckpoint()`, `loadCurrent()` and `workspaceState()` (`src/checkpoint.ts`); slice 4 left `loadBrain()`, `parseRecord()`, `patchFrontmatter()`, `brainContextRecords()` (`src/brain.ts`) and the shared matcher `taskTerms()` / `termHits()` / `subjectOf()` (`src/context-builder.ts`). Slice 6 (Obsidian) can build on `loadBrain`/`patchFrontmatter`: storage is plain Markdown + frontmatter with workspace-relative paths, no engine-specific code.
+
+## Slice 5 — agent manifests, lifecycle, engine capability matrix
+
+`agentos agents add|show|enable|disable|remove|manifest|sync`, `agentos engines`, `agentos context --require-enforcement`. Modules `src/agents.ts` (manifest, validation, scope narrowing, lifecycle, doctor check) and `src/engines.ts` (adapter contract, matrix, native config, add-keys-only merge). `core.ts` gained wiring (`agents add` install plan, `syncAgentsUnlocked`, context advisories, the doctor check) and exports of `parseProjectYaml` / `assertProjectYamlWellFormed`; `context-builder.ts` reads the role card through `parseAgentCard` (body only in the role section) and applies `effectiveEditScope`; `brain.ts` exports `diffLines`. Contract and limits: `docs/agents.md`, `docs/engines.md`.
+
+Decisions taken in this slice (assumptions, revisit in review):
+
+- The card spec's "a card declaring edit of `backend`" needed a key: optional `edit_request` (advisory list). Entries outside the task's edit scope are ignored with a warning; entries inside change nothing (no narrowing by request). Only `permission_intent: read-only` narrows (to `[]`); `release` keeps the task scope.
+- Catalog intents: planner, reviewer, security-reviewer `read-only`; release-manager `release`; developer, tester `edit-in-scope`. `knowledge_selectors`, `skills`, `tools_requested` are `[]` for catalog cards (not parsed from prose).
+- `init` and `doctor --fix` still write legacy cards (no frontmatter) so existing byte-shape tests, retired-card migration and `templates copy` stay unchanged; `doctor` reports legacy cards as `diagnostics` (not warnings/problems) with the exact command. This repo's own four cards differ from the catalog (three) or match it (reviewer); they were left legacy — choosing `--custom` vs `agents add --replace` is the owner's call.
+- `agents add` upgrade without `--replace`: a byte-matched legacy card or an unmodified non-custom manifest card. `--replace` keeps the old card under `.agentos/runs/replaced-agents/` (not in the card spec; added so a replace cannot lose a hand edit).
+- `disable` refuses to empty `agents.enabled` (the format-preserving editor falls back to a whole-file dump for an emptied list, losing comments).
+- `remove` Brain references: a record whose `scope` equals the id or whose `tags` contain `<id>` or `agent:<id>`. Brain scopes are repo ids, so tags are the practical selector.
+- `agents sync` requires a manifest, takes role and edit scope from the context builder (so `--scope` and the manifest narrowing apply), and refuses on any conflict: an existing `.claude/agents/<id>.md` with different bytes, a settings key with a different value (arrays compared whole), invalid JSON, or an ambiguous role-block marker. Codex target = the `AGENTS.md` of the single child repo holding the edit scope, else the root.
+- Claude settings rules follow the current Claude Code permissions docs: `Edit(/<path>/**)` (Write path rules never match; `/` is relative to the settings source; deny beats allow). Read-only roles get `deny: [Edit, Write, NotebookEdit]`.
+- One hard requirement today (edit scope → `permission_enforcement`), so one ADVISORY line; per-tool requirements wait for per-tool allowlists.
+
+## Slice 5 — acceptance evidence
+
+| Command | Where | Exit | Result |
+|---|---|---|---|
+| `npm test` | `feat/v1-agents` start (= `bfd97d8`) | 0 | 680 / 680 (slice 4 final) |
+| `node --test --test-reporter=tap test/v1-slice5-agents.test.js` against `bfd97d8` dist (RED) | detached worktree of `feat/v1-brain` | 1 | 13 tests, 0 pass, 13 fail. E1 scope test: fails at the warning assertion (line 149: no `requests edit of backend … ignored` warning; the base builder ignores the manifest, so `scope.edit` was already `['web']` — the widening fault below is what proves the never-exceeds check); E2 custom test: old message `Existing card differs: … Review it and use --replace` (no `body changed since install`, no diff preview); E2 remove test: `agents remove` prints the old `agents list | agents add` usage (no refusal, no reference list) |
+| same, `effectiveEditScope` made to add `edit_request` to the edit scope (dist) | fault injection | 1 | scope test fails: actual `['web', 'backend']`, expected `['web']` |
+| same, `remove` ignoring references (dist) | fault injection | 1 | remove test fails |
+| same, every existing card treated as generated (dist) | fault injection | 1 | preservation test fails: hand-edited card overwritten (`agents add` exit 0). A first injection attempt with wrong operator precedence did not change behaviour and passed; recorded, not counted |
+| `test/boundaries.test.js` with two new cases (`agents remove` via symlinked `.agentos/runs`, `agents manifest` via symlinked `.agentos/agents`) | final | 0 | 10 / 10 |
+| `npm run check` | final | 0 | |
+| `npm test` | final | 0 | 693 / 693 (680 + 13 in `test/v1-slice5-agents.test.js`; two boundary cases and the catalog-parity body check changed in existing tests) |
+| `npm run smoke` | final | 0 | |
+| `node dist/cli.js doctor --json` | final | 0 | `"ok": true`, `problems: []`; diagnostics list this repo's four legacy cards with their commands |
+| dogfood on a fresh two-repo fixture (`/tmp/s5-dogfood-*`): init, add developer (legacy → manifest upgrade), show, engines, context claude, context codex `--require-enforcement`, sync claude-code `--dry-run`, sync codex, remove tester, doctor | `/tmp` | 0 / 1 as expected | upgrade printed `Diff summary: body unchanged (manifest only)`; `--require-enforcement` exit 1 `UNSUPPORTED`; dry-run printed both files; remove tester refused listing `agents.enabled` and `agents.capabilities.qa`; doctor OK |
 
 ## Slice 4 — managed Project Brain
 
@@ -182,4 +214,11 @@ The developer sandbox has no `bun` on PATH (bun is installed on the host); every
 - Brain: every read walks the workspace; use `index.json` as a validated cache if large monorepos make it slow.
 - Brain: `apply` keeps an earlier `verified_at/by` after new content is accepted; consider clearing them (history already shows the order).
 - Brain: `.agentos/guide.md` does not list `brain` yet (same generator constraint as `context`).
+- Agents: per-tool allowlists (`tools_requested` reaches only the Claude Code subagent `tools:` list; no ADVISORY line per tool, no Codex/OpenCode mapping).
+- Agents: provenance for imports (`templates import --type agent` still writes a legacy card; `import:<url>` is accepted by the validator but never written).
+- Agents: native session resume (`native_session_resume` is `unsupported` for every engine; `agentos resume` stays engine-neutral text).
+- Agents: `init` / `doctor --fix` / `templates copy` write legacy cards; writing manifests there changes generated bytes and the retired-card shape set, so it waits for a release slice.
+- Agents: `knowledge_selectors` and `skills` are recorded but not used by the context builder.
+- Agents: `agents sync claude-code` refuses an existing `.claude/agents/<id>.md` with different bytes (no managed marker, no `--replace`); re-syncing after a card edit needs the file moved first.
+- Engines: every row is `verified`-free until Phynceon's trial (`docs/engines.md`); `launch` is unsupported everywhere (no `agentos run`).
 - Brain: record files are discovered only directly by frontmatter; a Markdown file with `id: brain:` copied from elsewhere becomes a record (reported `invalid` if its `sources` does not list it).
