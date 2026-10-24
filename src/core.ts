@@ -3,6 +3,7 @@ import { withWorkspaceWriter } from './workspace-lock.js';
 import { readImportSource } from './import-source.js';
 import { appendContextRecord, literalMarkdown, markdownHeadings, markdownSection } from './markdown.js';
 import { HANDOFF_ROLES, recognizeSections, resolveObjective, sectionText } from './context-sections.js';
+import { assertRelativeBoundaryPath, validateTaskScope } from './task-scope.js';
 import { planCompactRewrite } from './compact-rewrite.js';
 import { STATE_SIZE_WARN_CHARS, largestSections, sectionSizes, tasksShapeWarnings } from './state-size.js';
 import { dumpYaml, patchProjectYaml } from './project-yaml-edit.js';
@@ -12,7 +13,7 @@ import { resolveCompactMode } from './cli-options.js';
 import { collectRunHandoffGitState } from './git-evidence.js';
 import { canonicalAgentId, resolveAgentAlias, resolveSkillAlias, RETIRED_AGENT_IDS, RETIRED_SKILL_IDS, SKILL_ALIASES, agentDeprecationNotice, skillDeprecationNotice } from './aliases.js';
 import { LEGACY_SKILL_CARD_HASHES } from './legacy-skill-shapes.js';
-import { access, chmod, link, mkdir, open, readFile, readdir, rename, rm, stat, lstat, realpath, writeFile } from 'node:fs/promises';
+import { access, chmod, link, mkdir, open, readFile, readdir, rename, rm, stat, lstat, realpath } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomBytes } from 'node:crypto';
@@ -894,7 +895,7 @@ async function initAgentOSUnlocked(options: any = {}) {
   const adapterTargets = [...rootAdapterTargets(cwd, workspaceKind, repos), ...childAdapterTargets(cwd, policy.pointers ? childRepos : [])];
   const adapterPlans = await planAdapterFiles(adapterTargets);
   const planned = [...new Set([
-    ...plannedFiles(mode, workspaceKind, repos),
+    ...plannedFiles(mode),
     ...agentSelection.agents.map(agent => `.agentos/agents/${agent.id}.md`),
     ...repos.map(repo => `.agentos/repos/${repo.name}.md`),
     ...adapterTargets.map(target => relative(cwd, target.path)),
@@ -1025,8 +1026,21 @@ export async function promptAgentOS(options: any = {}) {
   const project = await safeRead(join(root, '.agentos/project.yaml'));
   const handoff = await safeRead(join(root, '.agentos/handoff.md'));
   const tasks = await safeRead(join(root, '.agentos/tasks.md'));
-  const prompt = renderEnginePrompt({ engine, root, project, handoff, tasks });
+  // Same resolver as status/doctor/compact: broken objective state must never yield an OK-looking prompt.
+  const objective = resolveObjective(handoff);
+  let scope;
+  try { scope = taskScopeFromProject(project); } catch (error) { return promptFailure(`.agentos/project.yaml ${error.message}`); }
+  if (objective.kind !== 'resolved') return promptFailure(objective.diagnostic);
+  const prompt = renderEnginePrompt({ engine, root, project, objective: objective.selected.text, tasks, scope });
   return { ok: true, engine, text: prompt };
+}
+
+function promptFailure(diagnostic) {
+  return { ok: false, text: `AgentOS prompt: NEEDS ATTENTION\n- ${diagnostic}\nNo prompt was generated. Fix the file above (see \`agentos doctor\`), then re-run.` };
+}
+
+function taskScopeFromProject(project) {
+  return validateTaskScope(parseProjectYaml(project).task_scope, parseReposFromProjectYaml(project, { includeRoot: true }));
 }
 
 async function compactAgentOSUnlocked(options: any = {}) {
@@ -1790,7 +1804,7 @@ async function agentsAgentOSUnlocked(options: any = {}) {
   if (!raw) throw new Error('agentos agents add requires an agent id or template file.');
   const dryRun = Boolean(options.dryRun);
   const id = normalizeAgentAlias(options.name || (isPathLike(raw) ? basename(raw, extname(raw)) : raw));
-  const content = await agentTemplateContent(raw, id);
+  const content = await agentTemplateContent(raw);
   validateAgentTemplate(content, id);
   const relPath = `.agentos/agents/${id}.md`;
   await assertCardReplacement(join(root, relPath), content, options.replace);
@@ -1830,7 +1844,7 @@ function listAgentTemplates(root) {
 async function assertCardReplacement(path: string, content: string, replace: boolean = false) {
   if (!replace && await exists(path) && await safeRead(path) !== content) throw new Error(`Existing card differs: ${path}. Review it and use --replace to overwrite local content.`);
 }
-async function agentTemplateContent(raw, id) {
+async function agentTemplateContent(raw) {
   if (isPathLike(raw)) return await readFile(resolve(raw), 'utf8');
   const agent = AGENT_DEFINITIONS[normalizeAgentAlias(raw)];
   if (!agent) throw new Error(`Unknown agent template: ${raw}. Run \`agentos agents list\`.`);
@@ -2355,23 +2369,9 @@ function renderRunHandoffStateUpdate({ engine, role, phase, repo, reason, handof
   ].join('\n'));
 }
 
-function sectionLines(section) {
-  return String(section || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-}
-
-function appendUniqueTask(lines, task) {
-  return lines.includes(task) ? lines : [...lines, task];
-}
-
 function slug(value) {
   const text = String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   return text || 'run';
-}
-
-function clipText(value, max) {
-  const text = String(value || '');
-  if (max <= 0) return '[diff truncated]';
-  return text.length > max ? `${text.slice(0, max).trimEnd()}\n[diff truncated]` : text;
 }
 
 export async function handoffAgentOS(options: any = {}) {
@@ -2518,6 +2518,7 @@ async function doctorAgentOSUnlocked(options: any = {}) {
     if (!/^name:/m.test(project)) problems.push('.agentos/project.yaml missing name');
     if (!/^workspace_kind:/m.test(project)) warnings.push('.agentos/project.yaml missing workspace_kind');
     if (!project.includes('- opencode')) warnings.push('.agentos/project.yaml engines.allowed does not list opencode');
+    try { taskScopeFromProject(project); } catch (error) { problems.push(`.agentos/project.yaml ${error.message}`); }
     await checkAgentAndSkillConfig(root, project, warnings);
     await checkLegacyCatalogState(root, project, warnings);
   }
@@ -2790,7 +2791,7 @@ async function checkGitState(root, repos, warnings, diagnostics) {
     const dirty = status.stdout.split(/\r?\n/).slice(1).filter(Boolean);
     const trackedDirty = dirty.filter((line) => !line.startsWith('??'));
     if (trackedDirty.length) warnings.push(`${repo.name} has tracked working-tree changes (${trackedDirty.length})`);
-    await checkUntrackedAdapters(abs, repo, dirty, warnings, diagnostics);
+    await checkUntrackedAdapters(repo, dirty, warnings, diagnostics);
     const upstream = await runGit(abs, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}']);
     if (!upstream.ok) {
       warnings.push(`${repo.name} branch ${branch.stdout || '(detached)'} has no upstream`);
@@ -2805,7 +2806,7 @@ async function checkGitState(root, repos, warnings, diagnostics) {
   }
 }
 
-async function checkUntrackedAdapters(abs, repo, dirty, warnings, diagnostics) {
+async function checkUntrackedAdapters(repo, dirty, warnings, diagnostics) {
   const adapters = dirty.filter((line) => /^\?\?\s+(.hermes\/|\.hermes\.md$|AGENTS\.md$|CLAUDE\.md$)/.test(line));
   if (adapters.length) {
     warnings.push(`${repo.name} has untracked AgentOS adapter files: ${adapters.map((line) => line.replace(/^\?\?\s+/, '')).join(', ')}`);
@@ -2852,13 +2853,6 @@ async function runCommand(command: string, args: string[], cwd?: string) {
   }
 }
 
-
-function assertRelativeBoundaryPath(value: string) {
-  // Validate the original token, before normalizing away absolute/traversal syntax.
-  if (!value || value.includes('\0') || value.includes('\\') || value.startsWith('/') || /^[a-z]:/i.test(value) || value.split('/').includes('..')) {
-    throw new Error(`Unsafe boundary path; expected a workspace-relative path: ${value}`);
-  }
-}
 
 // Reject symlink components, including dangling links, before any mutation.
 // The selected root may itself be reached through an alias; anchor it once.
@@ -2926,7 +2920,7 @@ async function fixAgentOSAdapters(root, options: { allowAdopt?: boolean } = {}) 
   await mkdirTracked(join(root, '.agentos/agents'));
   await mkdirTracked(join(root, '.agentos/repos'));
   for (const repo of allRepos) await writeIfMissing(join(root, '.agentos/repos', `${repo.name}.md`), repoMd(repo));
-  await ensureProjectYamlEngine(projectPath, 'opencode');
+  // engines.allowed is the owner's preference: --fix never adds an engine (every generated default already listed opencode).
   await writeIfMissing(join(root, '.agentos/knowledge.md'), knowledgeMd());
   const agentSelection = await agentSelectionFromProject(project, allRepos, root);
   await ensureProjectYamlAgents(projectPath, agentSelection);
@@ -4156,17 +4150,6 @@ function agentMd(agent) {
 function repoMd(repo) { return `# ${title(repo.name)} Repo\n\nPath: \`${repo.path}\`; type: ${repo.type}; framework: ${repo.framework}; package manager: ${repo.packageManager}.\nCommands: dev=\`${repo.devCommand || repo.commands?.dev_command || 'unknown'}\`; build=\`${repo.buildCommand || repo.commands?.build_command || 'unknown'}\`; test=\`${repo.testCommand || repo.commands?.test_command || 'unknown'}\`${repo.testE2eCommand ? `; e2e=\`${repo.testE2eCommand}\`` : ''}${repo.generateCommand ? `; generate=\`${repo.generateCommand}\`` : ''}${repo.previewCommand ? `; preview=\`${repo.previewCommand}\`` : ''}.\nScope: edit only when task includes \`${repo.name}\`.\n`; }
 
 
-async function ensureProjectYamlEngine(path, engine) {
-  if (!await exists(path)) return;
-  const content = await readFile(path, 'utf8');
-  const patched = patchProjectYaml(content, (data) => {
-    data.engines = data.engines && typeof data.engines === 'object' ? data.engines : {};
-    data.engines.allowed = Array.isArray(data.engines.allowed) ? data.engines.allowed : [];
-    if (!data.engines.allowed.includes(engine)) data.engines.allowed.push(engine);
-  });
-  if (patched !== content) await writeFileAtomic(path, patched);
-}
-
 async function ensureProjectYamlAgents(path, agentSelection) {
   if (!await exists(path)) return;
   const content = await readFile(path, 'utf8');
@@ -4202,10 +4185,9 @@ function normalizeEngine(engine) {
   return value === 'generic' ? 'generic' : value;
 }
 
-function renderEnginePrompt({ engine, root, project, handoff, tasks }) {
+function renderEnginePrompt({ engine, root, project, objective, tasks, scope }) {
   const projectName = firstYamlValue(project, 'name') ?? basename(root);
   const workspaceKind = firstYamlValue(project, 'workspace_kind') ?? 'unknown';
-  const currentObjective = extractSection(handoff, 'Current objective') || '(none)';
   const now = extractSection(tasks, 'Now') || '(none)';
   const obsidianLine = obsidianPromptLine(project);
   return [
@@ -4216,7 +4198,12 @@ function renderEnginePrompt({ engine, root, project, handoff, tasks }) {
     obsidianLine,
     'Rules: declare role + scope before editing; edit only in scope; no secrets/.env/migrations/prod config without approval; no commit/push unless asked; verify; update handoff/tasks if state changes.',
     ...engineSpecificRules(engine),
-    `Current objective: ${oneLine(currentObjective)}`,
+    ...(scope ? [
+      `Repos (inventory, not permission): ${scope.repos.join('; ')}`,
+      `Read scope: ${scope.read.join(', ') || '(none)'}`,
+      `Edit scope: ${scope.edit.join(', ') || '(none; read-only task)'}. Do not edit anything outside it.`,
+    ] : []),
+    `Current objective: ${oneLine(objective)}`,
     `Now: ${oneLine(now)}`,
     'If a user task is included, perform only that task under these rules; otherwise wait for the task.',
   ].filter(Boolean).join('\n');
@@ -4487,7 +4474,6 @@ function oneLine(text, max = 700) {
   const compact = String(text).replace(/\s+/g, ' ').trim();
   return compact.length > max ? `${compact.slice(0, max - 1)}…` : compact;
 }
-function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 function safeId(s) { return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'project'; }
 
 // Two repository IDs that differ only in case or punctuation (`frontend_client`
@@ -4507,7 +4493,7 @@ function repoIdCollisions(ids: string[]): string[] {
     .map(([canonical, group]) => `Unsafe repository IDs collide after normalization: ${group.map((id) => `'${id}'`).join(', ')} all normalize to '${canonical}'; rename one of them by hand, then re-run.`);
 }
 function title(s) { return s.split('-').map((p) => p[0]?.toUpperCase() + p.slice(1)).join(' '); }
-function plannedFiles(mode, workspaceKind, repos) { return [...REQUIRED_FILES, '.agentos/skills.md', '.agentos/runs/README.md', '.hermes.md', ...(mode === 'new' ? ['.agentos/product.md', '.agentos/architecture.md'] : [])]; }
+function plannedFiles(mode) { return [...REQUIRED_FILES, '.agentos/skills.md', '.agentos/runs/README.md', '.hermes.md', ...(mode === 'new' ? ['.agentos/product.md', '.agentos/architecture.md'] : [])]; }
 function renderDryRun({ cwd, mode, workspaceKind, repos, agentSelection }: any) {
   return `AgentOS dry run\nRoot: ${cwd}\nMode: ${mode}\nWorkspace: ${workspaceKind}\nAgents: ${agentSelection?.profile || 'detected'} (${agentSelection?.enabled?.join(', ') || 'unknown'})\nRepos:\n${repos.map((r) => `- ${r.name}: ${r.path}`).join('\n')}\nWould create/patch AgentOS context files. App source files would not be touched.`;
 }

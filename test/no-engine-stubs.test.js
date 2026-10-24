@@ -135,13 +135,13 @@ test('doctor --fix on a workspace without the stubs does not create them', async
   assert.equal(await exists(join(root, '.agentos/engines')), false);
 });
 
-test('doctor --fix still records opencode in project.yaml engines.allowed', async (t) => {
+test('doctor --fix respects an engines.allowed list without opencode', async (t) => {
   const root = await multiRepo(t);
   const projectPath = join(root, '.agentos/project.yaml');
   await writeFile(projectPath, (await readFile(projectPath, 'utf8')).replace(/ {4}- opencode\n/, ''));
   assert.doesNotMatch(await readFile(projectPath, 'utf8'), /- opencode/);
   await doctorAgentOS({ cwd: root, fix: true });
-  assert.match(await readFile(projectPath, 'utf8'), /- opencode/);
+  assert.doesNotMatch(await readFile(projectPath, 'utf8'), /- opencode/);
 });
 
 test('existing engine stubs are tolerated and left byte-identical by doctor and doctor --fix', async (t) => {

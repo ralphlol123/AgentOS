@@ -166,20 +166,14 @@ test('doctor --fix on a hand-formatted file that needs no change leaves project.
   assert.equal(await readFile(path, 'utf8'), text);
 });
 
-test('doctor --fix that must add opencode to engines.allowed changes only that line', async (t) => {
+test('doctor --fix never adds an engine the owner left out of engines.allowed (file byte-identical)', async (t) => {
   const { root, path, text } = await handFormatted(t);
   const without = text.replace(/ {4}- opencode\n/, '');
   assert.notEqual(without, text, 'fixture check: opencode was listed');
   await writeFile(path, without);
   const r = cli(['doctor', '--fix'], root);
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  const after = await readFile(path, 'utf8');
-  assert.match(after, /^# Owner notes: keep this file small\.$/m);
-  assert.match(after, /^name: .* +# product name$/m);
-  assert.match(after, /team: \{ lead: ralph, size: 2 \} +# flow style on purpose/);
-  assert.deepEqual(parseYaml(after).engines.allowed, parseYaml(text).engines.allowed.filter((e) => e !== 'opencode').concat('opencode'));
-  const addedLines = after.split('\n').filter((l) => !without.split('\n').includes(l));
-  assert.deepEqual(addedLines.map((l) => l.trim()), ['- opencode'], 'exactly one new line');
+  assert.equal(await readFile(path, 'utf8'), without);
 });
 
 test('agents add keeps comments and flow style in project.yaml', async (t) => {
