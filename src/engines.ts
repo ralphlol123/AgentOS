@@ -1,10 +1,10 @@
 /** Engine adapter contract and capability matrix (`agentos engines`, `agentos context <engine>`,
  *  `agentos agents sync <engine>`). See docs/engines.md.
  *
- * Every row is a claim about what AgentOS can make the engine do, with its evidence. Nothing here is `verified`:
- * no engine was run to observe it. Generated config (a `.claude/settings.local.json` fragment, an AGENTS.md role
- * block) is configuration, not evidence of enforcement. Rows move to `verified` only after a recorded trial
- * (docs/engines.md lists the commands and the observable result for each row).
+ * Every row is a claim about what AgentOS can make the engine do, with its evidence. `verified` means observed in a
+ * recorded engine trial (docs/evidence/2026-10-25-cross-engine/REPORT.md, n=1 per cell) and the evidence names the
+ * report section. Generated config alone (a `.claude/settings.local.json` fragment, an AGENTS.md role block) is
+ * configuration, not evidence of enforcement.
  */
 import type { ContextBundle } from './context-builder.js';
 import type { AgentManifest } from './agents.js';
@@ -13,7 +13,8 @@ export const CAPABILITY_ROWS = ['context_rendering', 'native_agent_config', 'too
 export const CAPABILITY_STATUSES = ['verified', 'advisory', 'unsupported', 'unverified'] as const;
 export type CapabilityRow = typeof CAPABILITY_ROWS[number];
 export type CapabilityStatus = typeof CAPABILITY_STATUSES[number];
-export type CapabilityMatrix = Record<CapabilityRow, { status: CapabilityStatus; evidence: string }>;
+/** `edit_scope` (permission_enforcement only): how far the verified enforcement covers the AgentOS edit scope. */
+export type CapabilityMatrix = Record<CapabilityRow, { status: CapabilityStatus; evidence: string; edit_scope?: string }>;
 
 export interface NativeConfigInput {
   role: string; manifest: AgentManifest; body: string;
@@ -21,6 +22,8 @@ export interface NativeConfigInput {
   edit: Array<{ path: string; dir: boolean }>;
   /** Workspace-relative directory whose AGENTS.md carries the role block (codex). */
   repoDir: string;
+  /** Repo and read-scope paths outside the edit scope (claude-code deny rules). */
+  outside?: Array<{ path: string; dir: boolean }>;
 }
 export interface NativeFile { path: string; content: string; merge: 'whole-file' | 'json-add-keys' | 'managed-block' }
 export interface EngineAdapter {
@@ -28,6 +31,8 @@ export interface EngineAdapter {
   render(context: ContextBundle): string;
   nativeConfig?(input: NativeConfigInput): NativeFile[];
   capabilities: CapabilityMatrix;
+  /** Printed by `agents sync <engine>`: what the user must know for the generated config to matter. */
+  syncNote?: string;
 }
 
 const NO_LAUNCH = 'AgentOS does not start engines (there is no `agentos run`); the user launches the engine.';
@@ -38,7 +43,11 @@ const row = (status: CapabilityStatus, evidence: string) => ({ status, evidence 
 const HARD_REQUIREMENTS: Array<[string, CapabilityRow]> = [['edit scope', 'permission_enforcement']];
 
 export function advisories(adapter: Pick<EngineAdapter, 'id' | 'capabilities'>) {
-  return HARD_REQUIREMENTS.filter(([, key]) => adapter.capabilities[key].status !== 'verified').map(([what]) => `ADVISORY: ${what} is instruction-only for ${adapter.id}`);
+  return HARD_REQUIREMENTS.flatMap(([what, key]) => {
+    const row = adapter.capabilities[key];
+    if (row.status !== 'verified') return [`ADVISORY: ${what} is instruction-only for ${adapter.id}`];
+    return row.edit_scope ? [`ADVISORY: ${what} is ${row.edit_scope}`] : [];
+  });
 }
 
 function renderWith(this: EngineAdapter, context: ContextBundle) {
@@ -57,12 +66,17 @@ function claudeAgentFile(input: NativeConfigInput): NativeFile {
   };
 }
 
-/** Proposed permission fragment. Claude Code checks file edits against `Edit(path)` rules only (Write(path) rules never
- *  match), `/path` is relative to the settings source, and deny rules win over allow rules. Unverified until trialled. */
-export function claudeSettingsFragment(edit: NativeConfigInput['edit']) {
-  if (!edit.length) return { permissions: { deny: ['Edit', 'Write', 'NotebookEdit'] } };
-  return { permissions: { allow: edit.map(({ path, dir }) => path === '.' ? 'Edit(/**)' : `Edit(/${path}${dir ? '/**' : ''})`) } };
+const WRITE_TOOLS = ['Edit', 'Write', 'NotebookEdit'];
+const claudePath = ({ path, dir }: { path: string; dir: boolean }) => path === '.' ? '/**' : `/${path}${dir ? '/**' : ''}`;
+/** Permission fragment. Allow rules alone do not restrict Claude Code and the file is ignored until the workspace is
+ *  trusted (trial T3a); deny rules in a trusted workspace do (T3b), and deny wins over allow. `/path` is relative to
+ *  the settings source. `outside` = repo and read paths outside the edit scope. */
+export function claudeSettingsFragment(edit: NativeConfigInput['edit'], outside: NativeConfigInput['outside'] = []) {
+  if (!edit.length) return { permissions: { deny: WRITE_TOOLS.map((tool) => `${tool}(/**)`) } };
+  const deny = outside.flatMap((entry) => WRITE_TOOLS.map((tool) => `${tool}(${claudePath(entry)})`));
+  return { permissions: { allow: edit.map((entry) => `Edit(${claudePath(entry)})`), ...(deny.length ? { deny } : {}) } };
 }
+export const CLAUDE_TRUST_NOTE = 'Claude Code ignores `.claude/settings.local.json` until the workspace is trusted; run `claude` interactively once or set `projects[<root>].hasTrustDialogAccepted` in ~/.claude.json.';
 
 function codexRoleBlock(input: NativeConfigInput): NativeFile {
   const { role, manifest, edit } = input;
@@ -79,32 +93,41 @@ function codexRoleBlock(input: NativeConfigInput): NativeFile {
   return { path: `${input.repoDir === '.' ? '' : `${input.repoDir}/`}AGENTS.md`, merge: 'managed-block', content: `${lines.join('\n')}\n` };
 }
 
-const advisoryContext = (bootloader: string) => row('advisory', `Rendered as text (${bootloader} + \`agentos context\`); the engine may ignore instructions.`);
+const REPORT = 'docs/evidence/2026-10-25-cross-engine/REPORT.md';
+const advisoryContext = (bootloader: string, trialled = false) => row('advisory', `Rendered as text (${bootloader} + \`agentos context\`); the engine may ignore instructions.${trialled ? ` In the 2026-10-25 trial it followed the scope instructions, unenforced (${REPORT}#T1, T2, n=1).` : ''}`);
 const notGenerated = (engine: string) => row('unsupported', `AgentOS generates no native ${engine} agent config.`);
 const instructionOnly = row('unsupported', 'No enforcement wiring for this engine; edit scope and tool rules are instruction text only.');
 
 const ADAPTERS: EngineAdapter[] = [
   {
     id: 'claude-code', render: renderWith, capabilities: {
-      context_rendering: advisoryContext('CLAUDE.md'),
-      native_agent_config: row('unverified', '`agentos agents sync claude-code` writes .claude/agents/<id>.md; not yet observed being loaded by Claude Code in a recorded trial.'),
-      tool_restrictions: row('unverified', 'Manifest tools_requested becomes the subagent `tools:` list; not trialled.'),
-      permission_enforcement: row('unverified', '`agents sync claude-code` proposes .claude/settings.local.json Edit(...) allow rules (deny Edit/Write for read-only roles); Claude Code\'s permission system is designed to enforce them, but no trial has observed an out-of-scope edit being refused.'),
+      context_rendering: advisoryContext('CLAUDE.md', true),
+      native_agent_config: row('unverified', `\`agentos agents sync claude-code\` writes .claude/agents/<id>.md; the 2026-10-25 trial did not observe Claude Code loading it (${REPORT}).`),
+      tool_restrictions: row('verified', `Verified (launch-time --allowedTools; see T1/T2): \`claude -p --allowedTools Read,Edit,Write,Bash(node:*),Bash(cd:*)\` blocked Bash git in Claude Code 2.1.310 (${REPORT}#T1, n=1). AgentOS passes no launch flags; the manifest tools_requested -> subagent tools: list is not covered (native_agent_config unverified).`),
+      permission_enforcement: {
+        ...row('verified', `Verified for deny rules in a trusted workspace: with hasTrustDialogAccepted and permissions.deny [Edit(/api/**), Write(/api/**)], Claude Code 2.1.310 refused an edit under api/ and allowed web/ (${REPORT}#T3, T3b, n=1). Allow-only rules or an untrusted workspace do not restrict (T3a). \`agents sync claude-code\` writes deny rules for every repo/read path outside the edit scope.`),
+        edit_scope: 'enforced for claude-code only by the deny rules from `agentos agents sync claude-code` in a trusted workspace; otherwise instruction-only',
+      },
       launch: row('unsupported', NO_LAUNCH),
       native_session_resume: row('unsupported', NO_RESUME),
     },
-    nativeConfig: (input) => [claudeAgentFile(input), { path: '.claude/settings.local.json', merge: 'json-add-keys', content: `${JSON.stringify(claudeSettingsFragment(input.edit), null, 2)}\n` }],
+    nativeConfig: (input) => [claudeAgentFile(input), { path: '.claude/settings.local.json', merge: 'json-add-keys', content: `${JSON.stringify(claudeSettingsFragment(input.edit, input.outside), null, 2)}\n` }],
+    syncNote: CLAUDE_TRUST_NOTE,
   },
   {
     id: 'codex', render: renderWith, capabilities: {
-      context_rendering: advisoryContext('AGENTS.md'),
-      native_agent_config: row('unverified', '`agentos agents sync codex` writes a managed role block into the in-scope AGENTS.md; Codex reads AGENTS.md, but the role block has not been observed in a recorded trial.'),
+      context_rendering: advisoryContext('AGENTS.md', true),
+      native_agent_config: row('unverified', `\`agentos agents sync codex\` writes a managed role block into the in-scope AGENTS.md; Codex reads AGENTS.md, but the 2026-10-25 trial did not observe the role block being used (${REPORT}).`),
       tool_restrictions: row('unsupported', 'Codex has no per-tool allowlist that AgentOS writes; sandbox modes are launch-time flags (`--sandbox`), not file config AgentOS generates.'),
-      permission_enforcement: row('unverified', 'Only `codex exec --sandbox read-only|workspace-write` (launch-time, chosen by the user) can block writes, and only per working directory, not per AgentOS edit path; AgentOS passes no flags.'),
+      permission_enforcement: {
+        ...row('verified', `Verified (launch-time sandbox: --sandbox read-only refuses writes; per-path scope unsupported): \`codex exec --sandbox read-only\` refused an append to api/contracts/openapi.yaml with "Read-only file system" in Codex 0.156.1 (${REPORT}#T4, n=1). The user picks the sandbox at launch; AgentOS passes no flags and workspace-write cannot express AgentOS edit paths.`),
+        edit_scope: 'instruction-only per path for codex (only the launch-time sandbox is enforced; --sandbox read-only refuses every write)',
+      },
       launch: row('unsupported', NO_LAUNCH),
       native_session_resume: row('unsupported', NO_RESUME),
     },
     nativeConfig: (input) => [codexRoleBlock(input)],
+    syncNote: 'advisory: Codex enforces only its launch-time sandbox (`codex exec --sandbox read-only|workspace-write`); the role block and edit scope are instructions.',
   },
   {
     id: 'opencode', render: renderWith, capabilities: {
@@ -132,10 +155,13 @@ export const engineAdapter = (engine: string): EngineAdapter => ENGINE_ADAPTERS[
 export function enginesReport(options: { json?: boolean } = {}) {
   const matrix = Object.fromEntries(ADAPTERS.map((adapter) => [adapter.id, adapter.capabilities]));
   if (options.json) return { ok: true, matrix, text: JSON.stringify({ ok: true, rows: CAPABILITY_ROWS, matrix }, null, 2) };
-  const lines = ['AgentOS engine capability matrix', `Statuses: ${CAPABILITY_STATUSES.join(' | ')}. No row is verified until a recorded engine trial (docs/engines.md).`, ''];
+  const lines = ['AgentOS engine capability matrix', `Statuses: ${CAPABILITY_STATUSES.join(' | ')}. verified = observed in a recorded engine trial (${REPORT}, n=1 per cell; docs/engines.md).`, ''];
   for (const adapter of ADAPTERS) {
     lines.push(`${adapter.id}:`);
-    for (const key of CAPABILITY_ROWS) lines.push(`  ${key.padEnd(22)} ${adapter.capabilities[key].status.padEnd(11)} ${adapter.capabilities[key].evidence}`);
+    for (const key of CAPABILITY_ROWS) {
+      const cell = adapter.capabilities[key];
+      lines.push(`  ${key.padEnd(22)} ${cell.status.padEnd(11)} ${cell.evidence}`, ...(cell.edit_scope ? [`  ${''.padEnd(34)} edit scope: ${cell.edit_scope}`] : []));
+    }
     lines.push('');
   }
   return { ok: true, matrix, text: lines.join('\n').trimEnd() };

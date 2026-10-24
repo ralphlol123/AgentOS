@@ -38,6 +38,8 @@ export interface Receipt {
 }
 export interface RepoState {
   name: string; path: string; worktree: string; available: boolean; reason?: string;
+  /** Set when the repo path is a directory inside an enclosing git work tree (HEAD/branch are the enclosing repo's). */
+  state?: 'enclosing-worktree';
   branch: string | null; head: string | null; fingerprint: string | null; changed_paths: string[]; omitted_paths: number;
 }
 export interface Checkpoint {
@@ -83,26 +85,37 @@ export function resolveTask(task: string | undefined, objective: { text: string 
 // --- git state ------------------------------------------------------------------------------------
 
 /** Branch, HEAD and working-tree fingerprint for one repo. Paths under `.agentos/` are AgentOS state (checkpoint
- *  writes them), not engine work, so they are left out of the fingerprint and the changed paths. */
+ *  writes them), not engine work, so they are left out of the fingerprint and the changed paths.
+ *  A repo path that is a directory inside an enclosing work tree (web/ in a root repo) uses that work tree, limited
+ *  to the directory by pathspec; its changed paths are relative to the directory and `state` is `enclosing-worktree`. */
 export async function repoState(root: string, repo: { name: string; path: string }, excluded: string[]): Promise<RepoState> {
   const worktree = resolve(root, repo.path);
   const base = { name: repo.name, path: posix(repo.path), worktree, branch: null, head: null, fingerprint: null, changed_paths: [], omitted_paths: 0 };
   if (!await exists(worktree)) return { ...base, available: false, reason: 'path does not exist' };
   const top = await runReadOnlyGit(worktree, ['rev-parse', '--show-toplevel']);
-  if (!top.ok || await realpath(top.stdout.trim()).catch(() => '') !== await realpath(worktree)) return { ...base, available: false, reason: 'not the top of a git work tree' };
+  if (!top.ok) return { ...base, available: false, reason: 'not inside a git work tree' };
+  const topDir = top.stdout.trim();
+  let prefix = '';
+  if (await realpath(topDir).catch(() => '') !== await realpath(worktree)) {
+    const show = await runReadOnlyGit(worktree, ['rev-parse', '--show-prefix']);
+    prefix = show.ok ? show.stdout.trim().replace(/\/+$/, '') : '';
+    if (!prefix) return { ...base, available: false, reason: 'git work tree prefix could not be resolved' };
+  }
+  const cwd = prefix ? topDir : worktree;
   const [head, branch, numstat, git] = await Promise.all([
-    runReadOnlyGit(worktree, ['rev-parse', 'HEAD']),
-    runReadOnlyGit(worktree, ['rev-parse', '--abbrev-ref', 'HEAD']),
-    runReadOnlyGit(worktree, ['diff', '--no-ext-diff', '--no-textconv', '--numstat', 'HEAD']),
-    collectRunHandoffGitState(worktree, excluded),
+    runReadOnlyGit(cwd, ['rev-parse', 'HEAD']),
+    runReadOnlyGit(cwd, ['rev-parse', '--abbrev-ref', 'HEAD']),
+    runReadOnlyGit(cwd, prefix ? ['--literal-pathspecs', 'diff', '--no-ext-diff', '--no-textconv', '--numstat', 'HEAD', '--', prefix] : ['diff', '--no-ext-diff', '--no-textconv', '--numstat', 'HEAD']),
+    collectRunHandoffGitState(cwd, excluded, prefix || undefined),
   ]);
+  const rel = (path: string) => prefix && path.startsWith(`${prefix}/`) ? path.slice(prefix.length + 1) : path;
   const state = (path: string) => !(path === '.agentos' || path.startsWith('.agentos/'));
   const statusLines = git.status.split('\n').filter((line) => !line.startsWith('##') && !/^.{3}"\.agentos[/"]/.test(line));
   const numstatLines = (numstat.ok ? numstat.stdout : '').split('\n').filter((line) => line && state(line.split('\t').slice(2).join('\t')));
-  const changed = git.changedFiles.filter(state).sort();
-  const omitted = new Set(git.omittedFiles);
+  const omitted = new Set(git.omittedFiles.map(rel));
+  const changed = git.changedFiles.map(rel).filter(state).sort();
   return {
-    ...base, available: true,
+    ...base, available: true, ...(prefix ? { state: 'enclosing-worktree' as const } : {}),
     branch: branch.ok ? branch.stdout.trim() : null,
     head: head.ok ? head.stdout.trim() : null,
     // sha256 over porcelain status (staged, unstaged, untracked), changed names and per-file line counts
@@ -217,7 +230,7 @@ export async function buildRecord(ctx: CheckpointContext, options: CheckpointOpt
 // --- handoff.md managed section ---------------------------------------------------------------------
 
 function repoLine(repos: RepoState[]) {
-  return oneLine(repos.map((repo) => repo.available ? `${repo.name} ${repo.branch ?? '?'}@${repo.head?.slice(0, 7) ?? '(no commits)'} (${repo.changed_paths.length + repo.omitted_paths} changed)` : `${repo.name} unavailable`).join('; ') || '(none)', 600);
+  return oneLine(repos.map((repo) => repo.available ? `${repo.name}${repo.state ? ' (enclosing work tree)' : ''} ${repo.branch ?? '?'}@${repo.head?.slice(0, 7) ?? '(no commits)'} (${repo.changed_paths.length + repo.omitted_paths} changed)` : `${repo.name} unavailable`).join('; ') || '(none)', 600);
 }
 
 export function summaryLines(record: Checkpoint, recordPath: string) {

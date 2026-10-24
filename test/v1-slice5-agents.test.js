@@ -302,13 +302,14 @@ test('agentos engines --json: five engines, exactly the six rows each, statuses 
   for (const [engine, matrix] of Object.entries(out.matrix)) {
     assert.deepEqual(Object.keys(matrix), rows, engine);
     for (const [key, value] of Object.entries(matrix)) {
-      assert.deepEqual(Object.keys(value), ['status', 'evidence']);
+      assert.deepEqual(Object.keys(value), value.edit_scope ? ['status', 'evidence', 'edit_scope'] : ['status', 'evidence']);
       assert.ok(['verified', 'advisory', 'unsupported', 'unverified'].includes(value.status), `${engine}.${key}`);
-      assert.notEqual(value.status, 'verified', `${engine}.${key} must not claim verified without a trial`);
+      // slice 7: verified only with a recorded trial section (test/v1-slice7.test.js pins the exact rows)
+      if (value.status === 'verified') assert.match(value.evidence, /REPORT\.md#T\d/, `${engine}.${key} must name its trial`);
       assert.ok(value.evidence.length > 20, `${engine}.${key} has evidence text`);
     }
   }
-  assert.equal(out.matrix['claude-code'].permission_enforcement.status, 'unverified');
+  assert.equal(out.matrix['claude-code'].permission_enforcement.status, 'verified');
   assert.equal(out.matrix['claude-code'].context_rendering.status, 'advisory');
   assert.match(out.matrix.codex.tool_restrictions.evidence, /launch-time/);
   const docs = await readFile(resolve('docs/engines.md'), 'utf8');
@@ -319,19 +320,23 @@ test('agentos engines --json: five engines, exactly the six rows each, statuses 
 
 test('context prints one ADVISORY line per unenforced hard requirement; --require-enforcement exits 1 UNSUPPORTED for every engine today', async (t) => {
   const { root } = await workspace(t);
+  const advisory = {
+    'claude-code': 'edit scope is enforced for claude-code only by the deny rules from `agentos agents sync claude-code` in a trusted workspace; otherwise instruction-only',
+    codex: 'edit scope is instruction-only per path for codex (only the launch-time sandbox is enforced; --sandbox read-only refuses every write)',
+  };
   for (const engine of ['claude-code', 'codex', 'opencode', 'hermes', 'generic']) {
     const r = cli(['context', engine, '--task', 'settings page'], root);
     ok(r);
     assert.equal(r.stdout.split('\n').filter((line) => line.startsWith('ADVISORY:')).length, 1);
-    assert.match(r.stdout, new RegExp(`^ADVISORY: edit scope is instruction-only for ${engine}$`, 'm'));
+    assert.ok(r.stdout.split('\n').includes(`ADVISORY: ${advisory[engine] ?? `edit scope is instruction-only for ${engine}`}`), r.stdout);
     const strict = cli(['context', engine, '--task', 'settings page', '--require-enforcement'], root);
     fails(strict);
     assert.match(strict.stdout, /^AgentOS context: UNSUPPORTED/);
-    assert.match(strict.stdout, /permission_enforcement is (unverified|unsupported)/);
+    assert.match(strict.stdout, /permission_enforcement is (unverified|unsupported|verified for \S+ only conditionally)/);
     assert.doesNotMatch(strict.stdout, /## Objective/);
   }
-  const { out } = json(['context', 'codex', '--task', 'settings page'], root);
-  assert.deepEqual(out.advisories, ['ADVISORY: edit scope is instruction-only for codex']);
+  const { out } = json(['context', 'opencode', '--task', 'settings page'], root);
+  assert.deepEqual(out.advisories, ['ADVISORY: edit scope is instruction-only for opencode']);
 });
 
 test('agents sync claude-code: dry run writes nothing; sync writes the subagent and an add-keys-only settings fragment; conflicting values refuse with zero writes', async (t) => {
@@ -346,7 +351,7 @@ test('agents sync claude-code: dry run writes nothing; sync writes the subagent 
   ok(dry);
   assert.match(dry.stdout, /Would create: \.claude\/agents\/developer\.md/);
   assert.match(dry.stdout, /Edit\(\/web\/\*\*\)/);
-  assert.match(dry.stdout, /not proof of enforcement: permission_enforcement is unverified/);
+  assert.match(dry.stdout, /not proof of enforcement on its own: permission_enforcement is verified for claude-code; edit scope is enforced for claude-code only by the deny rules/);
   assert.deepEqual(await snapshot(root), before, 'dry run writes nothing');
 
   await mkdir(join(root, '.claude'));
@@ -356,7 +361,7 @@ test('agents sync claude-code: dry run writes nothing; sync writes the subagent 
   assert.match(agent, /^---\nname: developer\ndescription: "Implement scoped changes/);
   assert.ok(agent.includes(bodyOf(await read(root, '.agentos/agents/developer.md')).replace(/^\n+/, '')), 'agent file carries the card body');
   const settings = JSON.parse(await read(root, '.claude/settings.local.json'));
-  assert.deepEqual(settings, { model: 'opus', permissions: { ask: ['Bash'], allow: ['Edit(/web/**)'] } }, 'existing keys kept, only new keys added');
+  assert.deepEqual(settings, { model: 'opus', permissions: { ask: ['Bash'], allow: ['Edit(/web/**)'], deny: ['Edit(/backend/**)', 'Write(/backend/**)', 'NotebookEdit(/backend/**)'] } }, 'existing keys kept, only new keys added');
   const synced = await snapshot(root);
   ok(cli(['agents', 'sync', 'claude-code'], root));
   assert.deepEqual(await snapshot(root), synced, 're-sync is a no-op');
@@ -375,7 +380,7 @@ test('agents sync claude-code: dry run writes nothing; sync writes the subagent 
   await rm(join(root, '.claude'), { recursive: true });
   ok(cli(['agents', 'add', 'reviewer', '--replace'], root));
   ok(cli(['agents', 'sync', 'claude-code', '--role', 'reviewer'], root));
-  assert.deepEqual(JSON.parse(await read(root, '.claude/settings.local.json')), { permissions: { deny: ['Edit', 'Write', 'NotebookEdit'] } });
+  assert.deepEqual(JSON.parse(await read(root, '.claude/settings.local.json')), { permissions: { deny: ['Edit(/**)', 'Write(/**)', 'NotebookEdit(/**)'] } });
 });
 
 test('agents sync codex writes a managed role block into the in-scope repo AGENTS.md; bytes outside it and doctor stay intact', async (t) => {

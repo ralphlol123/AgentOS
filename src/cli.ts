@@ -265,7 +265,8 @@ async function main() {
     }
     if (command === 'checkpoint') {
       const { positionals, checks, claims } = parseFlagsAndPositionals(args);
-      const [sub, id] = positionals;
+      // A bare `.` (habit from `git add .`) means "this workspace"; checkpoint always covers it.
+      const [sub, id] = positionals.filter((value) => value !== '.');
       if (sub && sub !== 'list' && sub !== 'show') {
         console.log(CHECKPOINT_USAGE);
         process.exitCode = 1;

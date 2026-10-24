@@ -55,7 +55,9 @@ The record id is `<created_at with : and . as ->-<first 8 hex of sha256 of the r
 
 Per repo: sha256 over `git status --porcelain` (staged, unstaged and untracked, no branch line), the changed path names (`git diff --name-only`, `--cached`, and status), and `git diff --numstat HEAD` line counts. Git evidence comes from the same bounded collector as `agentos run handoff` (5 s and 1 MiB per git call), with its sensitive-path exclusions and `handoff.exclude_paths`: protected paths count in the fingerprint but are not listed in `changed_paths` (only `omitted_paths` counts them). Paths under `.agentos/` are AgentOS state, not engine work, and are left out, so a checkpoint's own writes are not drift. Limit: an edit that keeps a file's porcelain status and its added/removed line counts identical is not detected.
 
-A repo whose path is missing, or is not the top of a git work tree, is `available: false` with a `reason`.
+A repo path that is a directory inside an enclosing git work tree (for example `web/` and `api/` in a root repo — the layout of the 2026-10-25 engine trial) uses that work tree: `branch` and `head` are the enclosing repo's, every git call is limited to the directory by pathspec (`git status --porcelain -- web`, `git diff --name-only [--cached] -- web`, `git diff --numstat HEAD -- web`), `changed_paths` are relative to the directory, and the repo entry carries `state: "enclosing-worktree"` (the handoff line says `(enclosing work tree)`). Drift in `web/` therefore flags only `web`; a commit moves the shared HEAD, so every directory of that work tree reports `head_moved`. The sensitive-path exclusions and bounds are the same.
+
+A repo whose path is missing, or is not inside any git work tree, is `available: false` with a `reason`.
 
 ## Receipts
 

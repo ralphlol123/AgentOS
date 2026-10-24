@@ -1960,14 +1960,17 @@ async function syncAgentsUnlocked(root: string, options: any) {
   const card = parseAgentCard(role, await safeRead(join(root, '.agentos/agents', `${role}.md`)));
   if (!card.manifest) return { ok: false, text: `AgentOS agents sync: REFUSED\n.agentos/agents/${role}.md has ${card.state === 'invalid' ? 'an invalid manifest' : 'no manifest'}; native config is generated from the manifest. Run \`agentos agents manifest ${role} --from-catalog\` (or --custom) first.\nNothing was written.` };
   const repoPath = (entry: string) => (input.repos.find((repo) => repo.name === entry)?.path ?? entry).replace(/^\.\/(?=.)/, '').replace(/\/+$/, '') || '.';
-  const edit = [];
-  for (const entry of bundle.scope.edit) {
-    const path = repoPath(entry);
-    edit.push({ path, dir: path === '.' || (await stat(join(root, path)).then((info) => info.isDirectory()).catch(() => true)) });
-  }
+  const entry = async (path: string) => ({ path, dir: path === '.' || (await stat(join(root, path)).then((info) => info.isDirectory()).catch(() => true)) });
+  const edit = await Promise.all(bundle.scope.edit.map((scope) => entry(repoPath(scope))));
   const childRepos = input.repos.map((repo) => repoPath(repo.name)).filter((path) => path !== '.');
   const owners = [...new Set(edit.map(({ path }) => childRepos.find((repo) => path === repo || path.startsWith(`${repo}/`)) ?? '.'))];
-  const files = adapter.nativeConfig({ role, manifest: card.manifest, body: card.body, edit, repoDir: owners.length === 1 ? owners[0] : '.' });
+  // Paths outside the edit scope: every repo and read path not covered by an edit path. A path that *contains* an
+  // edit path is skipped too (deny wins over allow in Claude Code, so denying it would block the edit scope).
+  // ponytail: siblings of a nested edit path (web/ when only web/src is editable) stay undenied; add per-child denies if it matters.
+  const within = (path: string, base: string) => base === '.' || path === base || path.startsWith(`${base}/`);
+  const outsidePaths = [...new Set([...childRepos, ...bundle.scope.read.map(repoPath)])].filter((path) => path !== '.' && !edit.some((e) => within(path, e.path) || within(e.path, path))).sort();
+  const outside = await Promise.all(outsidePaths.map(entry));
+  const files = adapter.nativeConfig({ role, manifest: card.manifest, body: card.body, edit, outside, repoDir: owners.length === 1 ? owners[0] : '.' });
   const plans = [];
   const conflicts = [];
   for (const file of files) {
@@ -1996,7 +1999,8 @@ async function syncAgentsUnlocked(root: string, options: any) {
     plans.push({ path: file.path, abs, next, action: current === null ? 'create' : next === current ? 'unchanged' : 'update' });
   }
   const head = [`AgentOS agents sync ${engine}${options.dryRun ? ' dry run' : ''}`, `Role: ${role}; edit scope: ${bundle.scope.edit.join(', ') || '(none; read-only)'}`];
-  const caveat = `Generated configuration is not proof of enforcement: permission_enforcement is ${adapter.capabilities.permission_enforcement.status} for ${engine} (agentos engines).`;
+  const enforcement = adapter.capabilities.permission_enforcement;
+  const caveat = [`Generated configuration is not proof of enforcement on its own: permission_enforcement is ${enforcement.status} for ${engine}${enforcement.edit_scope ? `; edit scope is ${enforcement.edit_scope}` : ''} (agentos engines).`, ...(adapter.syncNote ? [adapter.syncNote] : [])].join('\n');
   if (conflicts.length) return { ok: false, conflicts, text: [...head, 'REFUSED (existing values conflict; add-keys-only):', ...conflicts.map((c) => `- ${c}`), 'Nothing was written.'].join('\n') };
   if (!options.dryRun) {
     await withMutationTransaction(async () => {
@@ -4418,8 +4422,10 @@ export async function contextAgentOS(options: any = {}) {
   const engine = normalizeEngine(options.engine ?? 'generic');
   const adapter = engineAdapter(engine);
   const enforcement = adapter.capabilities.permission_enforcement;
-  if (options.requireEnforcement && enforcement.status !== 'verified') {
-    return { ok: false, text: `AgentOS context: UNSUPPORTED\n--require-enforcement: permission_enforcement is ${enforcement.status} for ${engine}. ${enforcement.evidence}\nNo context was rendered. Without the flag, the edit scope is delivered as instructions only (see \`agentos engines\`).` };
+  // Conditional enforcement (claude-code deny rules + trust, codex launch-time sandbox) cannot be confirmed from here.
+  if (options.requireEnforcement && (enforcement.status !== 'verified' || enforcement.edit_scope)) {
+    const why = enforcement.status !== 'verified' ? `permission_enforcement is ${enforcement.status} for ${engine}. ${enforcement.evidence}` : `permission_enforcement is verified for ${engine} only conditionally: edit scope is ${enforcement.edit_scope}. AgentOS cannot confirm that condition here.`;
+    return { ok: false, text: `AgentOS context: UNSUPPORTED\n--require-enforcement: ${why}\nNo context was rendered. Without the flag, the edit scope is delivered as instructions only (see \`agentos engines\`).` };
   }
   const input = await contextInputFor(root, engine, options);
   const objective = resolveObjective(await safeRead(join(root, '.agentos/handoff.md')));

@@ -1,0 +1,13 @@
+Added `farewell(name)` and its test. Both test commands passed; no commit made. The checkpoint records `npm run test` as not-run despite the separate successful run.
+
+```text
+AgentOS checkpoint
+Task: greeting (from --task)
+Wrote: .agentos/checkpoints/greeting/2026-10-24T21-16-51-443Z-c1e4c547.json
+Updated: .agentos/checkpoints/greeting/current.json, .agentos/handoff.md (## Checkpoint (managed))
+Repos: api unavailable; web unavailable
+Receipts: observed-pass 1, observed-fail 0, claimed 0, not-run 1, unavailable 0
+- observed-pass: `node test.js` (cwd web, exit 0, evidence .agentos/checkpoints/greeting/evidence/26e47a491e728295.log)
+- not-run: `npm run test` (cwd web, declared web.test_command)
+One active writer per workspace; concurrent engines are not supported.
+```
