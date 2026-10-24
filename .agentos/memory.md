@@ -8,7 +8,7 @@ Stable project facts only. Do not dump execution logs here.
 - AgentOS reads/writes `.agentos/project.yaml` with the `yaml` package; avoid regex/string-splice YAML parsing for project config changes.
 - Core rule: one AgentOS per product/workspace; many repos inside it; each task declares repo scope.
 - Obsidian integration is link-only: create/link specific notes through `.agentos/knowledge.md`; never bulk-load the vault.
-- Current command surface (`agentos help`): `init`, `status`, `handoff`, `run`, `doctor`, `adapters`, `compact`, `link-obsidian`, `obsidian`, `skills`, `agents`, `templates`, `migrate`, `prompt`, `context`, `help`, `version`.
+- Current command surface (`agentos help`): `init`, `status`, `handoff`, `run`, `doctor`, `adapters`, `compact`, `link-obsidian`, `obsidian`, `skills`, `agents`, `templates`, `migrate`, `prompt`, `context`, `checkpoint`, `resume`, `help`, `version`.
 - `doctor --fix` never edits `engines.allowed`; the engine list is the owner's choice. Optional `task_scope: {read, edit}` in project.yaml separates read from edit permission; `repos:` is inventory only.
 - Release readiness uses `bun run release:check` plus `bun run publish:dry-run`; real `npm publish` still requires confirmed npm account/package ownership/version.
 - AgentOS dogfoods itself in this repo before Photobooth rollout.

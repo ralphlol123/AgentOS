@@ -11,14 +11,49 @@ Deliver a working v1 of the five AgentOS priorities — context builder, checkpo
 | # | Slice | Status |
 |---|---|---|
 | 1 | Baseline, review findings, correctness fixes + cleanup (section A) | Done; reviewed, pushed to `origin/feat/v1-cleanup` (`78638c0`), PR #46 open, not merged |
-| 2 | Context builder (`agentos context`, section B) | Done on `feat/v1-context` (stacked on `feat/v1-cleanup`), awaiting review; not pushed |
-| 3 | Checkpoints | Next |
-| 4 | Managed Project Brain | Not started |
+| 2 | Context builder (`agentos context`, section B) | Done; reviewed, pushed to `origin/feat/v1-context` (`ca527fb`), PR #47 (stacked on #46), not merged |
+| 3 | Checkpoints and resume (section C) | Done on `feat/v1-checkpoint` (stacked on `feat/v1-context`), awaiting review; not pushed |
+| 4 | Managed Project Brain | Next |
 | 5 | Agent management | Not started |
 | 6 | Optional Obsidian | Not started |
 | 7 | v1 end-to-end validation (title assumed; confirm against the slice 7 card) | Not started |
 
-**Next exact action: slice 3, checkpoints** (after slice 2 review). Slice 2 left `buildContextBundle()` / `assertContextBundle()` (`src/context-builder.ts`) for any later slice that needs task context.
+**Next exact action: slice 4, managed Project Brain** (after slice 3 review). Slice 2 left `buildContextBundle()` / `assertContextBundle()` (`src/context-builder.ts`); slice 3 left `assertCheckpoint()`, `loadCurrent()` and `workspaceState()` (`src/checkpoint.ts`) for later slices.
+
+## Slice 3 — checkpoints and resume
+
+`agentos checkpoint [--task] [--engine] [--role] [--progress] [--blocker] [--next] [--check "<cmd>" [--cwd <dir>]]... [--claim]... [--json] [--dry-run]`, `checkpoint --recover`, `checkpoint list|show`, `agentos resume [--task] [--engine] [--json]`. Module `src/checkpoint.ts`; `core.ts` gained wiring (`checkpointAgentOS`, `resumeAgentOS`, `checkpointContextFor`, the doctor check), exports of four existing write/marker helpers, and `contextInputFor` extracted from `contextAgentOS` (context output unchanged except the new checkpoint record). Contract and limits: `docs/checkpoints.md`.
+
+Decisions taken in this slice (assumptions, revisit in review):
+
+- Task id = slug of `--task`, else slug of the first line of the resolved objective (the heading suffix when it carries text). Without either, `checkpoint` exits 1 and asks for `--task`.
+- The record id is `<ISO-ts>-<sha256(record body)[:8]>`: same content at the same millisecond is the same record and is refused. Records are linked into place from a temp file (`writeFileExclusiveAtomic`, link = no-clobber rename); `current.json` and `handoff.md` use `writeFileAtomic`; all inside one mutation transaction.
+- Fingerprint = sha256 over porcelain status (no branch line), changed names and `git diff --numstat HEAD`; `.agentos/` paths are excluded because the checkpoint writes there (a single-repo workspace that tracks `.agentos/` would otherwise always be drifted; regression test added).
+- `not-run` receipts come from declared `*build*|*test*|*check*|*lint*` commands of in-scope repos that no `--check` ran (and every check under `--dry-run`, which runs nothing).
+- `--check` runs via `execFile` without a shell (quoted argv split); spawn errors are `unavailable`, non-zero exits and timeouts (10 min) are `observed-fail`. Output is kept as a content-addressed log, last 32 KiB per stream.
+- Stale receipts (tested state ≠ current state) are listed under Remaining as `stale (recheck)`, even passes; only current passes count as accomplished.
+- Overall resume status: drifted > unavailable > clean. `incomplete` and `none` exit 1; `recovered` (no record, but run notes or changed files) exits 0 and writes nothing.
+- The handoff section uses its own markers (`<!-- agentos:checkpoint:start/end -->`) with the adapters' `locateManagedBlock` rules; it is inserted once at the end of the file and replaced in place afterwards.
+- `run_id` is `$AGENTOS_RUN_ID` or null (AgentOS has no run concept yet).
+
+## Slice 3 — acceptance evidence
+
+| Command | Where | Exit | Result |
+|---|---|---|---|
+| `npm test` | `feat/v1-checkpoint` start (= `ca527fb`) | 0 | 647 / 647 (slice 2 final) |
+| `node --test test/v1-slice3-checkpoint.test.js` (RED, no `checkpoint` command) | before implementation | 1 | 16 tests, 0 pass, 16 fail (`Unknown option: --progress`) |
+| same, record overwrite allowed in dist (item 3) | fault injection | 1 | 1 fail: immutability test |
+| same, missing `current.json` treated as "no checkpoint" (item 3) | fault injection | 1 | 1 fail: interruption test |
+| same, block appended instead of replaced (item 4) | fault injection | 1 | 1 fail: five-checkpoints section-size test |
+| same, stale flag disabled (item 5) | fault injection | 1 | 1 fail: drift test |
+| same, untracked files ignored by the fingerprint (item 5) | fault injection | 1 | 3 fail: record shape, recovery, drift |
+| same, `.agentos/` counted as drift (item 5) | fault injection | 1 | 1 fail: single-repo clean test |
+| `test/boundaries.test.js` symlinked-managed-target table with `.agentos/checkpoints` case, boundary check removed from dist | fault injection | 1 | 1 fail |
+| `npm run check` | final | 0 | |
+| `npm test` | final | 0 | 664 / 664 (647 + 17 in `test/v1-slice3-checkpoint.test.js`; boundaries case added to an existing test) |
+| `npm run smoke` | final | 0 | |
+| `node dist/cli.js doctor --json` | final | 0 | `"ok": true`, `problems: []` |
+| dogfood in a throwaway clone of this repo (`/tmp`): checkpoint with 2 checks + 1 claim, resume, edit README, resume, `compact`, checkpoint, doctor | `/tmp/cp-dogfood2` | 0 | clean → drifted (`new changed paths: README.md`, pass marked stale); 3 declared `bun run` commands listed `not-run`; after `compact` the next checkpoint still found and restored its block; doctor OK |
 
 ## Slice 2 — context builder
 
@@ -97,3 +132,11 @@ The developer sandbox has no `bun` on PATH (bun is installed on the host); every
 - Context builder: repo-in-scope is "a read entry covers the whole repo" (root repo special-cased); nested child repos would need a repo tree.
 - Deprecated migration writers: GATED (see finding 8).
 - `core.ts` is ~4.9k lines; extract only along slice boundaries as later slices touch it.
+- Checkpoints: concurrent writers are not supported (one writer lock per workspace; two engines checkpointing the same workspace serialize or fail on the lock).
+- Checkpoints: no crash-safe multi-file transaction. Per-file atomic writes plus in-process rollback only; a crash between the record and `current.json` is reported by `resume` as `incomplete`, not repaired.
+- Checkpoints: receipt evidence retention policy. Records and evidence logs accumulate under `.agentos/checkpoints/`; nothing prunes or archives them, and they are not gitignored by default.
+- Checkpoints: the fingerprint misses an edit that keeps a file's status and its added/removed line counts identical; hashing diff content would close it at a cost.
+- Checkpoints: `agentos compact` treats `## Checkpoint (managed)` as an unclassified section and demotes it under `## Preserved context` (markers kept); the next checkpoint restores it. Teach compact to leave the managed block alone.
+- Checkpoints: the start marker line sits at the end of the previous handoff section's body, so that section's text (e.g. in `agentos context`) ends with the marker comment. Cosmetic.
+- Checkpoints: `--check` has no shell (no pipes/`&&`); `execFile` of `npm` on Windows needs `npm.cmd`. Untested on Windows.
+- Checkpoints: `.agentos/guide.md` does not list `checkpoint`/`resume` yet (same generator constraint as `context`).

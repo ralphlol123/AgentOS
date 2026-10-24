@@ -12,7 +12,7 @@ These checks protect against existing unsafe paths, not concurrent filesystem re
 
 Every critical AgentOS text file — `.agentos/project.yaml`, `handoff.md`, `tasks.md`, `knowledge.md`, `skills.md`, managed agent/repo markdown, and root/child adapter files (`AGENTS.md`, `CLAUDE.md`, `.hermes.md`, child repo pointers) plus their `.agentos.bak` backups — is replaced through a single atomic-write primitive: the new content is written to a uniquely named temporary file in the *same directory* as the destination, flushed and fsync'd, closed, given the destination's existing file mode (or the OS default for a brand-new file), then renamed over the destination in one filesystem `rename()` call. `rename()` never follows a symlink at the destination — it replaces the link entry itself — and this primitive does not change Task 2's symlink/boundary checks, which still run before any of this. If the temp file can't be renamed (or any earlier step fails), the temp file is removed; no partial or zero-byte destination file is ever left behind.
 
-Commands that touch more than one output — `agentos init`, `doctor --fix`, `agentos obsidian link` / `link-workspace`, `agents add` and agent template copy, `skills add` / `skills remove` and skill template copy/import, `compact`, and `agentos run handoff` — run their entire write phase as one in-process mutation transaction. For `init`, that includes every filesystem mutation it makes, not just the adapter files: the `.agentos` scaffold directories and files, per-agent/engine/repo files, root/child adapters and their one-time backups, and child `.gitignore` blocks are all one transaction, so a fault partway through leaves the workspace exactly as it was before `init` ran. Before each write/create/remove, the transaction snapshots either the target's existing bytes and mode (if it already existed) or its topmost not-yet-existing ancestor directory (if it's new), so a brand-new nested folder can be removed as a whole on rollback. If any later step in the same command throws, every tracked path is restored to its pre-command bytes, mode, or absence, in reverse order, before the error is re-raised; dry-run and dependency/config validation still happen before any of this and are unaffected.
+Commands that touch more than one output — `agentos init`, `doctor --fix`, `agentos obsidian link` / `link-workspace`, `agents add` and agent template copy, `skills add` / `skills remove` and skill template copy/import, `compact`, `agentos run handoff`, and `agentos checkpoint` — run their entire write phase as one in-process mutation transaction. For `init`, that includes every filesystem mutation it makes, not just the adapter files: the `.agentos` scaffold directories and files, per-agent/engine/repo files, root/child adapters and their one-time backups, and child `.gitignore` blocks are all one transaction, so a fault partway through leaves the workspace exactly as it was before `init` ran. Before each write/create/remove, the transaction snapshots either the target's existing bytes and mode (if it already existed) or its topmost not-yet-existing ancestor directory (if it's new), so a brand-new nested folder can be removed as a whole on rollback. If any later step in the same command throws, every tracked path is restored to its pre-command bytes, mode, or absence, in reverse order, before the error is re-raised; dry-run and dependency/config validation still happen before any of this and are unaffected.
 
 Guarantees:
 
@@ -278,6 +278,11 @@ agentos templates import <url-or-file> --type agent|skill --name <id> [--mode su
 agentos migrate claude --preserve [--dry-run]
 agentos prompt [claude|codex|opencode|hermes]
 agentos context [claude|codex|opencode|hermes] [--task "<text>"] [--role <agent-id>] [--scope <repo-or-path>,...] [--budget <tokens>] [--json] [--include-superseded]
+agentos checkpoint [--task <id>] [--engine <e>] [--role <r>] [--progress "<text>"] [--blocker "<text>"] [--next "<text>"] [--check "<cmd>" [--cwd <dir>]]... [--claim "<text>"]... [--json] [--dry-run]
+agentos checkpoint --recover [--task <id>] [--dry-run]
+agentos checkpoint list [--task <id>] [--json]
+agentos checkpoint show <id> [--json]
+agentos resume [--task <id>] [--engine <e>] [--json]
 ```
 
 ## Task-specific context
@@ -295,6 +300,26 @@ agentos context codex --task "..." --json      # structured bundle only
 - Tokens are `estimate (chars/4)` plus a fixed per-engine overhead; default budget 24000. If the mandatory records alone exceed the budget, the command exits 1 with `overflow` and renders nothing. A missing objective also exits 1; a missing agent card or scope path is listed under `missing` as a warning; two current decisions with the same heading subject are listed under `conflicts`.
 
 Selection signals, budget numbers and the JSON shape: [`docs/context-builder.md`](docs/context-builder.md).
+
+## Checkpoints and resume
+
+`agentos checkpoint` records where a task stands; `agentos resume` reads it back against the repos as they are now, so the same or another engine can continue without restarting:
+
+```bash
+agentos checkpoint --task token-rotation --engine claude --progress "Endpoint drafted" --next "Wire the settings page" \
+  --check "npm run test" --cwd web --claim "manual login flow works"
+agentos resume --task token-rotation          # read-only
+agentos checkpoint --recover --task token-rotation   # the engine died without a summary
+```
+
+- Each checkpoint is an immutable JSON record (`agentos.checkpoint/1`) under `.agentos/checkpoints/<task>/`, plus a `current.json` pointer and one bounded `## Checkpoint (managed)` section in `.agentos/handoff.md` that is replaced in place, never appended. `tasks.md` is not touched.
+- Per repo it stores branch, HEAD and a working-tree fingerprint (staged, unstaged and untracked), using the same bounded, sensitive-path-aware git evidence as `run handoff`.
+- Verification receipts say exactly what is known: `observed-pass` / `observed-fail` (AgentOS ran the `--check`; output saved as evidence), `claimed` (`--claim`, engine-reported), `not-run` (declared build/test commands of in-scope repos nobody ran), `unavailable` (could not start). Each receipt records the state it tested.
+- `resume` reports `clean`, `drifted` (HEAD moved, fingerprint differs, new changed paths) or `unavailable`, lists what is accomplished (progress plus current passes) and what remains (next action, blockers, failed/claimed/not-run receipts, passes marked `stale (recheck)`), and prints the `agentos context <engine> --task <id>` line to run next. A missing pointer or damaged record is reported as `incomplete` with the files and error, never skipped.
+- `agentos context` includes the current checkpoint; `doctor` fails on a pointer to a missing or invalid record.
+- One active writer per workspace; concurrent engines are not supported. Each file is written atomically, but several files are not one crash-safe transaction.
+
+Schema, receipt vocabulary, reconciliation states and limits: [`docs/checkpoints.md`](docs/checkpoints.md).
 
 ## Compaction
 

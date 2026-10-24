@@ -54,6 +54,8 @@ export interface ContextInput {
   scope?: string;
   budget?: string | number;
   includeSuperseded?: boolean;
+  /** Current checkpoint summary for the task (`.agentos/checkpoints/<task>/current.json`), when one exists. */
+  checkpoint?: { source: string; text: string };
 }
 
 interface Candidate {
@@ -74,6 +76,13 @@ async function exists(path: string) { try { await stat(path); return true; } cat
 
 function roles(...titles: string[]): SectionRole[] { return titles.map((canonical) => ({ role: titles[0], canonical })); }
 function section(text: string, titles: SectionRole[]) { return recognizeSections(text, titles)[0]; }
+
+/** Acceptance criteria: `## Acceptance criteria` in tasks.md, else in handoff.md. */
+export function findAcceptance(tasks: string, handoff: string): { source: string; text: string } | null {
+  const inTasks = section(tasks, roles('Acceptance criteria'));
+  const found = inTasks ?? section(handoff, roles('Acceptance criteria'));
+  return found ? { source: `.agentos/${inTasks ? 'tasks' : 'handoff'}.md#${found.headingText}`, text: sectionText(found) || '(none recorded)' } : null;
+}
 
 export async function buildContextBundle(input: ContextInput): Promise<ContextBundle> {
   const { root, engine } = input;
@@ -177,11 +186,10 @@ export async function buildContextBundle(input: ContextInput): Promise<ContextBu
     warnings.push('no agent role selected');
   }
 
-  const tasksAcceptance = section(files['tasks.md'], roles('Acceptance criteria'));
-  const acceptance = tasksAcceptance ?? section(files['handoff.md'], roles('Acceptance criteria'));
+  const acceptance = findAcceptance(files['tasks.md'], files['handoff.md']);
   add({ id: 'acceptance', kind: 'acceptance', title: 'Acceptance criteria', always: true, fresh: mtimes['tasks.md'],
-    source: acceptance ? `.agentos/${tasksAcceptance ? 'tasks' : 'handoff'}.md#${acceptance.headingText}` : '(none recorded)',
-    text: acceptance ? sectionText(acceptance) || '(none recorded)' : '(none recorded)' });
+    source: acceptance?.source ?? '(none recorded)', text: acceptance?.text ?? '(none recorded)' });
+  if (input.checkpoint) add({ id: 'checkpoint', kind: 'checkpoint', title: 'Checkpoint', source: input.checkpoint.source, text: input.checkpoint.text, always: true, fresh: Date.now() });
   for (const [id, title, titles] of [['handoff:current-state', 'Current state', roles('Current state', 'Current status')], ['handoff:next-exact-action', 'Next exact action', roles('Next exact action', 'Next action', 'Next step')]] as const) {
     const found = section(files['handoff.md'], titles as SectionRole[]);
     if (found && sectionText(found)) add({ id, kind: 'handoff', title, source: handoffSource(found.headingText), text: sectionText(found), always: true, fresh: mtimes['handoff.md'] });

@@ -4,7 +4,8 @@ import { readImportSource } from './import-source.js';
 import { appendContextRecord, literalMarkdown, markdownHeadings, markdownSection } from './markdown.js';
 import { HANDOFF_ROLES, recognizeSections, resolveObjective, sectionText } from './context-sections.js';
 import { assertRelativeBoundaryPath, validateTaskScope } from './task-scope.js';
-import { buildContextBundle } from './context-builder.js';
+import { buildContextBundle, findAcceptance } from './context-builder.js';
+import { checkpointContextRecord, checkpointProblems, listCheckpoints, resolveTask, resumeCheckpoint, showCheckpoint, writeCheckpoint, type CheckpointContext } from './checkpoint.js';
 import { planCompactRewrite } from './compact-rewrite.js';
 import { STATE_SIZE_WARN_CHARS, largestSections, sectionSizes, tasksShapeWarnings } from './state-size.js';
 import { dumpYaml, patchProjectYaml } from './project-yaml-edit.js';
@@ -64,7 +65,7 @@ function currentMutationTransaction() {
   return mutationTransactionStorage.getStore();
 }
 
-async function withMutationTransaction(fn) {
+export async function withMutationTransaction(fn) {
   const tx = new MutationTransaction();
   try {
     return await mutationTransactionStorage.run(tx, fn);
@@ -156,7 +157,7 @@ async function restorePathSnapshot(path: string, snapshot: any) {
   for (const [name, child] of snapshot.children) await restorePathSnapshot(join(path, name), child);
 }
 
-async function mkdirTracked(path: string) {
+export async function mkdirTracked(path: string) {
   const tx = currentMutationTransaction();
   if (tx && !await exists(path)) await tx.track(path);
   return mkdir(path, { recursive: true });
@@ -177,7 +178,7 @@ async function removeTracked(path: string) {
 // call's link wins and its bytes/mode land exactly, or it loses and the file
 // that's already there (written by an earlier or concurrent caller) is left
 // completely untouched. The temp file is always removed either way.
-async function writeFileExclusiveAtomic(path: string, content: Buffer, mode?: number): Promise<{ created: boolean }> {
+export async function writeFileExclusiveAtomic(path: string, content: Buffer, mode?: number): Promise<{ created: boolean }> {
   const tx = currentMutationTransaction();
   if (tx) await tx.track(path);
   const tmpPath = uniqueTempPath(dirname(path), basename(path));
@@ -404,7 +405,7 @@ function parseFenceMarker(line: string): { char: string; length: number; rest: s
 // is delimited) is never treated as forming or extending an owned block; its
 // presence always makes the file ambiguous rather than silently ignored or
 // trusted.
-function locateManagedBlock(content: string, markerStart = MANAGED_BLOCK_START, markerEnd = MANAGED_BLOCK_END) {
+export function locateManagedBlock(content: string, markerStart = MANAGED_BLOCK_START, markerEnd = MANAGED_BLOCK_END) {
   const starts: number[] = [];
   const ends: number[] = [];
   let embedded = false;
@@ -2618,6 +2619,7 @@ async function doctorAgentOSUnlocked(options: any = {}) {
   const diagnostics = [];
   for (const note of migrationNotes) diagnostics.push(`migrated: ${note}`);
   await checkTasksAndHandoff(root, problems, warnings, diagnostics);
+  problems.push(...await checkpointProblems(root));
   await checkRepoCommands(repos, warnings, diagnostics);
   await checkGitState(root, repos, warnings, diagnostics);
   await checkPorts(repos, warnings, diagnostics);
@@ -4198,23 +4200,32 @@ function promptHeaderLines(engine, root, project) {
   ];
 }
 
-/** `agentos context`: read-only wiring around src/context-builder.ts. */
-export async function contextAgentOS(options: any = {}) {
-  const root = await findAgentOSRoot(options.cwd ?? process.cwd());
-  if (!root) return { ok: false, text: 'AgentOS context: FAIL\nNo .agentos directory found here or in parent directories.' };
-  const engine = normalizeEngine(options.engine ?? 'generic');
+async function contextInputFor(root: string, engine: string, options: any) {
   const projectText = await safeRead(join(root, '.agentos/project.yaml'));
   const project = parseProjectYaml(projectText);
   const agents = project.agents && typeof project.agents === 'object' ? project.agents : {};
-  const bundle = await buildContextBundle({
-    root, engine, project,
+  return {
+    root, engine, project, projectText,
     repos: parseReposFromProjectYaml(projectText, { includeRoot: true }),
     enabledAgents: Array.isArray(agents.enabled) ? agents.enabled.map((id) => normalizeAgentAlias(String(id))) : [],
     defaultRole: agents.capabilities?.implementation ? normalizeAgentAlias(String(agents.capabilities.implementation)) : undefined,
     header: promptHeaderLines(engine, root, projectText),
     rules: [PROMPT_RULES, ...engineSpecificRules(engine), obsidianPromptLine(projectText)].filter(Boolean),
     task: options.task, role: options.role ? normalizeAgentAlias(String(options.role)) : undefined, scope: options.scope, budget: options.budget, includeSuperseded: Boolean(options.includeSuperseded),
-  });
+  };
+}
+
+/** `agentos context`: read-only wiring around src/context-builder.ts. */
+export async function contextAgentOS(options: any = {}) {
+  const root = await findAgentOSRoot(options.cwd ?? process.cwd());
+  if (!root) return { ok: false, text: 'AgentOS context: FAIL\nNo .agentos directory found here or in parent directories.' };
+  const engine = normalizeEngine(options.engine ?? 'generic');
+  const input = await contextInputFor(root, engine, options);
+  const objective = resolveObjective(await safeRead(join(root, '.agentos/handoff.md')));
+  let checkpointTask: string | null = null;
+  try { checkpointTask = resolveTask(options.task, objective.selected ?? null).id; } catch { /* no task id: no checkpoint record */ }
+  const checkpoint = checkpointTask ? await checkpointContextRecord(root, checkpointTask) : null;
+  const bundle = await buildContextBundle({ ...input, checkpoint: checkpoint ?? undefined });
   if (options.json) return { ok: bundle.ok, bundle, text: JSON.stringify(bundle, null, 2) };
   const footer = `\n\nBudget: ${bundle.budget.estimate} of ${bundle.budget.limit} tokens, ${bundle.budget.label}, including ${bundle.budget.overhead} assumed engine overhead.`;
   return { ok: bundle.ok, bundle, text: `${bundle.text}${bundle.ok ? footer : ''}` };
@@ -4669,6 +4680,41 @@ export async function runHandoffAgentOS(options: any = {}) {
   const root = await findAgentOSRoot(options.cwd ?? process.cwd());
   const action = () => runHandoffAgentOSUnlocked(options);
   return root && (!options.dryRun) ? withWorkspaceWriter(root, action) : action();
+}
+
+async function checkpointContextFor(root: string, options: any): Promise<CheckpointContext> {
+  const engine = options.engine ? normalizeEngine(options.engine) : null;
+  const input = await contextInputFor(root, engine ?? 'generic', { role: options.role });
+  const handoffText = await safeRead(join(root, '.agentos/handoff.md'));
+  const resolved = resolveObjective(handoffText).selected;
+  const objective = resolved ? { id: resolved.id, text: resolved.text } : null;
+  const task = resolveTask(options.task, objective);
+  const excluded = input.project.handoff?.exclude_paths ?? [];
+  if (!Array.isArray(excluded) || excluded.some((path) => typeof path !== 'string')) throw new Error('handoff.exclude_paths must be a list of relative paths.');
+  for (const path of excluded) assertRelativeBoundaryPath(path);
+  const bundle = await buildContextBundle({ ...input, task: task.id.replace(/-/g, ' ') });
+  return {
+    root, engine, repos: input.repos, excluded, handoffText, objective, task, bundle,
+    projectName: firstYamlValue(input.projectText, 'name') ?? basename(root),
+    acceptance: findAcceptance(await safeRead(join(root, '.agentos/tasks.md')), handoffText),
+  };
+}
+
+/** `agentos checkpoint`: writes under the workspace writer lock; list/show/--dry-run are read-only and lock-free. */
+export async function checkpointAgentOS(options: any = {}) {
+  const root = await findAgentOSRoot(options.cwd ?? process.cwd());
+  if (!root) return { ok: false, text: 'AgentOS checkpoint: FAIL\nNo .agentos directory found here or in parent directories.' };
+  if (options.subcommand === 'list') return listCheckpoints(root, options);
+  if (options.subcommand === 'show') return showCheckpoint(root, options.id, options);
+  const action = async () => { await assertWorkspaceBoundaries(root); return writeCheckpoint(await checkpointContextFor(root, options), options); };
+  return options.dryRun ? action() : withWorkspaceWriter(root, action);
+}
+
+/** `agentos resume`: read-only. */
+export async function resumeAgentOS(options: any = {}) {
+  const root = await findAgentOSRoot(options.cwd ?? process.cwd());
+  if (!root) return { ok: false, text: 'AgentOS resume: FAIL\nNo .agentos directory found here or in parent directories.' };
+  return resumeCheckpoint(await checkpointContextFor(root, options), { engine: options.engine ? normalizeEngine(options.engine) : undefined, json: options.json });
 }
 
 export async function doctorAgentOS(options: any = {}) {

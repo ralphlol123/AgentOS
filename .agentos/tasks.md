@@ -5,15 +5,15 @@ Active scope: AgentOS v1 (seven slices). Plan, decisions, evidence and backlog: 
 ## Done
 
 - [x] Slice 1 on `feat/v1-cleanup` (pushed, PR #46): objective resolver parity in `prompt`; broken objective state fails `prompt`/`status`/`doctor` alike; `task_scope` read/edit contract; `doctor --fix` keeps `engines.allowed`; dead code removed with unused-code compiler flags on; docs facts tested against source. 631/631 tests.
-- [x] Slice 2 on `feat/v1-context`: read-only `agentos context` task-specific context builder (`src/context-builder.ts`). 647/647 tests. Awaiting review; not pushed.
+- [x] Slice 2 on `feat/v1-context` (pushed, PR #47): read-only `agentos context` task-specific context builder (`src/context-builder.ts`). 647/647 tests.
+- [x] Slice 3 on `feat/v1-checkpoint`: `agentos checkpoint` / `resume` with immutable records, receipts and reconciliation (`src/checkpoint.ts`). 664/664 tests. Awaiting review; not pushed.
 
 ## Now
 
-- [ ] Slice 3: checkpoints (after slice 2 review and push).
+- [ ] Slice 4: managed Project Brain (after slice 3 review and push).
 
 ## Next
 
-- [ ] Slice 4: managed Project Brain.
 - [ ] Slice 5: agent management.
 - [ ] Slice 6: optional Obsidian.
 - [ ] Slice 7: v1 end-to-end validation.
