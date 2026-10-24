@@ -346,6 +346,18 @@ Profiles:
 
 `planner` is optional and planning-only. It is not enabled by the default detected profile.
 
+### Task scope (optional)
+
+`repos:` in `.agentos/project.yaml` is an inventory; it grants no permission. To scope the current task, add an optional `task_scope` mapping (repo IDs or workspace-relative paths; `edit` implies `read`):
+
+```yaml
+task_scope:
+  read: [api/contracts/openapi.yaml]
+  edit: [web]
+```
+
+`agentos prompt` then prints the repo inventory, read scope and edit scope separately, so a frontend task can read a backend contract without gaining backend edit scope. `prompt` and `doctor` fail on a malformed `task_scope` (unknown keys, non-lists, absolute or `..` paths). `doctor --fix` never edits `engines.allowed`.
+
 ```bash
 agentos agents add planner
 ```

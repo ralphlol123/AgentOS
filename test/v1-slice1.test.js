@@ -118,6 +118,28 @@ test('a workspace without task_scope gets no scope lines in its prompt', async (
   assert.doesNotMatch(r.stdout, /Read scope:|Edit scope:/);
 });
 
+// --- 6. built-in alias pairs are equivalents ------------------------------------------------------
+
+test('agent profiles minimal and detected enable the same team; only the recorded profile label differs', async (t) => {
+  const yaml = async (agents) => {
+    const root = await mkdtemp(join(tmpdir(), 'agentos-v1s1-prof-'));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    await initAgentOS({ cwd: root, mode: 'new', yes: true, agents });
+    return (await readFile(join(root, '.agentos/project.yaml'), 'utf8')).replace(/^name: .*$/m, 'name: x');
+  };
+  assert.equal((await yaml('minimal')).replace('profile: minimal', 'profile: detected'), await yaml('detected'));
+});
+
+// --- 7. docs truth: derived facts are checked against their source --------------------------------
+
+test('docs state the package.json version and the cli.ts command surface', async () => {
+  const pkg = JSON.parse(await readFile('package.json', 'utf8'));
+  assert.match(await readFile('docs/release-readiness.md', 'utf8'), new RegExp(`^version: ${pkg.version.replace(/\./g, '\\.')}$`, 'm'));
+  const commands = [...(await readFile('src/cli.ts', 'utf8')).matchAll(/command === '([a-z][a-z-]*)'/g)].map((m) => m[1]);
+  const line = (await readFile('.agentos/memory.md', 'utf8')).match(/^- Current command surface.*$/m)[0];
+  assert.deepEqual([...line.matchAll(/`([a-z-]+)`/g)].map((m) => m[1]).filter((c) => c !== 'agentos help').sort(), [...new Set(commands)].sort());
+});
+
 // --- 4. doctor --fix preserves engine preferences --------------------------------------------------
 
 test('doctor --fix leaves a user-limited engines.allowed byte-identical', async (t) => {
