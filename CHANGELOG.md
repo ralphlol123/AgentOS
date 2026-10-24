@@ -4,6 +4,10 @@ All notable changes to AgentOS for Projects are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **`agentos context <engine>` builds task-specific context, read-only.** Flags: `--task`, `--role`, `--scope`, `--budget`, `--json`, `--include-superseded`. Mandatory records (objective, constraints, scope, role card) come first and are never truncated; optional records (acceptance criteria, handoff state, repo notes, verification commands, decisions, skills and linked notes by reference) are filtered by read scope and status, ranked by term overlap with the task and freshness, and added until the budget (default 24000, `estimate (chars/4)` plus an assumed per-engine overhead) is reached. Every omission has a reason (`budget`, `superseded`, `out-of-scope`, `no-match`); conflicting current decisions and missing sources are listed. Mandatory overflow or an unresolved objective exits 1 with nothing rendered. `--scope` can narrow but never widen the edit scope. `agentos prompt` output is unchanged. Details: `docs/context-builder.md`.
+
 ### Changed
 
 - **`docs/compaction.md` states the confident rule's subject-before-modal window correctly.** It said "six words"; the rule allows the first word plus up to six more (seven subject words), and the window only decides lines with no terminal punctuation. A terminated line qualifies at any subject length. The long-subject example is carried by the uncertain-obligation tier. No behavior changed: two new boundary tests (they fail if the window moves by one word in either direction) and a reported-speech test now pin what the docs say, and one misleading source comment about repeat runs was tightened. Documentation and comments only; `docs/` is not part of the npm package.

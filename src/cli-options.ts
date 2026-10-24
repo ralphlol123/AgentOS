@@ -1,6 +1,6 @@
 export type FlagValue = string | boolean;
-const booleans = new Set(['new', 'existing', 'dry-run', 'yes', 'y', 'detected', 'replace', 'preserve', 'fix', 'json', 'create', 'refresh', 'installed', 'normalize-repo-ids', 'adopt-custom-adapters', 'prune-retired', 'rewrite', 'checkpoint', 'diff']);
-const values = new Set(['agents', 'engine', 'role', 'repo', 'worktree', 'phase', 'reason', 'vault', 'dest', 'link', 'mode', 'name', 'type', 'expected-sha256', 'objective', 'expect-state']);
+const booleans = new Set(['new', 'existing', 'dry-run', 'yes', 'y', 'detected', 'replace', 'preserve', 'fix', 'json', 'create', 'refresh', 'installed', 'normalize-repo-ids', 'adopt-custom-adapters', 'prune-retired', 'rewrite', 'checkpoint', 'diff', 'include-superseded']);
+const values = new Set(['agents', 'engine', 'role', 'repo', 'worktree', 'phase', 'reason', 'vault', 'dest', 'link', 'mode', 'name', 'type', 'expected-sha256', 'objective', 'expect-state', 'task', 'scope', 'budget']);
 export function parseFlagsAndPositionals(args: string[]): { flags: Record<string, FlagValue>; positionals: string[] } {
   const flags: Record<string, FlagValue> = {}, positionals: string[] = [];
   for (let i = 0; i < args.length; i++) {
@@ -23,6 +23,7 @@ export function parseFlagsAndPositionals(args: string[]): { flags: Record<string
 export function validateCommandFlags(command: string, flags: Record<string, FlagValue>): void {
   const allowed: Record<string, string[]> = {
     init: ['new', 'existing', 'agents', 'dry-run', 'yes', 'y', 'refresh'], status: [], handoff: [], prompt: [],
+    context: ['task', 'role', 'scope', 'budget', 'json', 'include-superseded'],
     run: ['engine', 'role', 'repo', 'worktree', 'phase', 'reason', 'dry-run'], doctor: ['fix', 'json', 'normalize-repo-ids', 'adopt-custom-adapters', 'prune-retired', 'dry-run'], compact: ['dry-run', 'rewrite', 'checkpoint', 'objective', 'expect-state', 'diff'],
     'link-obsidian': ['vault', 'dest', 'link', 'create', 'dry-run'], obsidian: ['vault', 'dest', 'create', 'dry-run'], adapters: [],
     skills: ['detected', 'mode', 'dry-run', 'replace', 'installed'], agents: ['name', 'dry-run', 'replace', 'installed'],

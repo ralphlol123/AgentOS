@@ -277,7 +277,24 @@ agentos templates validate <file> --type agent|skill
 agentos templates import <url-or-file> --type agent|skill --name <id> [--mode summary|full] [--dry-run] [--yes] [--replace]
 agentos migrate claude --preserve [--dry-run]
 agentos prompt [claude|codex|opencode|hermes]
+agentos context [claude|codex|opencode|hermes] [--task "<text>"] [--role <agent-id>] [--scope <repo-or-path>,...] [--budget <tokens>] [--json] [--include-superseded]
 ```
+
+## Task-specific context
+
+`agentos prompt` prints a short generic prefix. `agentos context` builds a context bundle for one task and one role, read-only (no file, lock or temp file is created):
+
+```bash
+agentos context claude --task "rotate auth tokens in the settings page" --role developer --scope web,api/contracts/openapi.yaml
+agentos context codex --task "..." --json      # structured bundle only
+```
+
+- Mandatory records come first and are never truncated: objective (same resolver as `status`/`doctor`), constraints (handoff "Protected files / do not touch" plus the generated rules), scope, and the role's agent card.
+- Optional records are filtered before ranking: out of read scope → `out-of-scope`; `superseded`/`deprecated` heading or `status:` line → `superseded` (shown labelled with `--include-superseded`); decisions, skills and linked notes that share no term with `--task` → `no-match`. The rest (acceptance criteria, handoff current state / next action, repo notes and verification commands for repos in scope, decisions, skills, linked notes by reference) is ranked by term overlap, then freshness, and added until the budget is reached; the rest is listed as `budget`.
+- `--scope` narrows `task_scope`: it replaces the read scope and keeps only the edit entries it still covers, so it never widens edit. Without any scope the read scope is the whole workspace and edit scope is empty.
+- Tokens are `estimate (chars/4)` plus a fixed per-engine overhead; default budget 24000. If the mandatory records alone exceed the budget, the command exits 1 with `overflow` and renders nothing. A missing objective also exits 1; a missing agent card or scope path is listed under `missing` as a warning; two current decisions with the same heading subject are listed under `conflicts`.
+
+Selection signals, budget numbers and the JSON shape: [`docs/context-builder.md`](docs/context-builder.md).
 
 ## Compaction
 

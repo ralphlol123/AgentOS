@@ -4,6 +4,7 @@ import { readImportSource } from './import-source.js';
 import { appendContextRecord, literalMarkdown, markdownHeadings, markdownSection } from './markdown.js';
 import { HANDOFF_ROLES, recognizeSections, resolveObjective, sectionText } from './context-sections.js';
 import { assertRelativeBoundaryPath, validateTaskScope } from './task-scope.js';
+import { buildContextBundle } from './context-builder.js';
 import { planCompactRewrite } from './compact-rewrite.js';
 import { STATE_SIZE_WARN_CHARS, largestSections, sectionSizes, tasksShapeWarnings } from './state-size.js';
 import { dumpYaml, patchProjectYaml } from './project-yaml-edit.js';
@@ -4185,18 +4186,48 @@ function normalizeEngine(engine) {
   return value === 'generic' ? 'generic' : value;
 }
 
-function renderEnginePrompt({ engine, root, project, objective, tasks, scope }) {
+const PROMPT_RULES = 'Rules: declare role + scope before editing; edit only in scope; no secrets/.env/migrations/prod config without approval; no commit/push unless asked; verify; update handoff/tasks if state changes.';
+
+function promptHeaderLines(engine, root, project) {
   const projectName = firstYamlValue(project, 'name') ?? basename(root);
   const workspaceKind = firstYamlValue(project, 'workspace_kind') ?? 'unknown';
-  const now = extractSection(tasks, 'Now') || '(none)';
-  const obsidianLine = obsidianPromptLine(project);
   return [
     'Follow AgentOS for Projects.',
     `Project: ${projectName}; root: ${root}; kind: ${workspaceKind}; engine: ${engine}.`,
     `Read: AGENTS.md${engineAdapterLine(engine) ? `; ${engineAdapterLine(engine)}` : ''}; .agentos/project.yaml; memory.md; handoff.md; tasks.md. Then load skills.md plus only the assigned repo/agent context needed for the task.`,
+  ];
+}
+
+/** `agentos context`: read-only wiring around src/context-builder.ts. */
+export async function contextAgentOS(options: any = {}) {
+  const root = await findAgentOSRoot(options.cwd ?? process.cwd());
+  if (!root) return { ok: false, text: 'AgentOS context: FAIL\nNo .agentos directory found here or in parent directories.' };
+  const engine = normalizeEngine(options.engine ?? 'generic');
+  const projectText = await safeRead(join(root, '.agentos/project.yaml'));
+  const project = parseProjectYaml(projectText);
+  const agents = project.agents && typeof project.agents === 'object' ? project.agents : {};
+  const bundle = await buildContextBundle({
+    root, engine, project,
+    repos: parseReposFromProjectYaml(projectText, { includeRoot: true }),
+    enabledAgents: Array.isArray(agents.enabled) ? agents.enabled.map((id) => normalizeAgentAlias(String(id))) : [],
+    defaultRole: agents.capabilities?.implementation ? normalizeAgentAlias(String(agents.capabilities.implementation)) : undefined,
+    header: promptHeaderLines(engine, root, projectText),
+    rules: [PROMPT_RULES, ...engineSpecificRules(engine), obsidianPromptLine(projectText)].filter(Boolean),
+    task: options.task, role: options.role ? normalizeAgentAlias(String(options.role)) : undefined, scope: options.scope, budget: options.budget, includeSuperseded: Boolean(options.includeSuperseded),
+  });
+  if (options.json) return { ok: bundle.ok, bundle, text: JSON.stringify(bundle, null, 2) };
+  const footer = `\n\nBudget: ${bundle.budget.estimate} of ${bundle.budget.limit} tokens, ${bundle.budget.label}, including ${bundle.budget.overhead} assumed engine overhead.`;
+  return { ok: bundle.ok, bundle, text: `${bundle.text}${bundle.ok ? footer : ''}` };
+}
+
+function renderEnginePrompt({ engine, root, project, objective, tasks, scope }) {
+  const now = extractSection(tasks, 'Now') || '(none)';
+  const obsidianLine = obsidianPromptLine(project);
+  return [
+    ...promptHeaderLines(engine, root, project),
     `Commands and workflows: ${GUIDE_PATH} (load on demand; run \`agentos status\` first).`,
     obsidianLine,
-    'Rules: declare role + scope before editing; edit only in scope; no secrets/.env/migrations/prod config without approval; no commit/push unless asked; verify; update handoff/tasks if state changes.',
+    PROMPT_RULES,
     ...engineSpecificRules(engine),
     ...(scope ? [
       `Repos (inventory, not permission): ${scope.repos.join('; ')}`,
