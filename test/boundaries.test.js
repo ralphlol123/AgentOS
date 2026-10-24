@@ -49,6 +49,8 @@ test('boundary: symlinked managed targets fail before writes or deletions', asyn
     ['.agentos/brain', root => brainAgentOS({ cwd: root, subcommand: 'init' })],
     ['.agentos/brain', root => brainAgentOS({ cwd: root, subcommand: 'register', args: ['.agentos/decisions.md'] })],
     ['AGENTS.md', root => doctorAgentOS({ cwd: root, fix: true })],
+    ['knowledge', root => obsidianAgentOS({ cwd: root, command: 'init' })],
+    ['.agentos/knowledge.md', root => obsidianAgentOS({ cwd: root, command: 'init' })],
   ];
   for (const [target, action] of cases) {
     const { base, root, outside } = await fixture(t);
@@ -62,7 +64,7 @@ test('boundary: symlinked managed targets fail before writes or deletions', asyn
 });
 
 test('boundary: Obsidian rejects raw escapes and symlink destinations without partial writes', async t => {
-  for (const command of ['legacy', 'workspace']) {
+  for (const command of ['legacy', 'workspace', 'link']) {
     for (const dest of ['../outside', '/absolute', 'C:/outside', 'escape/new']) {
       const { base, root, outside } = await fixture(t);
       const vault = join(base, 'vault'); await mkdir(vault);
@@ -70,7 +72,7 @@ test('boundary: Obsidian rejects raw escapes and symlink destinations without pa
       const options = { cwd: root, vault, dest, create: true };
       await rejectedWithoutChanges(base, () => command === 'legacy'
         ? linkObsidianAgentOS(options)
-        : obsidianAgentOS({ ...options, command: 'link-workspace' }));
+        : obsidianAgentOS({ ...options, command: command === 'link' ? 'link' : 'link-workspace' }));
     }
   }
 });

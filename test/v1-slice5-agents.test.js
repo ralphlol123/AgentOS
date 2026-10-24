@@ -129,6 +129,7 @@ test('validateAgentManifest rejects unknown keys and widening intents; the schem
 
 test('an invalid manifest is a doctor problem; a legacy card is reported with the command that adds a manifest', async (t) => {
   const { root } = await workspace(t);
+  await writeFile(join(root, '.agentos/agents/developer.md'), await TEMPLATE('developer')); // a pre-slice-6 legacy card
   const { out } = json(['doctor'], root);
   assert.ok(out.diagnostics.some((line) => line.includes('legacy agent card .agentos/agents/developer.md has no manifest') && line.includes('agentos agents manifest developer --from-catalog')), out.diagnostics.join('\n'));
   assert.equal(out.ok, true, 'legacy cards are not problems');
@@ -202,7 +203,7 @@ test('a hand-edited card survives doctor --fix and agents add byte for byte; --r
 test('legacy cards: a byte-matched card gets its manifest from add or manifest --from-catalog; an unmatched one is never given inferred provenance', async (t) => {
   const { root } = await workspace(t);
   const template = await TEMPLATE('tester');
-  assert.equal(await read(root, '.agentos/agents/tester.md'), template, 'init writes legacy cards');
+  await writeFile(join(root, '.agentos/agents/tester.md'), template); // a pre-slice-6 legacy card (init now writes manifests)
   ok(cli(['agents', 'manifest', 'tester', '--from-catalog'], root));
   assert.equal(bodyOf(await read(root, '.agentos/agents/tester.md')), template);
   assert.match(frontOf(await read(root, '.agentos/agents/tester.md')), /installed_from: catalog:tester/);
@@ -397,6 +398,7 @@ test('agents sync codex writes a managed role block into the in-scope repo AGENT
 
 test('agents sync refuses a legacy card and a symlinked .claude directory without writing anywhere', async (t) => {
   const { base, root } = await workspace(t);
+  await writeFile(join(root, '.agentos/agents/developer.md'), await TEMPLATE('developer')); // a pre-slice-6 legacy card
   let before = await snapshot(base);
   const legacy = cli(['agents', 'sync', 'claude-code'], root);
   fails(legacy);

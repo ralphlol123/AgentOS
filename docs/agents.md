@@ -76,7 +76,7 @@ The same effective scope feeds `agentos context`, `agentos checkpoint` and `agen
 
 Everything else is refused with exit 1 and zero writes: `custom: true`, a body edited since install, a legacy card that differs from the source, an invalid manifest. `agents add <id> --replace --dry-run` prints a diff summary of the body and writes nothing; `agents add <id> --replace` replaces the card and keeps the old bytes under `.agentos/runs/replaced-agents/<ts>-<id>.md`.
 
-`doctor --fix` only creates missing cards; it never rewrites an existing one, with or without a manifest (its only other card action is the existing migration of byte-matched retired cards). `templates copy agent:<id>` also writes a legacy card. Cards written by `init` and `doctor --fix` are still legacy (no frontmatter); `doctor` lists each with the exact command, `--from-catalog` when it byte-matches the catalog, otherwise `--custom` (or `agents add <id> --replace`). Provenance is never inferred for a card that does not match its source.
+`doctor --fix` only creates missing cards; it never rewrites an existing one, with or without a manifest (its only other card action is the existing migration of byte-matched retired cards). Since slice 6, every card AgentOS generates for a catalog agent — `init`, `doctor --fix` (a missing card, or the canonical card of a migrated retired one) and `templates copy agent:<id>` — carries its manifest: `provenance.installed_from: catalog:<id>`, `custom: false`, the body byte-identical to the catalog card. Existing legacy cards (no frontmatter) are never touched; `doctor` lists each with the exact command, `--from-catalog` when it byte-matches the catalog, otherwise `--custom` (or `agents add <id> --replace`). Provenance is never inferred for a card that does not match its source.
 
 ## What `custom` means
 
@@ -84,6 +84,6 @@ Everything else is refused with exit 1 and zero writes: `custom: true`, a body e
 
 ## Limits
 
-- `init` and `doctor --fix` do not write manifests yet; existing workspaces stay legacy until `agents manifest` or `agents add` runs.
+- Existing workspaces keep their legacy cards until `agents manifest` or `agents add` runs; nothing upgrades them automatically.
 - `knowledge_selectors`, `skills` and `tools_requested` are recorded but not used for context selection; only `tools_requested` reaches an engine (Claude Code subagent `tools:`, unverified).
 - `import:<url>` provenance is accepted by the validator but `templates import` still writes legacy cards.

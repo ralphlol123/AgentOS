@@ -30,7 +30,7 @@ Optional: `acceptance` (`## Acceptance criteria` in `tasks.md`, else `handoff.md
 ## Conflicts and missing
 
 - `conflicts`: two or more included, current decisions whose subject is equal. Subject = heading without a leading date and separator, up to the first `:`, lowercased. `Package manager: npm` and `Package manager: bun` conflict.
-- `missing`: unresolved objective (fatal: `ok:false`, exit 1, no rendering), missing agent card, no role, a scope path that does not exist (warnings).
+- `missing`: unresolved objective (fatal: `ok:false`, exit 1, no rendering), missing agent card, no role, a scope path that does not exist (warnings), and an unavailable linked Obsidian folder (`vault unavailable: <path>` plus one entry per record last known there; see `docs/obsidian.md`). `ok` stays true for these; `--require-complete` makes any `missing` entry exit 1 (`INCOMPLETE`, the bundle is still printed).
 
 ## Budget
 

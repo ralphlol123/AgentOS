@@ -74,7 +74,7 @@ proposed ──apply──▶ accepted ──verify──▶ verified
 
 - **Single writer.** Writes take the workspace writer lock; per-file atomic writes plus in-process rollback, not a crash-safe multi-file transaction.
 - No database, embeddings, semantic search or semantic dedup: duplicate detection is exact (whitespace-normalized) text; conflict detection is the heading-subject heuristic.
-- No vault ingestion: Obsidian stays link-only; a vault note is not scanned.
+- No vault ingestion: only a linked folder (`knowledge.obsidian`, `canonical: vault`) is walked, never the rest of the vault; records there keep vault-relative `sources` (`docs/obsidian.md`).
 - No automatic proposals: engines write proposal text; nothing is generated.
 - `decisions.md` stays one record; splitting it into per-decision records is backlog. The context builder still reads its decisions per heading as before.
 - Every read walks the workspace (bounded by the skip list); the index is not used as a cache.

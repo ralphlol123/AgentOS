@@ -11,7 +11,7 @@
  */
 import { createHash } from 'node:crypto';
 import { lstat, readFile, readdir } from 'node:fs/promises';
-import { basename, join, relative, resolve, sep } from 'node:path';
+import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { parseDocument, stringify as stringifyYaml } from 'yaml';
 import { subjectOf, taskTerms, termHits } from './context-builder.js';
 import { markdownHeadings } from './markdown.js';
@@ -37,8 +37,14 @@ const SKIP_PATHS = new Set(['.agentos/runs', '.agentos/checkpoints', PROPOSALS, 
 export interface BrainRecord {
   id: string | null; path: string; kind: string | null; scope: string | null; status: string; state: 'ok' | 'changed' | 'invalid';
   title: string; source_hash: string | null; current_hash: string; fields: Record<string, any>; problems: string[]; body: string; text: string;
+  /** `vault`: `path` (and `sources`) are vault-relative — the portable identity; `abs` is this machine's file. */
+  location: 'workspace' | 'vault'; abs: string;
 }
-export interface BrainCtx { root: string; cwd: string; repos: string[] }
+/** The linked Obsidian folder (`knowledge.obsidian` in project.yaml). `vault` is the machine-specific absolute
+ *  binding and lives only in project.yaml; records under `dir` carry vault-relative paths. Records are walked
+ *  there only when `canonical: vault` (records live in exactly one place; the other side holds links). */
+export interface VaultBinding { vault: string; dest: string; dir: string; canonical: 'workspace' | 'vault' }
+export interface BrainCtx { root: string; cwd: string; repos: string[]; vault?: VaultBinding | null }
 
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
 const norm = (text: string) => text.replace(/\s+/g, ' ').trim();
@@ -109,11 +115,11 @@ export function patchFrontmatter(text: string, updates: Record<string, any>) {
 
 const isBrainCandidate = (text: string) => { const split = splitFrontmatter(text); return split.has && /^id\s*:\s*["']?brain:/m.test(split.fm); };
 
-export function parseRecord(rel: string, text: string, repos: string[]): BrainRecord {
+export function parseRecord(rel: string, text: string, repos: string[], location: 'workspace' | 'vault' = 'workspace', abs = ''): BrainRecord {
   const split = splitFrontmatter(text);
   const current_hash = sha256(split.body);
   const h1 = markdownHeadings(split.body).find((heading) => heading.level === 1)?.title;
-  const base = { path: rel, current_hash, body: split.body, text };
+  const base = { path: rel, current_hash, body: split.body, text, location, abs };
   if (!split.closed) return { ...base, id: null, kind: null, scope: null, status: 'invalid', state: 'invalid', title: h1 ?? basename(rel), source_hash: null, fields: {}, problems: [`${rel}:1: frontmatter is not closed (no terminating --- line)`] };
   const { fields, problems } = parseFields(rel, split.fm, RECORD_KEYS);
   const at = (key: string) => `${rel}:${keyLine(split.fm, key) || 2}`;
@@ -124,7 +130,7 @@ export function parseRecord(rel: string, text: string, repos: string[]): BrainRe
     if (!KINDS.includes(fields.kind)) problems.push(`${at('kind')}: kind must be one of ${KINDS.join('|')}`);
     if (!STATUSES.includes(fields.status)) problems.push(`${at('status')}: status must be one of ${STATUSES.join('|')}`);
     if (!str(fields.scope) || (fields.scope !== '.' && !repos.includes(fields.scope))) problems.push(`${at('scope')}: scope must be . or a repo id from project.yaml (${repos.join(', ') || 'none'})`);
-    if (!Array.isArray(fields.sources) || !fields.sources.every(str)) problems.push(`${at('sources')}: sources must be a list of workspace-relative paths`);
+    if (!Array.isArray(fields.sources) || !fields.sources.every(str)) problems.push(`${at('sources')}: sources must be a list of ${location}-relative paths`);
     else if (!fields.sources.includes(rel)) problems.push(`${at('sources')}: sources does not list this file (${rel}); was it moved or copied?`);
     if (!str(fields.source_hash) || !/^[a-f0-9]{64}$/.test(fields.source_hash)) problems.push(`${at('source_hash')}: source_hash must be a sha256 hex digest`);
     if (!ids(fields.supersedes)) problems.push(`${at('supersedes')}: supersedes must be brain ids`);
@@ -143,23 +149,27 @@ export function parseRecord(rel: string, text: string, repos: string[]): BrainRe
 
 /** Every Markdown file in the workspace whose frontmatter declares `id: brain:…`. Symlinks are not followed.
  *  ponytail: a full walk on every read (skipping vendored/build/state dirs); use index.json as a cache if it gets slow. */
-export async function loadBrain(root: string, repos: string[]): Promise<BrainRecord[]> {
+export async function loadBrain(root: string, repos: string[], vault?: VaultBinding | null): Promise<BrainRecord[]> {
   const records: BrainRecord[] = [];
-  async function walk(rel: string) {
-    for (const entry of (await readdir(join(root, rel), { withFileTypes: true }).catch(() => [])).sort((a, b) => a.name.localeCompare(b.name))) {
+  const inVault = vault?.canonical === 'vault';
+  const vaultInWorkspace = inVault ? posix(relative(root, vault.dir)) : null; // walked once, as vault records
+  async function walk(base: string, rel: string, location: 'workspace' | 'vault') {
+    for (const entry of (await readdir(join(base, rel), { withFileTypes: true }).catch(() => [])).sort((a, b) => a.name.localeCompare(b.name))) {
       const path = rel ? `${rel}/${entry.name}` : entry.name;
       if (entry.isDirectory()) {
-        if (SKIP_DIRS.has(entry.name) || SKIP_PATHS.has(path) || (entry.name.startsWith('.') && path !== '.agentos')) continue;
-        await walk(path);
+        if (SKIP_DIRS.has(entry.name) || (entry.name.startsWith('.') && !(location === 'workspace' && path === '.agentos'))) continue;
+        if (location === 'workspace' && (SKIP_PATHS.has(path) || path === vaultInWorkspace)) continue;
+        await walk(base, path, location);
       } else if (entry.isFile() && /\.md$/i.test(entry.name)) {
-        const abs = join(root, path);
+        const abs = join(base, path);
         if ((await lstat(abs)).size > 1024 * 1024) continue;
         const text = await readFile(abs, 'utf8');
-        if (isBrainCandidate(text)) records.push(parseRecord(path, text, repos));
+        if (isBrainCandidate(text)) records.push(parseRecord(path, text, repos, location, abs));
       }
     }
   }
-  await walk('');
+  await walk(root, '', 'workspace');
+  if (inVault) await walk(vault.vault, vault.dest === '.' ? '' : vault.dest, 'vault');
   const seen = new Map<string, BrainRecord>();
   for (const record of records) {
     if (!record.id || record.state === 'invalid') continue;
@@ -171,51 +181,101 @@ export async function loadBrain(root: string, repos: string[]): Promise<BrainRec
 }
 
 const valid = (records: BrainRecord[]) => records.filter((record) => record.state !== 'invalid');
-const findRecord = (records: BrainRecord[], ctx: BrainCtx, ref: string) => records.find((record) => record.id === ref)
-  ?? records.find((record) => record.path === posix(relative(ctx.root, resolve(ctx.cwd, ref))));
+const inside = (dir: string, abs: string) => { const rel = relative(dir, abs); return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel)); };
 
-/** Context builder input: valid records only (doctor reports the invalid ones). */
-export async function brainContextRecords(root: string, repos: string[]) {
-  return valid(await loadBrain(root, repos)).map((record) => ({ id: record.id, kind: record.kind, status: record.status, scope: record.scope, title: record.title, path: record.path, changed: record.state === 'changed' }));
+/** Where a path may hold a record: the workspace, or (canonical: vault) the linked folder — never the rest of the vault. */
+function classify(ctx: BrainCtx, abs: string): { location: 'workspace' | 'vault'; base: string } | { refused: string } | null {
+  const v = ctx.vault;
+  if (v && inside(v.dir, abs) && v.canonical === 'vault') return { location: 'vault', base: v.vault };
+  if (inside(ctx.root, abs)) return { location: 'workspace', base: ctx.root };
+  if (v && inside(v.dir, abs)) return { refused: `${abs}: knowledge.obsidian.canonical is workspace, so records live in the workspace and the vault folder holds links only (no copies). Set canonical: vault in .agentos/project.yaml to keep records in ${v.dir}. Nothing was written.` };
+  if (v && inside(v.vault, abs)) return { refused: `${abs} is inside the vault but outside the linked folder ${v.dir}; only that folder is allowed. Nothing was written.` };
+  return null;
 }
 
-function indexContent(records: BrainRecord[]) {
+function findRecord(records: BrainRecord[], ctx: BrainCtx, ref: string) {
+  const byId = records.find((record) => record.id === ref);
+  if (byId) return byId;
+  const abs = resolve(ctx.cwd, ref);
+  const where = classify(ctx, abs);
+  if (where && 'refused' in where) throw new Error(where.refused);
+  return records.find((record) => record.abs === abs);
+}
+
+/** Context builder input: valid records only (doctor reports the invalid ones). */
+/** Context builder input: valid records only (doctor reports the invalid ones). Vault records are referenced
+ *  by this machine's absolute path (the reader needs a real file), workspace records by their relative path. */
+export async function brainContextRecords(root: string, repos: string[], vault?: VaultBinding | null) {
+  return valid(await loadBrain(root, repos, vault)).map((record) => ({ id: record.id, kind: record.kind, status: record.status, scope: record.scope, title: record.title, path: record.location === 'vault' ? record.abs : record.path, location: record.location, changed: record.state === 'changed' }));
+}
+
+/** The linked folder is absent (vault unmounted, renamed, removed): its records are `unavailable`. The last known
+ *  list comes from index.json (derived, but the only list that survives the folder going away). */
+export async function vaultUnavailable(root: string, vault?: VaultBinding | null) {
+  if (!vault) return null;
+  if (await lstat(vault.dir).then((info) => info.isDirectory(), () => false)) return null;
+  let records: any[] = [];
+  try { records = JSON.parse(await readFile(join(root, INDEX), 'utf8')).records.filter((record: any) => record.location === 'vault'); } catch { /* no index yet */ }
+  return { dir: vault.dir, records: records.map((record) => ({ id: record.id, kind: record.kind, status: record.status, scope: record.scope, title: record.title, path: record.path, location: 'vault', state: 'unavailable' })) };
+}
+
+/** `context` input: what cannot be read right now. */
+export async function brainMissing(root: string, vault?: VaultBinding | null) {
+  const gone = await vaultUnavailable(root, vault);
+  return gone ? [`vault unavailable: ${gone.dir}`, ...gone.records.map((record) => `${record.id} (${record.path}): vault unavailable: ${gone.dir}`)] : [];
+}
+
+const indexEntry = (record: BrainRecord) => ({ id: record.id, kind: record.kind, status: record.status, scope: record.scope, title: record.title, path: record.path, ...(record.location === 'vault' ? { location: 'vault' } : {}), source_hash: record.source_hash, ...(record.fields.superseded_by ? { superseded_by: record.fields.superseded_by } : {}) });
+
+function indexContent(records: BrainRecord[], kept: any[] = []) {
   return `${JSON.stringify({
     schema: 'agentos.brain-index/1',
     note: 'Derived from record frontmatter by agentos brain; never authoritative. Safe to delete; the next brain write regenerates it.',
-    records: valid(records).map((record) => ({ id: record.id, kind: record.kind, status: record.status, scope: record.scope, title: record.title, path: record.path, source_hash: record.source_hash, ...(record.fields.superseded_by ? { superseded_by: record.fields.superseded_by } : {}) })),
+    records: [...valid(records).map(indexEntry), ...kept],
     invalid: records.filter((record) => record.state === 'invalid').map((record) => record.path),
   }, null, 2)}\n`;
 }
 
 async function writeIndex(ctx: BrainCtx) {
   await mkdirTracked(join(ctx.root, BRAIN_DIR));
-  await writeFileAtomic(join(ctx.root, INDEX), indexContent(await loadBrain(ctx.root, ctx.repos)));
+  // An unavailable vault keeps its last known entries, so its records stay reportable as `unavailable`.
+  let kept: any[] = [];
+  if (await vaultUnavailable(ctx.root, ctx.vault)) {
+    try { kept = JSON.parse(await readFile(join(ctx.root, INDEX), 'utf8')).records.filter((record: any) => record.location === 'vault'); } catch { /* none */ }
+  }
+  await writeFileAtomic(join(ctx.root, INDEX), indexContent(await loadBrain(ctx.root, ctx.repos, ctx.vault), kept));
 }
 
 const out = (json: boolean, ok: boolean, data: any, lines: string[]) => ({ ok, ...data, text: json ? JSON.stringify({ ok, ...data }, null, 2) : lines.join('\n') });
-const publicRecord = (record: BrainRecord) => ({ id: record.id, kind: record.kind, status: record.status, scope: record.scope, title: record.title, path: record.path, state: record.state });
+const publicRecord = (record: BrainRecord) => ({ id: record.id, kind: record.kind, status: record.status, scope: record.scope, title: record.title, path: record.path, state: record.state, ...(record.location === 'vault' ? { location: 'vault', abs: record.abs } : {}) });
 
 // --- register / init --------------------------------------------------------------------------------
 
 const slug = (text: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 const defaultKind = (rel: string) => (/(^|\/)adrs?\//i.test(rel) ? 'adr' : basename(rel) === 'decisions.md' ? 'decision' : 'note');
 
-/** Workspace-relative, inside the root, not in .git, Markdown, a regular file reached without symlinks. */
+/** Inside the workspace root or (canonical: vault) the linked folder, not in .git or a dot folder of the vault,
+ *  Markdown, a regular file reached without symlinks. Returns the location-relative path and the absolute file. */
 async function assertRegistrable(ctx: BrainCtx, pathArg: string) {
-  const rel = posix(relative(ctx.root, resolve(ctx.cwd, pathArg)));
+  const abs = resolve(ctx.cwd, pathArg);
+  const where = classify(ctx, abs);
+  if (where && 'refused' in where) throw new Error(where.refused);
+  const base = where && 'base' in where ? where.base : ctx.root;
+  const location = where && 'location' in where ? where.location : 'workspace';
+  const rel = posix(relative(base, abs));
   try { assertRelativeBoundaryPath(rel); } catch { throw new Error(`${pathArg} is outside the workspace root; only project-owned files can be registered.`); }
   if (rel.split('/').includes('.git')) throw new Error(`${rel} is inside .git; refused.`);
+  if (location === 'vault' && rel.split('/').some((part) => part.startsWith('.'))) throw new Error(`${rel} is inside a dot folder of the vault (e.g. .obsidian/); refused.`);
   if (!/\.md$/i.test(rel)) throw new Error(`${rel} is not a Markdown (.md) file; refused.`);
   if (rel === PROPOSALS || rel.startsWith(`${PROPOSALS}/`)) throw new Error(`${rel} is a proposal, not a record.`);
   const parts = rel.split('/');
   for (let i = 1; i <= parts.length; i++) {
     let info;
-    try { info = await lstat(join(ctx.root, ...parts.slice(0, i))); } catch { throw new Error(`${rel} does not exist; register an existing file.`); }
+    try { info = await lstat(join(base, ...parts.slice(0, i))); } catch { throw new Error(`${rel} does not exist; register an existing file.`); }
     if (info.isSymbolicLink()) throw new Error(`${parts.slice(0, i).join('/')} is a symlink; refused.`);
     if (i === parts.length && !info.isFile()) throw new Error(`${rel} is not a regular file.`);
   }
-  return rel;
+  return { rel, abs: join(base, rel), location };
 }
 
 async function readUtf8(path: string) {
@@ -228,8 +288,8 @@ interface RegisterOptions { kind?: string; scope?: string; status?: string; by?:
 
 /** Plan a registration: the patched text, the keys it adds and the conflicts it keeps. Throws on refusal. */
 async function planRegister(ctx: BrainCtx, records: BrainRecord[], pathArg: string, options: RegisterOptions) {
-  const rel = await assertRegistrable(ctx, pathArg);
-  const text = await readUtf8(join(ctx.root, rel));
+  const { rel, abs, location } = await assertRegistrable(ctx, pathArg);
+  const text = await readUtf8(abs);
   const split = splitFrontmatter(text);
   if (split.has && !split.closed) throw new Error(`${rel}:1: frontmatter is not closed; fix it by hand. Nothing was written.`);
   const existing = split.has ? parseFields(rel, split.fm, RECORD_KEYS) : { fields: {}, problems: [] };
@@ -242,9 +302,9 @@ async function planRegister(ctx: BrainCtx, records: BrainRecord[], pathArg: stri
   let id = fields.id;
   if (!id) {
     id = `brain:${slug(basename(rel, '.md'))}`;
-    if (records.some((record) => record.id === id && record.path !== rel)) id = `brain:${slug(rel.replace(/\.md$/i, ''))}`;
+    if (records.some((record) => record.id === id && record.abs !== abs)) id = `brain:${slug(rel.replace(/\.md$/i, ''))}`;
   }
-  if (records.some((record) => record.id === id && record.path !== rel)) throw new Error(`id ${id} is already used by ${records.find((record) => record.id === id).path}.`);
+  if (records.some((record) => record.id === id && record.abs !== abs)) throw new Error(`id ${id} is already used by ${records.find((record) => record.id === id).path}.`);
   const now = new Date().toISOString();
   const desired: Record<string, any> = {
     id, kind: options.kind ?? defaultKind(rel), scope, status: options.by ? 'verified' : options.status ?? 'accepted', sources: [rel], source_hash: sha256(split.body),
@@ -258,20 +318,20 @@ async function planRegister(ctx: BrainCtx, records: BrainRecord[], pathArg: stri
     else if (explicit.has(key) && JSON.stringify(fields[key]) !== JSON.stringify(value)) conflicts.push({ key, existing: fields[key], requested: value });
   }
   const next = Object.keys(missing).length ? patchFrontmatter(text, missing) : text;
-  const record = parseRecord(rel, next, ctx.repos);
+  const record = parseRecord(rel, next, ctx.repos, location, abs);
   if (record.state === 'invalid') throw new Error(`${rel} would not be a valid record:\n${record.problems.join('\n')}\nNothing was written.`);
-  return { rel, text, next, id, missing, conflicts, record };
+  return { rel, abs, text, next, id, missing, conflicts, record };
 }
 
 const conflictLines = (conflicts: Array<{ key: string; existing: any; requested: any }>) => conflicts.map((c) => `- conflict ${c.key}: kept ${JSON.stringify(c.existing)} (requested ${JSON.stringify(c.requested)})${c.key === 'source_hash' ? ' — the body changed since it was hashed; review, then `agentos brain verify`' : ''}`);
 
 export async function registerBrain(ctx: BrainCtx, pathArg: string | undefined, options: RegisterOptions) {
   if (!pathArg) throw new Error('Usage: agentos brain register <path> [--kind …] [--scope <repo-id|.>] [--status proposed|accepted] [--by <name>] [--dry-run] [--json]');
-  const plan = await planRegister(ctx, await loadBrain(ctx.root, ctx.repos), pathArg, options);
+  const plan = await planRegister(ctx, await loadBrain(ctx.root, ctx.repos, ctx.vault), pathArg, options);
   const added = Object.keys(plan.missing);
   const data = { dryRun: Boolean(options.dryRun), path: plan.rel, record: publicRecord(plan.record), added, conflicts: plan.conflicts };
   if (!added.length) return out(options.json, true, data, [`AgentOS brain register: ${plan.rel} is already registered as ${plan.id} (no-op; nothing written).`, ...conflictLines(plan.conflicts)]);
-  if (!options.dryRun) await withMutationTransaction(async () => { await writeFileAtomic(join(ctx.root, plan.rel), plan.next); await writeIndex(ctx); });
+  if (!options.dryRun) await withMutationTransaction(async () => { await writeFileAtomic(plan.abs, plan.next); await writeIndex(ctx); });
   return out(options.json, true, data, [
     `AgentOS brain register${options.dryRun ? ' (dry run)' : ''}: ${plan.rel} as ${plan.id}`,
     `${options.dryRun ? 'Would add' : 'Added'} frontmatter keys: ${added.join(', ')} (body untouched)`, ...conflictLines(plan.conflicts),
@@ -285,32 +345,38 @@ const TEMPLATES: Array<{ name: string; kind: string; title: string; sections: st
 ];
 const DECISIONS_TEMPLATE = { name: 'decisions', kind: 'decision', title: 'Decisions', sections: ['(first decision: date — subject)'] };
 
-function templateText(template: typeof TEMPLATES[number]) {
-  const rel = `${BRAIN_DIR}/${template.name}.md`;
+function templateText(template: typeof TEMPLATES[number], dir = BRAIN_DIR) {
+  const rel = dir ? `${dir}/${template.name}.md` : `${template.name}.md`;
   const body = [`# ${template.title}`, '', ...template.sections.flatMap((section) => [`## ${section}`, '', UNKNOWN, ''])].join('\n');
   return { rel, text: patchFrontmatter(body, { id: `brain:${template.name}`, kind: template.kind, scope: '.', status: 'proposed', sources: [rel], source_hash: sha256(body) }) };
 }
 
-export async function initBrain(ctx: BrainCtx, options: { dryRun?: boolean; json?: boolean }) {
-  const records = await loadBrain(ctx.root, ctx.repos);
-  const hasDecisions = await lstat(join(ctx.root, '.agentos/decisions.md')).then(() => true, () => false);
-  const creates = [...TEMPLATES, ...(hasDecisions ? [] : [DECISIONS_TEMPLATE])].map(templateText);
+export async function initBrain(ctx: BrainCtx, options: { dryRun?: boolean; json?: boolean; location?: string }) {
+  const toVault = options.location === 'vault';
+  if (options.location !== undefined && !['vault', 'workspace'].includes(options.location)) throw new Error('--location must be workspace or vault');
+  if (toVault && ctx.vault?.canonical !== 'vault') throw new Error('brain init --location vault needs a linked Obsidian folder with knowledge.obsidian.canonical: vault (see `agentos obsidian link --canonical vault`). Nothing was written.');
+  if (toVault && await vaultUnavailable(ctx.root, ctx.vault)) throw new Error(`vault unavailable: ${ctx.vault.dir}. Nothing was written.`);
+  const records = await loadBrain(ctx.root, ctx.repos, ctx.vault);
+  const base = toVault ? ctx.vault.vault : ctx.root;
+  const hasDecisions = toVault || await lstat(join(ctx.root, '.agentos/decisions.md')).then(() => true, () => false);
+  const creates = [...TEMPLATES, ...(hasDecisions ? [] : [DECISIONS_TEMPLATE])].map((template) => templateText(template, toVault ? (ctx.vault.dest === '.' ? '' : ctx.vault.dest) : BRAIN_DIR));
   const existing = [];
-  for (const file of creates) if (await lstat(join(ctx.root, file.rel)).then(() => true, () => false)) existing.push(file.rel);
+  for (const file of creates) if (await lstat(join(base, file.rel)).then(() => true, () => false)) existing.push(file.rel);
+  for (const file of creates) { const id = `brain:${basename(file.rel, '.md')}`; const used = records.find((record) => record.id === id); if (used && !existing.includes(file.rel)) existing.push(`${id} (id already used by ${used.path})`); }
   if (existing.length) return out(options.json, false, { existing }, ['AgentOS brain init: FAIL', ...existing.map((rel) => `- ${rel} exists; refusing to overwrite it.`), 'Nothing was written. Register existing files with `agentos brain register <path>`.']);
-  const decisions = hasDecisions ? await planRegister(ctx, records, join(ctx.root, '.agentos/decisions.md'), { kind: 'decision' }) : null;
+  const decisions = !toVault && hasDecisions ? await planRegister(ctx, records, join(ctx.root, '.agentos/decisions.md'), { kind: 'decision' }) : null;
   const registers = decisions && Object.keys(decisions.missing).length ? decisions : null;
   if (!options.dryRun) {
     await withMutationTransaction(async () => {
-      await mkdirTracked(join(ctx.root, BRAIN_DIR));
-      for (const file of creates) if (!(await writeFileExclusiveAtomic(join(ctx.root, file.rel), Buffer.from(file.text))).created) throw new Error(`${file.rel} appeared while writing; nothing was written.`);
-      if (registers) await writeFileAtomic(join(ctx.root, registers.rel), registers.next);
+      await mkdirTracked(toVault ? ctx.vault.dir : join(ctx.root, BRAIN_DIR));
+      for (const file of creates) if (!(await writeFileExclusiveAtomic(join(base, file.rel), Buffer.from(file.text))).created) throw new Error(`${file.rel} appeared while writing; nothing was written.`);
+      if (registers) await writeFileAtomic(registers.abs, registers.next);
       await writeIndex(ctx);
     });
   }
   const verb = options.dryRun ? 'Would create' : 'Created';
   return out(options.json, true, { dryRun: Boolean(options.dryRun), created: creates.map((file) => file.rel), registered: registers ? [registers.rel] : [] }, [
-    `AgentOS brain init${options.dryRun ? ' (dry run)' : ''}`,
+    `AgentOS brain init${options.dryRun ? ' (dry run)' : ''}${toVault ? ` into the linked vault folder ${ctx.vault.dir} (paths below are vault-relative)` : ''}`,
     ...creates.map((file) => `- ${verb}: ${file.rel} (status: proposed; sections marked ${UNKNOWN})`),
     ...(registers ? [`- ${options.dryRun ? 'Would register' : 'Registered'}: .agentos/decisions.md as ${registers.id} (existing file; frontmatter only, not duplicated)`] : decisions ? ['- .agentos/decisions.md is already registered'] : []),
   ]);
@@ -319,19 +385,23 @@ export async function initBrain(ctx: BrainCtx, options: { dryRun?: boolean; json
 // --- read-only views --------------------------------------------------------------------------------
 
 export async function listBrain(ctx: BrainCtx, options: { status?: string; kind?: string; json?: boolean }) {
-  const records = (await loadBrain(ctx.root, ctx.repos)).filter((record) => (!options.status || record.status === options.status) && (!options.kind || record.kind === options.kind));
-  return out(options.json, true, { records: records.map(publicRecord) }, records.length
-    ? records.map((record) => `- ${record.id ?? '(no id)'} [${record.status}${record.state === 'changed' ? ', source changed since verification' : ''}] ${record.kind ?? '?'} ${record.path} — ${record.title}`)
+  const records = (await loadBrain(ctx.root, ctx.repos, ctx.vault)).filter((record) => (!options.status || record.status === options.status) && (!options.kind || record.kind === options.kind));
+  const gone = await vaultUnavailable(ctx.root, ctx.vault);
+  const lines = records.map((record) => `- ${record.id ?? '(no id)'} [${record.status}${record.state === 'changed' ? ', source changed since verification' : ''}] ${record.kind ?? '?'} ${record.path}${record.location === 'vault' ? ` (vault: ${record.abs})` : ''} — ${record.title}`);
+  for (const record of gone?.records ?? []) lines.push(`- ${record.id} [unavailable] ${record.kind} ${record.path} (vault unavailable: ${gone.dir}) — ${record.title}`);
+  return out(options.json, true, { records: [...records.map(publicRecord), ...(gone?.records ?? [])] }, lines.length ? lines
     : ['No Brain records. Start with `agentos brain init` or `agentos brain register <path>`.']);
 }
 
 export async function showBrain(ctx: BrainCtx, ref: string | undefined, options: { json?: boolean }) {
   if (!ref) throw new Error('Usage: agentos brain show <id-or-path> [--json]');
-  const record = findRecord(await loadBrain(ctx.root, ctx.repos), ctx, ref);
+  const record = findRecord(await loadBrain(ctx.root, ctx.repos, ctx.vault), ctx, ref);
   if (!record) return out(options.json, false, {}, [`No Brain record ${ref}. List them with \`agentos brain list\`.`]);
-  const data = { record: { ...record.fields, id: record.id, path: record.path, title: record.title, state: record.state, status: record.status, current_hash: record.current_hash, problems: record.problems } };
+  const data = { record: { ...record.fields, id: record.id, path: record.path, ...(record.location === 'vault' ? { location: 'vault', abs: record.abs } : {}), title: record.title, state: record.state, status: record.status, current_hash: record.current_hash, problems: record.problems } };
   return out(options.json, true, data, [
-    `${record.id ?? '(no id)'} — ${record.title}`, `Path: ${record.path}`, `Status: ${record.status}; kind: ${record.kind ?? '?'}; scope: ${record.scope ?? '?'}; state: ${record.state}`,
+    `${record.id ?? '(no id)'} — ${record.title}`, `Path: ${record.path}`,
+    ...(record.location === 'vault' ? [`Location: vault (portable path above is vault-relative); on this machine: ${record.abs} (binding: .agentos/project.yaml knowledge.obsidian.vault)`] : []),
+    `Status: ${record.status}; kind: ${record.kind ?? '?'}; scope: ${record.scope ?? '?'}; state: ${record.state}`,
     ...(record.fields.superseded_by ? [`Superseded by: ${record.fields.superseded_by}`] : []),
     ...record.problems.map((problem) => `Problem: ${problem}`), '', record.body.trimEnd(),
   ]);
@@ -342,7 +412,7 @@ export async function searchBrain(ctx: BrainCtx, query: string, options: { json?
   const terms = taskTerms(query);
   if (!terms.length) throw new Error('Usage: agentos brain search <terms…> (terms of 3+ letters)');
   const rank = (record: BrainRecord) => (record.status === 'superseded' ? 2 : record.status === 'proposed' ? 1 : 0);
-  const hits = valid(await loadBrain(ctx.root, ctx.repos))
+  const hits = valid(await loadBrain(ctx.root, ctx.repos, ctx.vault))
     .map((record) => ({ record, matched: termHits(terms, `${record.id.slice(record.id.indexOf(':') + 1)} ${record.title} ${record.kind}`) }))
     .filter((hit) => hit.matched.length)
     .sort((a, b) => b.matched.length - a.matched.length || rank(a.record) - rank(b.record));
@@ -352,23 +422,30 @@ export async function searchBrain(ctx: BrainCtx, query: string, options: { json?
 
 const CHANGED = 'source changed since verification — recheck (a hash change says the text changed, not that it is wrong)';
 
+/** Exit 1 only on `invalid`; `unavailable` (vault folder absent) is reported, like doctor's warning. */
 export async function checkBrain(ctx: BrainCtx, options: { json?: boolean }) {
-  const records = await loadBrain(ctx.root, ctx.repos);
+  const records = await loadBrain(ctx.root, ctx.repos, ctx.vault);
+  const gone = await vaultUnavailable(ctx.root, ctx.vault);
   const invalid = records.filter((record) => record.state === 'invalid');
-  return out(options.json, invalid.length === 0, { records: records.map((record) => ({ ...publicRecord(record), source_hash: record.source_hash, current_hash: record.current_hash, problems: record.problems })) }, [
-    `AgentOS brain check: ${records.length} record(s), ${records.filter((r) => r.state === 'ok').length} ok, ${records.filter((r) => r.state === 'changed').length} changed, ${invalid.length} invalid`,
+  return out(options.json, invalid.length === 0, { ...(gone ? { vault_unavailable: gone.dir } : {}), records: [...records.map((record) => ({ ...publicRecord(record), source_hash: record.source_hash, current_hash: record.current_hash, problems: record.problems })), ...(gone?.records ?? [])] }, [
+    `AgentOS brain check: ${records.length + (gone?.records.length ?? 0)} record(s), ${records.filter((r) => r.state === 'ok').length} ok, ${records.filter((r) => r.state === 'changed').length} changed, ${invalid.length} invalid${gone ? `, ${gone.records.length} unavailable` : ''}`,
     ...records.map((record) => record.state === 'ok' ? `- ok ${record.id} (${record.path})`
       : record.state === 'changed' ? `- changed ${record.id} (${record.path}): ${CHANGED}; after review run \`agentos brain verify ${record.id} --by <name>\``
         : `- invalid ${record.path}: ${record.problems.join('; ')} (file left as is; fix it by hand)`),
+    ...(gone ? [...gone.records.map((record) => `- unavailable ${record.id} (${record.path}): vault unavailable: ${gone.dir}`), ...(gone.records.length ? [] : [`- vault unavailable: ${gone.dir} (no records known there)`])] : []),
   ]);
 }
 
-/** Doctor: invalid metadata is a problem, a changed source a warning. */
-export async function brainDoctor(root: string, repos: string[]) {
-  const records = await loadBrain(root, repos);
+/** Doctor: invalid metadata is a problem, a changed source or an unavailable vault folder a warning. */
+export async function brainDoctor(root: string, repos: string[], vault?: VaultBinding | null) {
+  const records = await loadBrain(root, repos, vault);
+  const gone = await vaultUnavailable(root, vault);
   return {
     problems: records.filter((record) => record.state === 'invalid').flatMap((record) => record.problems.map((problem) => `Brain record ${problem}`)),
-    warnings: records.filter((record) => record.state === 'changed').map((record) => `Brain record ${record.id} (${record.path}): ${CHANGED}; run \`agentos brain verify ${record.id}\` after review`),
+    warnings: [
+      ...records.filter((record) => record.state === 'changed').map((record) => `Brain record ${record.id} (${record.path}): ${CHANGED}; run \`agentos brain verify ${record.id}\` after review`),
+      ...(gone ? [`Obsidian vault unavailable: ${gone.dir} (absent or not mounted); ${gone.records.length} Brain record(s) under it are unavailable and \`agentos context\` lists them under Missing`] : []),
+    ],
   };
 }
 
@@ -376,7 +453,7 @@ export async function brainDoctor(root: string, repos: string[]) {
 
 export async function verifyBrain(ctx: BrainCtx, ref: string | undefined, options: { by?: string; dryRun?: boolean; json?: boolean }) {
   if (!ref) throw new Error('Usage: agentos brain verify <id-or-path> [--by <name>] [--dry-run]');
-  const record = findRecord(await loadBrain(ctx.root, ctx.repos), ctx, ref);
+  const record = findRecord(await loadBrain(ctx.root, ctx.repos, ctx.vault), ctx, ref);
   if (!record) throw new Error(`No Brain record ${ref}.`);
   if (record.state === 'invalid') throw new Error(`${record.path} has invalid metadata:\n${record.problems.join('\n')}\nFix it by hand first. Nothing was written.`);
   const now = new Date().toISOString();
@@ -385,7 +462,7 @@ export async function verifyBrain(ctx: BrainCtx, ref: string | undefined, option
     status: record.status === 'superseded' ? 'superseded' : 'verified', verified_at: now, verified_by: by, source_hash: record.current_hash,
     history: [...(record.fields.history ?? []), `${now} verified by ${by}: ${short(record.source_hash)} -> ${short(record.current_hash)}`],
   });
-  if (!options.dryRun) await withMutationTransaction(async () => { await writeFileAtomic(join(ctx.root, record.path), next); await writeIndex(ctx); });
+  if (!options.dryRun) await withMutationTransaction(async () => { await writeFileAtomic(record.abs, next); await writeIndex(ctx); });
   return out(options.json, true, { dryRun: Boolean(options.dryRun), id: record.id, path: record.path, source_hash: record.current_hash }, [
     `AgentOS brain verify${options.dryRun ? ' (dry run)' : ''}: ${record.id} (${record.path})`,
     `${options.dryRun ? 'Would record' : 'Recorded'} verified_by ${by}; source_hash ${short(record.source_hash)} -> ${short(record.current_hash)}${record.state === 'ok' ? ' (unchanged)' : ''}`,
@@ -489,7 +566,7 @@ interface ProposeOptions { from?: string; summary?: string; supersedes?: string;
 
 export async function proposeBrain(ctx: BrainCtx, ref: string | undefined, options: ProposeOptions) {
   if (!ref || !options.from) throw new Error('Usage: agentos brain propose <id-or-path> --from <file|-> [--summary "<text>"] [--supersedes <id>[,<id>]] [--append] [--by <name>] [--dry-run] [--json]');
-  const records = await loadBrain(ctx.root, ctx.repos);
+  const records = await loadBrain(ctx.root, ctx.repos, ctx.vault);
   const target = findRecord(records, ctx, ref);
   if (!target) throw new Error(`No Brain record ${ref}; register the file first (\`agentos brain register <path>\`).`);
   if (!target.id) throw new Error(`${target.path} has invalid metadata; fix it first.`);
@@ -525,7 +602,7 @@ export async function previewBrain(ctx: BrainCtx, ref: string | undefined, optio
   if (!ref) throw new Error('Usage: agentos brain preview <proposal> [--json]');
   const proposal = await loadProposal(ctx, ref);
   if (proposal.applied) return out(options.json, true, { applied: true, path: proposal.rel }, [`${proposal.rel}: already applied; nothing to preview.`]);
-  const result = validateProposal(ctx, await loadBrain(ctx.root, ctx.repos), proposal);
+  const result = validateProposal(ctx, await loadBrain(ctx.root, ctx.repos, ctx.vault), proposal);
   return out(options.json, true, { path: proposal.rel, target: result.target?.id ?? null, rejections: result.rejections, flags: result.flags, supersedes: result.supersede.map((record) => record.id), new_body: result.newBody },
     [`AgentOS brain preview: ${proposal.rel} (read-only)`, ...planLines(proposal, result), 'Validation:', ...validationLines(result)]);
 }
@@ -534,7 +611,7 @@ export async function validateBrain(ctx: BrainCtx, ref: string | undefined, opti
   if (!ref) throw new Error('Usage: agentos brain validate <proposal> [--json]');
   const proposal = await loadProposal(ctx, ref);
   if (proposal.applied) return out(options.json, true, { applied: true, path: proposal.rel, rejections: [], flags: [] }, [`${proposal.rel}: already applied.`]);
-  const result = validateProposal(ctx, await loadBrain(ctx.root, ctx.repos), proposal);
+  const result = validateProposal(ctx, await loadBrain(ctx.root, ctx.repos, ctx.vault), proposal);
   const ok = result.rejections.length === 0;
   return out(options.json, ok, { path: proposal.rel, target: result.target?.id ?? null, rejections: result.rejections, flags: result.flags },
     [`AgentOS brain validate: ${proposal.rel}: ${ok ? 'OK' : 'REJECTED'}`, ...validationLines(result)]);
@@ -544,7 +621,7 @@ export async function applyBrain(ctx: BrainCtx, ref: string | undefined, options
   if (!ref) throw new Error('Usage: agentos brain apply <proposal> [--dry-run] [--json]');
   const proposal = await loadProposal(ctx, ref);
   if (proposal.applied) return out(options.json, true, { applied: true, noop: true, path: `${APPLIED}/${basename(proposal.rel)}` }, [`AgentOS brain apply: ${basename(proposal.rel)} was already applied (${APPLIED}/); no-op, nothing written.`]);
-  const records = await loadBrain(ctx.root, ctx.repos);
+  const records = await loadBrain(ctx.root, ctx.repos, ctx.vault);
   const result = validateProposal(ctx, records, proposal);
   const data = { dryRun: Boolean(options.dryRun), path: proposal.rel, target: result.target?.id ?? null, rejections: result.rejections, flags: result.flags };
   if (result.rejections.length) return out(options.json, false, data, ['AgentOS brain apply: REFUSED', ...validationLines(result), 'Nothing was written.']);
@@ -561,8 +638,8 @@ export async function applyBrain(ctx: BrainCtx, ref: string | undefined, options
   const appliedText = patchFrontmatter(proposal.text, { status: 'applied', applied_at: now });
   if (!options.dryRun) {
     await withMutationTransaction(async () => {
-      await writeFileAtomic(join(ctx.root, target.path), targetText);
-      for (const old of result.supersede) await writeFileAtomic(join(ctx.root, old.path), patchFrontmatter(old.text, { status: 'superseded', superseded_by: target.id, updated_at: now }));
+      await writeFileAtomic(target.abs, targetText);
+      for (const old of result.supersede) await writeFileAtomic(old.abs, patchFrontmatter(old.text, { status: 'superseded', superseded_by: target.id, updated_at: now }));
       await mkdirTracked(join(ctx.root, APPLIED));
       if (!(await writeFileExclusiveAtomic(join(ctx.root, appliedRel), Buffer.from(appliedText))).created) throw new Error(`${appliedRel} already exists; nothing was written.`);
       await removeTracked(join(ctx.root, proposal.rel));

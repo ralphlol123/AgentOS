@@ -5,14 +5,14 @@ import { appendContextRecord, literalMarkdown, markdownHeadings, markdownSection
 import { HANDOFF_ROLES, recognizeSections, resolveObjective, sectionText } from './context-sections.js';
 import { assertRelativeBoundaryPath, validateTaskScope } from './task-scope.js';
 import { buildContextBundle, findAcceptance } from './context-builder.js';
-import { applyBrain, splitFrontmatter, brainContextRecords, brainDoctor, checkBrain, initBrain, listBrain, previewBrain, proposeBrain, registerBrain, searchBrain, showBrain, validateBrain, verifyBrain, type BrainCtx } from './brain.js';
+import { applyBrain, splitFrontmatter, brainContextRecords, brainDoctor, brainMissing, checkBrain, initBrain, listBrain, loadBrain, previewBrain, proposeBrain, registerBrain, searchBrain, showBrain, validateBrain, verifyBrain, type BrainCtx, type VaultBinding } from './brain.js';
 import { checkpointContextRecord, checkpointProblems, listCheckpoints, resolveTask, resumeCheckpoint, showCheckpoint, writeCheckpoint, type CheckpointContext } from './checkpoint.js';
 import { planCompactRewrite } from './compact-rewrite.js';
 import { STATE_SIZE_WARN_CHARS, largestSections, sectionSizes, tasksShapeWarnings } from './state-size.js';
 import { dumpYaml, patchProjectYaml } from './project-yaml-edit.js';
 import { deprecation, mergeDeprecations, noticeLine, renderDeprecations, type Deprecation } from './legacy-deprecation.js';
 import { renderUnifiedDiff } from './compact-report.js';
-import { agentCardDoctor, diffSummary, manifestAgent, PACKAGE_VERSION, parseAgentCard, planCardInstall, removeAgent, ROLE_ID, setAgentEnabled, showAgent } from './agents.js';
+import { agentCardDoctor, diffSummary, manifestAgent, manifestFor, PACKAGE_VERSION, parseAgentCard, planCardInstall, provenanceFor, removeAgent, renderCard, ROLE_ID, setAgentEnabled, showAgent } from './agents.js';
 import { advisories, engineAdapter, mergeAddKeysOnly, ROLE_BLOCK_END, ROLE_BLOCK_START } from './engines.js';
 import { resolveCompactMode } from './cli-options.js';
 import { collectRunHandoffGitState } from './git-evidence.js';
@@ -943,7 +943,7 @@ async function initAgentOSUnlocked(options: any = {}) {
     }
 
     for (const agent of agentSelection.agents) {
-      await writeIfMissing(join(cwd, AGENTOS_DIR, 'agents', `${agent.id}.md`), agentMd(agent));
+      await writeIfMissing(join(cwd, AGENTOS_DIR, 'agents', `${agent.id}.md`), generatedCard(agent));
     }
     for (const repo of repos) {
       await writeIfMissing(join(cwd, AGENTOS_DIR, 'repos', `${repo.name}.md`), repoMd(repo));
@@ -1494,10 +1494,83 @@ async function obsidianAgentOSUnlocked(options: any = {}) {
     };
   }
   if (command === 'link-workspace') return linkObsidianWorkspaceAgentOS(options);
+  if (command === 'link') return linkObsidianWorkspaceAgentOS({ ...options, index: true });
+  if (command === 'init') return obsidianInitAgentOS(options);
   if (command === 'status') return obsidianStatusAgentOS(options);
+  return { ok: false, text: OBSIDIAN_USAGE };
+}
+
+const OBSIDIAN_USAGE = [
+  'Usage: agentos obsidian init [--dir <path>] [--dry-run]',
+  '       agentos obsidian link --vault <abs-path> --dest <sub/folder> [--canonical workspace|vault] [--create] [--dry-run]',
+  '       agentos obsidian link-workspace --vault <path> --dest <folder> [--create] [--dry-run]   (boundary only, no index note)',
+  '       agentos obsidian status',
+].join('\n');
+
+const isInside = (dir: string, abs: string) => { const rel = relative(dir, abs); return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel)); };
+const toPosix = (path: string) => path.split(sep).join('/');
+
+/** The index note: links (relative paths) to the Brain records, never copies. Written once; never overwritten. */
+async function obsidianIndexText(root: string, projectText: string, indexAbs: string, canonical: string, binding: VaultBinding | null) {
+  const projectName = firstYamlValue(projectText, 'name') ?? basename(root);
+  const records = (await loadBrain(root, brainScopes(projectText), binding)).filter((record) => record.state !== 'invalid');
+  const link = (abs: string) => toPosix(relative(dirname(indexAbs), abs));
+  return [
+    `# ${title(projectName)} AgentOS Index`, '',
+    'Written once by `agentos obsidian init|link`; AgentOS never overwrites it. Edit it freely.', '',
+    `Canonical location of the Project Brain: **${canonical}**. Records live there only; this note holds links, never copies (no sync).`,
+    'Runtime state stays in the workspace `.agentos/`. Agents read only the notes a task needs, never the whole vault, and change records only through `agentos brain register|propose|apply`.', '',
+    '## Brain records', '',
+    ...(records.length ? records.map((record) => `- [${record.title}](<${link(record.abs)}>) — \`${record.id}\` (${record.kind}, ${record.status})`) : ['- None registered yet (`agentos brain init`, `agentos brain register <path>`).']),
+    '',
+  ].join('\n');
+}
+
+/** `agentos obsidian init`: no vault yet — a plain folder inside (or next to) the workspace, openable as a vault. */
+async function obsidianInitAgentOS(options: any = {}) {
+  const cwd = options.cwd ?? process.cwd();
+  const root = await findAgentOSRoot(cwd);
+  if (!root) return { ok: false, text: 'AgentOS obsidian init: FAIL\nNo .agentos directory found.' };
+  await assertWorkspaceBoundaries(root);
+  const projectPath = join(root, '.agentos/project.yaml');
+  await assertProjectYamlWellFormed(projectPath);
+  const project = await safeRead(projectPath);
+  const existing = obsidianConfigFromProject(project);
+  if (existing) return { ok: false, text: `AgentOS obsidian init: FAIL\nknowledge.obsidian is already configured (vault: ${existing.vault}, destination: ${existing.destination}); nothing was written. Use \`agentos obsidian status\`.` };
+  const dryRun = Boolean(options.dryRun);
+  const dir = options.dir ? resolve(cwd, String(options.dir)) : join(root, 'knowledge');
+  const inWorkspace = isInside(root, dir) && dir !== root;
+  if (inWorkspace) await assertBoundaryTarget(root, toPosix(relative(root, dir)));
+  const vaultValue = inWorkspace ? toPosix(relative(root, dir)) : dir;
+  const indexAbs = join(dir, 'index.md');
+  if (await exists(indexAbs)) return { ok: false, text: `AgentOS obsidian init: FAIL\n${indexAbs} already exists; refusing to overwrite it. Nothing was written.` };
+  const config = { mode: 'workspace-folder', vault: vaultValue, destination: '.', canonical: 'workspace', index: 'index.md' };
+  const patched = patchProjectYaml(project, (data) => {
+    if (!data.knowledge || typeof data.knowledge !== 'object') data.knowledge = {};
+    data.knowledge.obsidian = config;
+  });
+  const knowledge = reconcileKnowledge(await safeRead(join(root, '.agentos/knowledge.md')), knowledgeMd({ ...config, linked: [] }));
+  const index = await obsidianIndexText(root, project, indexAbs, 'workspace', null);
+  const shown = inWorkspace ? `${vaultValue}/index.md` : indexAbs;
+  const verb = (would: string, did: string) => (dryRun ? would : did);
+  if (!dryRun) {
+    await withMutationTransaction(async () => {
+      await mkdirTracked(dir);
+      if (!(await writeFileExclusiveAtomic(indexAbs, Buffer.from(index))).created) throw new Error(`${indexAbs} appeared while writing; nothing was written.`);
+      await writeFileAtomic(projectPath, patched);
+      await writeFileAtomic(join(root, '.agentos/knowledge.md'), knowledge);
+    });
+  }
   return {
-    ok: false,
-    text: 'Usage: agentos obsidian link-workspace --vault <path> --dest <folder> [--create] [--dry-run]\n       agentos obsidian status',
+    ok: true, dryRun, vault: vaultValue, text: [
+      `AgentOS obsidian init${dryRun ? ' dry run' : ''}`,
+      `${verb('Would create', 'Created')}: ${shown} (links to the Brain records by relative path)`,
+      `${verb('Would patch', 'Patched')}: .agentos/project.yaml knowledge.obsidian = {vault: ${vaultValue}, destination: ., canonical: workspace} (keys added only)`,
+      `${verb('Would write', 'Wrote')}: .agentos/knowledge.md`,
+      '',
+      'The folder is plain Markdown, useful without Obsidian. To use Obsidian, open it as a vault; .obsidian/ is not created here (Obsidian creates it on first open).',
+      'Canonical: workspace — records stay where they are; the index holds links, never copies.',
+    ].join('\n'),
   };
 }
 
@@ -1518,16 +1591,26 @@ async function linkObsidianWorkspaceAgentOS(options: any = {}) {
   const create = Boolean(options.create);
   const workspacePath = join(vault, destination);
   await assertBoundaryTarget(vault, destination);
+  // `obsidian link` (index: true) also writes one index note and records `canonical` + `index`; link-workspace stays boundary-only.
+  const canonical = String(options.canonical ?? 'workspace');
+  if (options.index && !['workspace', 'vault'].includes(canonical)) return { ok: false, text: 'AgentOS obsidian link: FAIL\n--canonical must be workspace or vault.' };
+  if (options.index && !create && !await exists(workspacePath)) return { ok: false, text: `AgentOS obsidian link: FAIL\nDestination folder does not exist: ${workspacePath}\nRe-run with --create to create it (only that folder and its index note are created). Nothing was written.` };
+  const indexRel = options.index ? `${destination}/${title(firstYamlValue(project, 'name') ?? basename(root))} AgentOS Index.md` : null;
+  if (indexRel) await assertBoundaryTarget(vault, indexRel);
+  const indexAbs = indexRel ? join(vault, indexRel) : null;
+  const writeIndexNote = Boolean(indexAbs && !await exists(indexAbs));
   for (const note of linked) {
     assertRelativeBoundaryPath(note);
     if (!note.startsWith(`${destination}/`)) throw new Error(`Unsafe linked note outside workspace boundary: ${note}`);
     await assertBoundaryTarget(vault, note);
   }
   await assertRepoBoundaries(root, parseReposFromProjectYaml(project, { includeRoot: true }));
-  const knowledge = reconcileKnowledge(await safeRead(join(root, '.agentos/knowledge.md')), knowledgeMd({ vault, destination, linked, mode: 'workspace-folder' }));
-  const projectPatched = ensureObsidianProjectConfig(project, { vault, destination, linked, mode: 'workspace-folder' });
+  const extra = indexRel ? { canonical, index: indexRel.slice(destination.length + 1) } : {};
+  const knowledge = reconcileKnowledge(await safeRead(join(root, '.agentos/knowledge.md')), knowledgeMd({ vault, destination, linked, mode: 'workspace-folder', ...extra }));
+  const projectPatched = ensureObsidianProjectConfig(project, { vault, destination, linked, mode: 'workspace-folder', ...extra });
+  const indexText = writeIndexNote ? await obsidianIndexText(root, project, indexAbs, canonical, { vault, dest: destination, dir: workspacePath, canonical: canonical as any }) : '';
   const lines = [
-    `AgentOS obsidian link-workspace${dryRun ? ' dry run' : ''}`,
+    `AgentOS obsidian ${indexRel ? 'link' : 'link-workspace'}${dryRun ? ' dry run' : ''}`,
     `Root: ${root}`,
     `Vault: ${vault}`,
     `Destination: ${destination}`,
@@ -1535,7 +1618,8 @@ async function linkObsidianWorkspaceAgentOS(options: any = {}) {
     '',
     `${dryRun ? 'Would write' : 'Wrote'}: .agentos/knowledge.md`,
     `${dryRun ? 'Would patch' : 'Patched'}: .agentos/project.yaml`,
-    create ? `${dryRun ? 'Would create' : 'Created'} workspace folder: ${destination}` : 'Workspace folder creation: skipped (use --create to mkdir only; no notes are created)',
+    create ? `${dryRun ? 'Would create' : 'Created'} workspace folder: ${destination}` : `Workspace folder creation: skipped (use --create to mkdir only${indexRel ? '' : '; no notes are created'})`,
+    ...(indexRel ? [writeIndexNote ? `${dryRun ? 'Would create' : 'Created'} index note: ${indexRel} (links only)` : `Index note exists, left unchanged: ${indexRel}`, `Canonical: ${canonical} — records live ${canonical === 'vault' ? `in ${destination} (vault-relative paths); the workspace holds links` : 'in the workspace; the vault folder holds links'}, never copies. Nothing else in the vault is touched.`] : []),
     '',
     'Safety: AgentOS confines Obsidian reads/writes to this workspace folder. It does not bulk-load the vault.',
     'Note creation: intentionally delegated to Claude Code, Codex, OpenCode, or Hermes when explicitly tasked.',
@@ -1546,6 +1630,7 @@ async function linkObsidianWorkspaceAgentOS(options: any = {}) {
       await mkdir(join(root, '.agentos'), { recursive: true });
       await withMutationTransaction(async () => {
         if (create) await mkdirTracked(workspacePath);
+        if (writeIndexNote && !(await writeFileExclusiveAtomic(indexAbs, Buffer.from(indexText))).created) throw new Error(`${indexAbs} appeared while writing; nothing was written.`);
         await writeFileAtomic(join(root, '.agentos/knowledge.md'), knowledge);
         await writeFileAtomic(join(root, '.agentos/project.yaml'), projectPatched);
         await fixAgentOSAdapters(root);
@@ -1560,7 +1645,7 @@ async function linkObsidianWorkspaceAgentOS(options: any = {}) {
     }
   }
 
-  return { ok: true, mode: 'workspace-folder', vault, destination, linked, workspacePath, text: lines.join('\n') };
+  return { ok: true, mode: 'workspace-folder', vault, destination, linked, workspacePath, ...extra, text: lines.join('\n') };
 }
 
 async function obsidianStatusAgentOS(options: any = {}) {
@@ -1573,6 +1658,7 @@ async function obsidianStatusAgentOS(options: any = {}) {
   const diagnostics = [];
   if (config.vault && !await exists(config.vault)) diagnostics.push(`Vault missing: ${config.vault}`);
   if (workspace && !await exists(workspace)) diagnostics.push(`Workspace folder missing: ${workspace}`);
+  else diagnostics.push(...await obsidianIndexWarnings(root, project));
   const ok = diagnostics.length === 0;
   return {
     ok,
@@ -1586,6 +1672,7 @@ async function obsidianStatusAgentOS(options: any = {}) {
       `Workspace: ${config.destination}`,
       workspace ? `Workspace path: ${workspace}` : null,
       `Linked notes: ${config.linked.length ? config.linked.join(', ') : 'none; engines may create/edit files inside the workspace when explicitly tasked'}`,
+      config.managed ? `Canonical: ${config.canonical}; index note: ${config.index || '(none)'}` : null,
       'Safety: no bulk vault access; writes confined to workspace folder',
       diagnostics.length ? `Diagnostics:\n${diagnostics.map((d) => `- ${d}`).join('\n')}` : null,
     ].filter(Boolean).join('\n'),
@@ -2036,11 +2123,13 @@ async function templatesCopyAgentOS(root, options: any = {}) {
   // copy is already satisfied: proceed idempotently with the deprecation
   // notice instead of a spurious overwrite refusal. Customized cards
   // (differing bytes) and direct copies remain protected by the refusal below.
-  const alreadyCanonical = !replace && existsTarget && resolved.deprecated && (await safeRead(targetPath)) === content;
+  const catalogAgent = entry.type === 'agent' && AGENT_DEFINITIONS[entry.name] && agentMd(AGENT_DEFINITIONS[entry.name]) === content ? AGENT_DEFINITIONS[entry.name] : null;
+  const onDisk = existsTarget ? await safeRead(targetPath) : '';
+  const alreadyCanonical = !replace && existsTarget && resolved.deprecated && (entry.type === 'agent' ? parseAgentCard(entry.name, onDisk).body : onDisk) === content;
   if (existsTarget && !replace && !alreadyCanonical) {
     return { ok: false, root, dryRun, entry, text: [`AgentOS templates copy: FAIL`, `Root: ${root}`, `Template: ${entry.id}`, '', `Target already exists: ${relPath}`, 'Refusing to overwrite local project context by default.', 'Use --replace only after reviewing the existing file and confirming replacement is intended.'].join('\n') };
   }
-  const files = entry.type === 'skill' ? skillInstallFiles(SKILL_BY_ID[entry.name], 'full') : [{ relPath, content }];
+  const files = entry.type === 'skill' ? skillInstallFiles(SKILL_BY_ID[entry.name], 'full') : [{ relPath, content: alreadyCanonical ? onDisk : catalogAgent ? generatedCard(catalogAgent) : content }];
   await preflightSkillFiles(root, files, replace);
   const action = alreadyCanonical ? 'Already installed' : dryRun ? (replace ? 'Would replace' : 'Would copy') : (replace ? 'Replaced' : 'Copied');
   const note = resolved.deprecated
@@ -2707,9 +2796,13 @@ async function doctorAgentOSUnlocked(options: any = {}) {
   const cards = await agentCardDoctor(root, Object.fromEntries(Object.values(AGENT_DEFINITIONS).map((agent: any) => [agent.id, { content: agentMd(agent) }])));
   problems.push(...cards.problems);
   diagnostics.push(...cards.diagnostics);
-  const brain = await brainDoctor(root, brainScopes(await safeRead(join(root, '.agentos/project.yaml'))));
+  const doctorProject = await safeRead(join(root, '.agentos/project.yaml'));
+  let binding: VaultBinding | null = null;
+  try { binding = obsidianBinding(root, doctorProject); } catch (error) { problems.push(error.message); }
+  const brain = await brainDoctor(root, brainScopes(doctorProject), binding);
   problems.push(...brain.problems);
   warnings.push(...brain.warnings);
+  if (binding) warnings.push(...await obsidianIndexWarnings(root, doctorProject));
   await checkRepoCommands(repos, warnings, diagnostics);
   await checkGitState(root, repos, warnings, diagnostics);
   await checkPorts(repos, warnings, diagnostics);
@@ -3019,7 +3112,7 @@ async function fixAgentOSAdapters(root, options: { allowAdopt?: boolean } = {}) 
   await ensureProjectYamlAgents(projectPath, agentSelection);
   await writeIfMissing(join(root, '.agentos/skills.md'), skillsMd(agentSelection));
   for (const agent of agentSelection.agents) {
-    await writeIfMissing(join(root, '.agentos/agents', `${agent.id}.md`), agentMd(agent));
+    await writeIfMissing(join(root, '.agentos/agents', `${agent.id}.md`), generatedCard(agent));
   }
   await applyAdapterPlans(adapterPlans);
   if (policy.gitignore === 'ignore') for (const repo of childRepos) await ensureChildRepoGitignore(join(root, repo.path));
@@ -3134,7 +3227,7 @@ async function fixLegacyCatalogState(root, options: { pruneRetired?: boolean } =
       await removeTracked(source);
       actions.push(`removed stale generated agent card ${file} ('${canonical}.md' already present)`);
     } else {
-      await writeFileAtomic(target, agentMd(AGENT_DEFINITIONS[canonical]));
+      await writeFileAtomic(target, generatedCard(AGENT_DEFINITIONS[canonical]));
       await removeTracked(source);
       actions.push(`migrated generated agent card ${file} -> ${canonical}.md`);
     }
@@ -4120,7 +4213,10 @@ function knowledgeMd(options: any = {}) {
   const linked = options.linked || [];
   const mode = options.mode || 'link-only';
   const workspacePath = options.vault && options.destination ? join(options.vault, options.destination) : '';
-  const obsidian = options.vault && mode === 'workspace-folder'
+  // Slice 6 (`obsidian init|link`): portable wording — the machine-specific vault path stays in project.yaml only.
+  const obsidian = options.vault && options.canonical
+    ? `\n## Obsidian\n\nMode: \`workspace-folder\`; canonical: \`${options.canonical}\`\nLinked folder: \`${options.destination}\` in the vault bound by \`.agentos/project.yaml\` (knowledge.obsidian.vault; machine-specific, not repeated here)\nIndex note: \`${options.index}\`\n\nRules:\n- Brain records live in exactly one place (the canonical location); the other side holds links, never copies. No sync.\n- Read, create or update notes in the linked folder only through \`agentos brain register|propose|apply\`; nothing else in the vault.\n- Do not bulk-load the Obsidian vault.\n- Runtime state stays in \`.agentos/\`.\n`
+    : options.vault && mode === 'workspace-folder'
     ? `\n## Obsidian\n\nVault: \`${options.vault}\`\nDestination: \`${options.destination}\`\nMode: \`workspace-folder\`\nWorkspace folder: \`${workspacePath}\`\n\nRules:\n- Agents may read/write only inside this folder unless the user explicitly allows another path.\n- Do not bulk-load the Obsidian vault.\n- Runtime state stays in \`.agentos/\`.\n- Durable notes, plans, summaries, decisions, and runbooks for this AgentOS workspace may be written here when the task explicitly allows it.\n\nLinked notes:\n${linked.map((note) => `- [[${note.replace(/\.md$/, '')}]]`).join('\n') || '- None linked yet; engines may create files inside the workspace when explicitly tasked.'}\n`
     : options.vault ? `\n## Obsidian\n\nVault: \`${options.vault}\`\nDestination: \`${options.destination}\`\nMode: \`link-only\`\n\nLinked notes:\n${linked.map((note) => `- [[${note.replace(/\.md$/, '')}]]`).join('\n') || '- None linked yet.'}\n` : '';
   return `# Knowledge\n\nLong-term knowledge links for this project.\n\nRules:\n- Do not bulk-load external vaults or folders.\n- Read only linked notes or the linked workspace folder relevant to the current task.\n- Keep runtime context small; use handoff/tasks for current state.\n${obsidian}`;
@@ -4235,6 +4331,14 @@ function agentConfigObject(agentSelection) {
   };
 }
 
+/** Cards that init / doctor --fix / templates copy generate for catalog agents carry their manifest (provenance
+ *  catalog:<id>, custom: false; the body is the catalog card byte for byte). Custom ids keep the plain card. */
+function generatedCard(agent) {
+  if (AGENT_DEFINITIONS[agent.id] !== agent) return agentMd(agent);
+  const body = agentMd(agent);
+  return renderCard(manifestFor(agent.id, body, provenanceFor(`catalog:${agent.id}`, body), { catalog: true }), body);
+}
+
 function agentMd(agent) {
   if (agent.content) return agent.content;
   return `# ${title(agent.id)}\n\nMandate: ${agent.mandate}\n\n## Responsibilities in\n\n- Work only inside declared task scope.\n- Read AgentOS project, memory, handoff, and tasks first; then load only relevant skills, repo, role, and engine context.\n- Report files changed, verification run, failures, and next action before stopping.\n\n## Responsibilities out\n\n- Do not touch secrets, .env files, production config, migrations, or unrelated repos without explicit approval.\n- Do not commit or push unless explicitly assigned.\n\n## Skills\n\nUse .agentos/skills.md as an on-demand index. Load only skills relevant to this role and task.\n`;
@@ -4302,7 +4406,8 @@ async function contextInputFor(root: string, engine: string, options: any) {
     header: promptHeaderLines(engine, root, projectText),
     rules: [PROMPT_RULES, ...engineSpecificRules(engine), obsidianPromptLine(projectText)].filter(Boolean),
     task: options.task, role: options.role ? normalizeAgentAlias(String(options.role)) : undefined, scope: options.scope, budget: options.budget, includeSuperseded: Boolean(options.includeSuperseded),
-    brain: await brainContextRecords(root, brainScopes(projectText)),
+    brain: await brainContextRecords(root, brainScopes(projectText), obsidianBinding(root, projectText)),
+    missing: await brainMissing(root, obsidianBinding(root, projectText)),
   };
 }
 
@@ -4323,9 +4428,12 @@ export async function contextAgentOS(options: any = {}) {
   const checkpoint = checkpointTask ? await checkpointContextRecord(root, checkpointTask) : null;
   const bundle = await buildContextBundle({ ...input, checkpoint: checkpoint ?? undefined });
   const advisoryLines = bundle.ok ? advisories(adapter) : [];
-  if (options.json) return { ok: bundle.ok, bundle, text: JSON.stringify({ ...bundle, advisories: advisoryLines }, null, 2) };
+  // --require-complete: a bundle with Missing items (e.g. an unavailable vault) exits 1; the bundle itself stays `ok`.
+  const incomplete = Boolean(options.requireComplete && bundle.ok && bundle.missing.length);
+  const incompleteLine = incomplete ? `\n\nAgentOS context: INCOMPLETE (--require-complete): ${bundle.missing.length} missing item(s): ${bundle.missing.join('; ')}` : '';
+  if (options.json) return { ok: bundle.ok && !incomplete, bundle, text: JSON.stringify({ ...bundle, advisories: advisoryLines, ...(options.requireComplete ? { complete: !bundle.missing.length } : {}) }, null, 2) };
   const footer = `\n\nBudget: ${bundle.budget.estimate} of ${bundle.budget.limit} tokens, ${bundle.budget.label}, including ${bundle.budget.overhead} assumed engine overhead.`;
-  return { ok: bundle.ok, bundle, text: `${adapter.render(bundle)}${bundle.ok ? footer : ''}` };
+  return { ok: bundle.ok && !incomplete, bundle, text: `${adapter.render(bundle)}${bundle.ok ? footer : ''}${incompleteLine}` };
 }
 
 function renderEnginePrompt({ engine, root, project, objective, tasks, scope }) {
@@ -4494,7 +4602,7 @@ function obsidianNoteTemplate(note, projectName, linked) {
   return `# ${titleText}\n\n${body}\n`;
 }
 
-function ensureObsidianProjectConfig(project, { vault, destination, linked, mode = 'link-only' }) {
+function ensureObsidianProjectConfig(project, { vault, destination, linked, mode = 'link-only', canonical = undefined, index = undefined }) {
   return patchProjectYaml(String(project || ''), (data) => {
     data.knowledge = data.knowledge && typeof data.knowledge === 'object' ? data.knowledge : {};
     data.knowledge.obsidian = {
@@ -4502,6 +4610,7 @@ function ensureObsidianProjectConfig(project, { vault, destination, linked, mode
       vault,
       destination,
       linked,
+      ...(canonical ? { canonical, index } : {}),
     };
     if (mode === 'workspace-folder') {
       data.knowledge.obsidian.rules = {
@@ -4521,9 +4630,33 @@ function obsidianConfigFromProject(project) {
   return {
     mode: stringValue(obsidian.mode, 'link-only'),
     vault: stringValue(obsidian.vault),
-    destination: normalizeVaultRelativePath(obsidian.destination),
+    destination: normalizeVaultRelativePath(obsidian.destination ?? obsidian.dest),
     linked: Array.isArray(obsidian.linked) ? obsidian.linked.map((note) => normalizeVaultRelativePath(note)).filter(Boolean) : [],
+    canonical: stringValue(obsidian.canonical, 'workspace'),
+    index: obsidian.index ? normalizeVaultRelativePath(obsidian.index) : '',
+    /** Written by `obsidian init|link` (slice 6); older link-workspace configs have no `canonical`/`index`. */
+    managed: 'canonical' in obsidian,
   };
+}
+
+/** The linked folder as a Brain location (workspace-folder mode only; link-only notes are not a location).
+ *  A relative `vault` (from `obsidian init`) is relative to the workspace root. */
+function obsidianBinding(root: string, projectText: string): VaultBinding | null {
+  const config = obsidianConfigFromProject(projectText);
+  if (!config || config.mode !== 'workspace-folder' || !config.vault) return null;
+  if (!['workspace', 'vault'].includes(config.canonical)) throw new Error(`.agentos/project.yaml knowledge.obsidian.canonical must be workspace or vault (got ${config.canonical})`);
+  const vault = resolve(root, config.vault);
+  const dest = config.destination || '.';
+  return { vault, dest, dir: resolve(vault, dest), canonical: config.canonical as VaultBinding['canonical'] };
+}
+
+/** A linked folder that exists but lacks its index note is reported, not treated as linked. */
+async function obsidianIndexWarnings(root: string, projectText: string) {
+  const config = obsidianConfigFromProject(projectText);
+  const binding = obsidianBinding(root, projectText);
+  if (!config?.managed || !binding || !await exists(binding.dir)) return [];
+  const index = config.index ? join(binding.dir, config.index) : '';
+  return index && await exists(index) ? [] : [`Obsidian linked folder ${binding.dir} has no index note${config.index ? ` (${config.index})` : ''}; it is not treated as linked. ${config.destination === '.' ? 'Restore the note (any Markdown index), or remove knowledge.obsidian and re-run `agentos obsidian init`.' : 'Re-run `agentos obsidian link` with the same --vault/--dest (it creates only the missing note).'}`];
 }
 
 function firstYamlValue(text, key) {
@@ -4745,7 +4878,7 @@ export async function linkObsidianAgentOS(options: any = {}) {
 export async function obsidianAgentOS(options: any = {}) {
   const root = await findAgentOSRoot(options.cwd ?? process.cwd());
   const action = () => obsidianAgentOSUnlocked(options);
-  return root && (!options.dryRun && options.command === 'link-workspace') ? withWorkspaceWriter(root, action) : action();
+  return root && (!options.dryRun && ['link-workspace', 'link', 'init'].includes(options.command)) ? withWorkspaceWriter(root, action) : action();
 }
 
 export async function migrateClaudeAgentOS(options: any = {}) {
@@ -4815,7 +4948,8 @@ export async function brainAgentOS(options: any = {}) {
   const cwd = options.cwd ?? process.cwd();
   const root = await findAgentOSRoot(cwd);
   if (!root) return { ok: false, text: 'AgentOS brain: FAIL\nNo .agentos directory found here or in parent directories.' };
-  const ctx: BrainCtx = { root, cwd, repos: brainScopes(await safeRead(join(root, '.agentos/project.yaml'))) };
+  const projectText = await safeRead(join(root, '.agentos/project.yaml'));
+  const ctx: BrainCtx = { root, cwd, repos: brainScopes(projectText), vault: obsidianBinding(root, projectText) };
   const [ref] = options.args ?? [];
   const run = () => {
     switch (options.subcommand) {
@@ -4839,7 +4973,7 @@ export async function brainAgentOS(options: any = {}) {
 }
 
 export const BRAIN_USAGE = [
-  'Usage: agentos brain init [--dry-run]',
+  'Usage: agentos brain init [--location workspace|vault] [--dry-run]   (vault: only with knowledge.obsidian.canonical: vault)',
   '       agentos brain register <path> [--kind architecture|decision|adr|convention|feature|note] [--scope <repo-id|.>] [--status proposed|accepted] [--by <name>] [--dry-run]',
   '       agentos brain list [--status <s>] [--kind <k>] | show <id-or-path> | search <terms…> | check   (read-only; all take --json)',
   '       agentos brain propose <id-or-path> --from <file|-> [--summary "<text>"] [--supersedes <id>[,<id>]] [--append] [--by <name>] [--dry-run]',

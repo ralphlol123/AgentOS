@@ -14,11 +14,44 @@ Deliver a working v1 of the five AgentOS priorities — context builder, checkpo
 | 2 | Context builder (`agentos context`, section B) | Done; reviewed, pushed to `origin/feat/v1-context` (`ca527fb`), PR #47 (stacked on #46), not merged |
 | 3 | Checkpoints and resume (section C) | Done; reviewed, pushed to `origin/feat/v1-checkpoint` (`2e3374b`), PR #48 (stacked on #47), not merged |
 | 4 | Managed Project Brain (section D) | Done; reviewed, pushed to `origin/feat/v1-brain` (`bfd97d8`), PR #49 (stacked on #48), not merged |
-| 5 | Agent manifests, lifecycle + engine capability matrix (section E) | Done on `feat/v1-agents` (stacked on `feat/v1-brain`), awaiting review; not pushed |
-| 6 | Optional Obsidian | Not started |
+| 5 | Agent manifests, lifecycle + engine capability matrix (section E) | Done; reviewed, pushed to `origin/feat/v1-agents` (`19a7806`), PR #50 (stacked on #49), not merged |
+| 6 | Optional Obsidian on Brain storage + manifests from init (section F) | Done on `feat/v1-obsidian` (stacked on `feat/v1-agents`), awaiting review; not pushed |
 | 7 | v1 end-to-end validation (title assumed; confirm against the slice 7 card) | Not started |
 
-**Next exact action: review slice 5, then slice 6 (optional Obsidian).** Slice 5 left `parseAgentCard()` / `validateAgentManifest()` / `effectiveEditScope()` (`src/agents.ts`) and `ENGINE_ADAPTERS` / `engineAdapter()` / `advisories()` (`src/engines.ts`); a recorded engine trial changes a row there. Earlier: slice 2 left `buildContextBundle()` / `assertContextBundle()` (`src/context-builder.ts`); slice 3 left `assertCheckpoint()`, `loadCurrent()` and `workspaceState()` (`src/checkpoint.ts`); slice 4 left `loadBrain()`, `parseRecord()`, `patchFrontmatter()`, `brainContextRecords()` (`src/brain.ts`) and the shared matcher `taskTerms()` / `termHits()` / `subjectOf()` (`src/context-builder.ts`). Slice 6 (Obsidian) can build on `loadBrain`/`patchFrontmatter`: storage is plain Markdown + frontmatter with workspace-relative paths, no engine-specific code.
+**Next exact action: review slice 6, then slice 7 (v1 end-to-end validation).** Slice 6 left `obsidianBinding()` / `obsidianIndexWarnings()` (`src/core.ts`) and `VaultBinding` / `classify()` / `vaultUnavailable()` / `brainMissing()` (`src/brain.ts`); `loadBrain(root, repos, vault)` walks the linked folder only when `canonical: vault`. Slice 5 left `parseAgentCard()` / `validateAgentManifest()` / `effectiveEditScope()` (`src/agents.ts`) and `ENGINE_ADAPTERS` / `engineAdapter()` / `advisories()` (`src/engines.ts`); a recorded engine trial changes a row there. Earlier: slice 2 left `buildContextBundle()` / `assertContextBundle()` (`src/context-builder.ts`); slice 3 left `assertCheckpoint()`, `loadCurrent()` and `workspaceState()` (`src/checkpoint.ts`); slice 4 left `loadBrain()`, `parseRecord()`, `patchFrontmatter()`, `brainContextRecords()` (`src/brain.ts`) and the shared matcher `taskTerms()` / `termHits()` / `subjectOf()` (`src/context-builder.ts`). Slice 6 (Obsidian) can build on `loadBrain`/`patchFrontmatter`: storage is plain Markdown + frontmatter with workspace-relative paths, no engine-specific code.
+
+## Slice 6 — optional Obsidian on Brain storage, manifests from init
+
+`agentos obsidian init [--dir] [--dry-run]`, `agentos obsidian link --vault --dest [--canonical workspace|vault] [--create] [--dry-run]`, `brain init --location vault`, `context --require-complete`. `src/brain.ts`: records carry `location` + `abs`; `VaultBinding`; `classify()` decides workspace / vault / refused for every path argument; `loadBrain` walks `<vault>/<dest>` when `canonical: vault`; `vaultUnavailable()` / `brainMissing()`; writes go to `record.abs`. `src/core.ts`: `obsidianInitAgentOS`, `link` = `linkObsidianWorkspaceAgentOS` + index note (`obsidianIndexText`), `obsidianBinding`, `obsidianIndexWarnings`, doctor/context/brain wiring, `generatedCard()` for F2. `src/context-builder.ts`: `input.missing`, vault records readable under the Obsidian rule. Contract and limits: `docs/obsidian.md`.
+
+Decisions taken in this slice (assumptions, revisit in review):
+
+- Config key stays `destination` (what existing configs and readers use); the card's `dest` is read as an alias. New keys `canonical` and `index` mark a slice-6 config (`managed`); the index-note check runs only for those, so older `link-workspace` configs get no new warning.
+- `obsidian init` stores `vault` workspace-relative when the folder is inside the workspace (portable), absolute otherwise; it refuses when `knowledge.obsidian` already exists or the index exists (no index refresh).
+- `obsidian link` is `link-workspace` + index note + `canonical` (one code path; `link-workspace` stays boundary-only because an existing test pins "no note helpers"). `link-obsidian` (exact-note link-only) is left unchanged rather than turned into an alias with different behaviour.
+- `canonical` governs the linked folder only: with `vault`, notes in `<vault>/<dest>` can be records; existing workspace records stay workspace records (one file each). With `workspace`, registering a vault note is refused.
+- Unavailable records come from the last `index.json` (`location: vault` entries), the only list that survives the folder going away; brain writes keep those entries while the folder is absent. `brain check` exits 0 on `unavailable` (only `invalid` exits 1), matching doctor's warning.
+- `context` keeps `ok: true` with Missing entries; `--require-complete` (new flag) exits 1 and still prints the bundle.
+- The binding applies to every `workspace-folder` config (default `canonical: workspace`); `link-only` configs (this repo's) are not a location, so `doctor` never stats the personal vault.
+- `.agentos/knowledge.md` for slice-6 configs names `project.yaml` instead of repeating the absolute vault path.
+- F2: `generatedCard()` writes the slice-5 manifest for catalog agents in `init`, `doctor --fix` (missing card, retired-card migration) and `templates copy` (only when the template equals the catalog card). Custom ids stay plain. This repo: `reviewer` byte-matched the catalog and got its manifest (`agents manifest reviewer --from-catalog`); `developer`, `tester`, `release-manager` differ from the catalog and were left legacy (owner: `--custom` vs `agents add --replace`).
+
+## Slice 6 — acceptance evidence
+
+| Command | Where | Exit | Result |
+|---|---|---|---|
+| `npm test` | `feat/v1-obsidian` start (= `19a7806`) | 0 | 693 / 693 (slice 5 final) |
+| `node --test --test-reporter=tap test/v1-slice6-obsidian.test.js` (RED) | before implementation | 1 | 6 tests, 0 pass, 6 fail: `obsidian init`/`link` print the old `link-workspace` usage, `--canonical` unknown option; F2 card regex fails on the legacy `developer` card |
+| same, `link` also writes `<vault>/.obsidian/app.json` (dist) | fault injection | 1 | unrelated-notes test fails: `nothing outside <dest> changed (including .obsidian/)` |
+| same, `vaultUnavailable()` always null (dist) | fault injection | 1 | unavailable test fails: `brain check` returns `{"ok":true,"records":[]}`, no `unavailable` record |
+| same, `classify()` treats the whole vault as the linked folder (dist) | fault injection | 1 | boundary test fails: `brain register <vault>/Inbox/todo.md` succeeded |
+| same, `generatedCard()` returns the legacy card (dist) | fault injection | 1 | F2 test fails |
+| `test/boundaries.test.js` with `obsidian init` (symlinked `knowledge`, symlinked `.agentos/knowledge.md`) and `obsidian link` escape cases | final | 0 | 10 / 10 |
+| `npm run check` | final | 0 | |
+| `npm test` | final | 0 | 699 / 699 (693 + 6 in `test/v1-slice6-obsidian.test.js`; catalog-parity, three slice-5 tests (they now write the legacy card they test) and the boundary tables updated) |
+| `npm run smoke` | final | 0 | |
+| `node dist/cli.js doctor --json` | final | 0 | `"ok": true`, `problems: []`; diagnostics list three legacy cards (developer, tester, release-manager) |
+| dogfood (`/tmp/s6-dogfood-*`): init, brain init, `obsidian link --canonical vault --create`, register a vault note, `brain list`, `obsidian status`, unmount (rename) the vault, `brain check`, `context --require-complete`, `doctor`, remount | `/tmp` | 0 / 1 as expected | list prints `Projects/Demo/AgentOS/design.md (vault: /tmp/…/design.md)`; check `1 unavailable`; context `## Missing` names the vault and `brain:design`, `INCOMPLETE`; doctor warns `Obsidian vault unavailable`, OK after remount |
 
 ## Slice 5 — agent manifests, lifecycle, engine capability matrix
 
@@ -217,8 +250,13 @@ The developer sandbox has no `bun` on PATH (bun is installed on the host); every
 - Agents: per-tool allowlists (`tools_requested` reaches only the Claude Code subagent `tools:` list; no ADVISORY line per tool, no Codex/OpenCode mapping).
 - Agents: provenance for imports (`templates import --type agent` still writes a legacy card; `import:<url>` is accepted by the validator but never written).
 - Agents: native session resume (`native_session_resume` is `unsupported` for every engine; `agentos resume` stays engine-neutral text).
-- Agents: `init` / `doctor --fix` / `templates copy` write legacy cards; writing manifests there changes generated bytes and the retired-card shape set, so it waits for a release slice.
+- Agents: existing legacy cards are never upgraded automatically (slice 6 only changed newly generated cards); a release note should tell owners to run `agents manifest`.
 - Agents: `knowledge_selectors` and `skills` are recorded but not used by the context builder.
 - Agents: `agents sync claude-code` refuses an existing `.claude/agents/<id>.md` with different bytes (no managed marker, no `--replace`); re-syncing after a card edit needs the file moved first.
 - Engines: every row is `verified`-free until Phynceon's trial (`docs/engines.md`); `launch` is unsupported everywhere (no `agentos run`).
 - Brain: record files are discovered only directly by frontmatter; a Markdown file with `id: brain:` copied from elsewhere becomes a record (reported `invalid` if its `sources` does not list it).
+- Obsidian: the index note is written once and never refreshed; add `obsidian index --refresh` (rewrite only an unmodified generated note) if stale indexes bite.
+- Obsidian: index links from a vault note to workspace records are relative paths outside the vault; Obsidian may not open them.
+- Obsidian: `agents remove` does not scan vault records for references (AgentsCtx has no vault binding).
+- Obsidian: unavailable detection is "linked folder absent"; a mounted but unreadable folder (EACCES) reads as empty, not unavailable.
+- Obsidian: `obsidian init` cannot recreate a deleted index note while `knowledge.obsidian` exists (doctor says so).

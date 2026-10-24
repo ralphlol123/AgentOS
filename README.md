@@ -264,6 +264,8 @@ agentos compact [--objective <id>] --dry-run [--diff]
 agentos compact --checkpoint [--dry-run]
 agentos compact --rewrite ...  # compatibility alias for normal compact
 agentos link-obsidian [--vault <path> --dest <folder> --link <note> --create]
+agentos obsidian init [--dir <path>] [--dry-run]
+agentos obsidian link --vault <abs-path> --dest <sub/folder> [--canonical workspace|vault] [--create] [--dry-run]
 agentos obsidian link-workspace --vault <path> --dest <folder> [--create] [--dry-run]
 agentos obsidian status
 agentos skills list
@@ -284,13 +286,13 @@ agentos templates validate <file> --type agent|skill
 agentos templates import <url-or-file> --type agent|skill --name <id> [--mode summary|full] [--dry-run] [--yes] [--replace]
 agentos migrate claude --preserve [--dry-run]
 agentos prompt [claude|codex|opencode|hermes]
-agentos context [claude|codex|opencode|hermes] [--task "<text>"] [--role <agent-id>] [--scope <repo-or-path>,...] [--budget <tokens>] [--json] [--include-superseded] [--require-enforcement]
+agentos context [claude|codex|opencode|hermes] [--task "<text>"] [--role <agent-id>] [--scope <repo-or-path>,...] [--budget <tokens>] [--json] [--include-superseded] [--require-enforcement] [--require-complete]
 agentos checkpoint [--task <id>] [--engine <e>] [--role <r>] [--progress "<text>"] [--blocker "<text>"] [--next "<text>"] [--check "<cmd>" [--cwd <dir>]]... [--claim "<text>"]... [--json] [--dry-run]
 agentos checkpoint --recover [--task <id>] [--dry-run]
 agentos checkpoint list [--task <id>] [--json]
 agentos checkpoint show <id> [--json]
 agentos resume [--task <id>] [--engine <e>] [--json]
-agentos brain init [--dry-run]
+agentos brain init [--location workspace|vault] [--dry-run]
 agentos brain register <path> [--kind architecture|decision|adr|convention|feature|note] [--scope <repo-id|.>] [--status proposed|accepted] [--by <name>] [--dry-run]
 agentos brain list [--status <s>] [--kind <k>] [--json] | show <id-or-path> [--json] | search <terms...> [--json] | check [--json]
 agentos brain propose <id-or-path> --from <file|-> [--summary "<text>"] [--supersedes <id>] [--append] [--by <name>] [--dry-run]
@@ -619,9 +621,16 @@ agentos templates import ./external-skill.md --type skill --name external-review
 
 Safe-import docs: [docs/safe-imports.md](docs/safe-imports.md).
 
-## Obsidian workspace-folder knowledge
+## Obsidian (optional)
 
-Preferred setup links one Obsidian folder/workspace per AgentOS workspace:
+Obsidian is a second location for the same Project Brain, never a second store; nothing needs it. Details: [docs/obsidian.md](docs/obsidian.md).
+
+- **No vault yet:** `agentos obsidian init [--dir <path>] [--dry-run]` creates a plain `knowledge/` folder with an `index.md` that links the Brain records by relative path, and registers it as `knowledge.obsidian` (keys added only). Open the folder in Obsidian if you like; `.obsidian/` is created by Obsidian, not by AgentOS.
+- **Existing vault:** `agentos obsidian link --vault <abs-path> --dest <sub/folder> [--canonical workspace|vault] [--create] [--dry-run]` registers one project folder. It creates only that folder and `<Project> AgentOS Index.md` in it; nothing else in the vault is touched.
+- **Canonical location** (`knowledge.obsidian.canonical`, default `workspace`): every record is one file in one place; the other side holds links, never copies; no sync. With `canonical: vault`, notes in the linked folder are Brain records with portable identity (`id`, vault-relative `sources`); the absolute vault path lives only in `project.yaml`. Notes are read and changed only through `agentos brain register|propose|apply`, and only inside `<vault>/<dest>`.
+- **Unavailable vault:** its records are `unavailable` in `brain check`, listed under Missing by `agentos context` (`--require-complete` exits 1), and `doctor` warns. An edit made in Obsidian shows up as `changed`.
+
+The boundary-only form (no index note) still works:
 
 ```bash
 agentos obsidian link-workspace \
