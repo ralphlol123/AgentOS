@@ -42,7 +42,6 @@ Closed during v1 (evidence in the plan file and the named tests):
 ### Context builder
 
 - Relevance ranking (term overlap, trailing-`s` stemming, no body text or synonyms); per-engine overhead constants (2000/1500/1000) are unmeasured; semantic dedup (repo note vs commands, handoff state vs objective). When real tasks show misses or budget waste.
-- `.agentos/guide.md` does not list `context`, `checkpoint`, `resume`, `brain`; adding them changes the adapter generator and needs `doctor --fix` in every workspace. At a release slice.
 - Repo-in-scope for nested child repos would need a repo tree. When a workspace nests repos.
 
 ### Checkpoints

@@ -1,11 +1,13 @@
 <!-- agentos:managed:start -->
 # AgentOS Guide
 
-How to operate an AgentOS workspace from any coding engine (Claude Code, OpenCode, Codex, Hermes). This is a command map, not project state. `agentos status` prints the current objective, open tasks and verification commands; read `.agentos/handoff.md` and `.agentos/tasks.md` for more only when file reads work.
+How to operate an AgentOS workspace from any coding engine. This is a command map, not project state: `agentos status` prints the objective, open tasks and verification commands; read `.agentos/handoff.md` and `.agentos/tasks.md` only when file reads work.
 
 ## Start
 
 - Run `agentos status`. It finds the workspace root from any subdirectory and prints the current objective, the open tasks and, from a child repo, that repo's verification commands.
+- Then `agentos context <engine> --task "<task>" --role <id>` (engine: `claude-code`, `codex`, `opencode`, `hermes`) prints the objective, read/edit scope, role card and relevant decisions. Reuse that `--task` value for `checkpoint` and `resume`.
+- If its `Edit scope` is none because no `task_scope` is declared, ask the owner to set `task_scope` (`read`/`edit`) in `.agentos/project.yaml`. Engines do not edit that file.
 - Declare your role (`.agentos/agents/`) and the repo scope before editing. Edit only inside that scope.
 - If a command is unclear, run `agentos --help` instead of guessing flags.
 
@@ -16,13 +18,20 @@ How to operate an AgentOS workspace from any coding engine (Claude Code, OpenCod
 - Some engines refuse file reads outside the directory they started in, and a refused read can end the session immediately instead of letting you continue. Use the CLI first and read parent files only if reads work.
 - `agentos handoff` prints the full handoff and the reading list when you need more than the status summary.
 
+## Stopping, switching engines, decisions
+
+- Before stopping or switching engines: `agentos checkpoint --task <id> --progress "<done>" --next "<remaining>" --check "<cmd>"`. Each `--check` runs as a receipt; `--claim "<text>"` records what AgentOS did not observe.
+- Next engine: `agentos resume --task <id>`, then `context`. No checkpoint was written: `agentos checkpoint --recover --task <id>`.
+- Prefer these to `agentos run handoff`: it writes only a prose note under `.agentos/runs/`, no receipts for `resume` to reconcile.
+- Durable decision or convention: `agentos brain propose <id-or-path> --from <file|-> --summary "<why>"` (ids: `agentos brain list`). Engines propose, never apply; the owner runs `agentos brain preview <proposal>`, then `agentos brain apply <proposal>`.
+- Engine role config (`claude-code`, `codex`): `agentos agents sync <engine> --role <id> --dry-run`, then without `--dry-run`. When `agentos doctor` prints `Synced config: STALE`, re-run the command it prints; add `--replace` only when that line does.
+
 ## Which command for which job
 
 - Health check: `agentos doctor` (read-only). To repair, preview with `agentos doctor --fix --dry-run`, then run `agentos doctor --fix`.
 - Handoff or tasks too long: `agentos compact --dry-run`, review the report, then `agentos compact`. It archives recognised history byte-for-byte and refuses ambiguous state. If it reports nothing to archive, rewrite the file as the rule below says instead of leaving it to grow.
 - Add a workflow: `agentos skills list` shows the catalog, `agentos skills list --installed` shows what is installed, `agentos templates show <id>` reads one first, then `agentos skills add <skill-id> --dry-run` and `agentos skills add <skill-id>`.
 - Roles: `agentos agents list`, `agentos agents list --installed`, `agentos agents add <agent-id> --dry-run`.
-- Switching engines or stopping mid-task: `agentos run handoff --dry-run` writes a continuation note without changing engines for you.
 - Is this adapter file current? `agentos adapters explain <file>`.
 
 ## Rules

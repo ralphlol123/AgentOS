@@ -2,34 +2,34 @@
 
 ## Current objective
 
-AgentOS 1.1 — make 1.0 dependable for everyday development (Ralph, 2026-10-25). Three sequential slices: (1) synced-config freshness detection — accepted; (2) safe agent re-sync — implemented, awaiting review; (3) complete generated workflow guidance; then a Claude + Codex validation run by Phynceon.
+AgentOS 1.1 — make 1.0 dependable for everyday development (Ralph, 2026-10-25). Three sequential slices: (1) synced-config freshness detection — accepted; (2) safe agent re-sync — accepted; (3) complete generated workflow guidance — implemented, awaiting review; then a Claude + Codex validation run by Phynceon.
 
 ## Scope
 
 - Repo: `agentos-for-projects` (single-repo workspace). `main` = `99553dc` (release 1.0.0, npm latest 1.0.0).
-- Slice 1: `feat/1.1-sync-freshness` = `4faca16`, pushed, accepted.
-- Slice 2: `feat/1.1-safe-resync`, stacked on `4faca16`, one local commit, not pushed. No version bump.
-- Client workspaces (KargaX, Labahub) are rolled out manually by the owner and are out of scope.
+- Slices 1–2: `feat/1.1-sync-freshness` = `4faca16`, `feat/1.1-safe-resync` = `973029f`, accepted.
+- Slice 3: `feat/1.1-workflow-guidance`, stacked on `973029f`, one local commit, not pushed. No version bump.
+- Client workspaces (KargaX, Labahub, laundry-pos) are rolled out by the owner and are out of scope.
 
 ## Current state
 
-- Slice 2: `agents sync <engine>` takes ownership only from the slice-1 record `.agentos/synced/<engine>.json`. Re-sync replaces exactly the recorded `permissions.allow`/`deny` entries (owner entries keep place and order; other keys, indent and trailing newline kept), replaces `.claude/agents/<role>.md` while it matches the recorded sha256, replaces only the Codex role block, and removes files recorded for a previous role. Hand-edited generated content, no record with a different list/file, or a broken record refuses with zero writes until `--replace` (one backup per overwritten file under `.agentos/runs/replaced-synced/<ts>/`). `--dry-run` prints per-file `+`/`-` entries and writes nothing. Files, backups and record are one mutation transaction.
-- Shared classifier: `editedEntries` in `src/synced-config.ts` is used by both `syncFreshness` and the sync planner (`planSyncedFile` in `src/core.ts`); `mergeAddKeysOnly` was deleted.
-- STALE line: `re-run agentos agents sync <engine> --role <id> [--scope '<a,b>']`, plus `--replace` only for `generated entry edited` and the 1.0.0 no-record case.
-- Tests: `test/safe-resync.test.js` (11 tests; RED on `4faca16`: 9 of the first 10 fail, the Codex block test already passed); five older assertions updated to the new messages. Docs: `docs/engines.md` (Re-sync and `--replace`), `docs/migration.md`, `docs/agents.md`, README, CHANGELOG `[Unreleased]`, `docs/improve-later.md` (R1–R4 closed). Gates ran as `npm run ...` (no `bun` on PATH in the developer sandbox).
-- History: slice 1 handoff `.agentos/runs/2026-10-26-1.1-slice1-handoff.md`; v1 closure/release state `.agentos/runs/2026-10-26-v1-release-state.md`; slices 1–6 `.agentos/runs/2026-10-25-v1-slice6-handoff.md`; older `.agentos/runs/2026-10-25-v1-slice1-history.md`.
+- Slice 3: `guideMd()` in `src/core.ts` now names the everyday loop, one line per job: `status` → `context <engine> --task "<task>" --role <id>`; owner sets `task_scope` when the edit scope is none (engines do not edit `project.yaml`); `checkpoint --task <id> --progress … --next … --check "<cmd>"` before stopping/switching, `resume --task <id>` to continue, `checkpoint --recover` when none was written, preferred over `run handoff` (prose note only, no receipts); `brain propose` (owner runs `brain preview`/`brain apply`); `agents sync <engine> --role <id> --dry-run` and re-running the command `doctor` prints on `Synced config: STALE`. Existing items and the Rules section kept; the root pointer line and `STATE_RULE_LINE` are unchanged, so root adapters did not change.
+- Guide size: 3,333 → 4,601 bytes (budget 4,608, test-enforced).
+- Tests: `test/workflow-guidance.test.js` (4 tests; RED on `973029f`: loop coverage and 1.0.0-guide staleness fail, allowlist and budget pass); fixture `test/fixtures/guide-1.0.0.md` (the 1.0.0 = `973029f` guide). `test/engine-discovery.test.js` drift test also accepts flags documented in `agentos brain` usage.
+- Docs: README "v1 workflow", `docs/migration.md` (1.1: `doctor --fix` for the new guide; set `task_scope`), CHANGELOG `[Unreleased]`, `docs/improve-later.md` (guide item closed). This repo's `.agentos/guide.md` regenerated with `doctor --fix`.
+- History: slice 2 handoff/tasks `.agentos/runs/2026-10-26-1.1-slice2-handoff.md`; slice 1 `.agentos/runs/2026-10-26-1.1-slice1-handoff.md`; v1 release state `.agentos/runs/2026-10-26-v1-release-state.md`.
 
 ## Known warnings / failures
 
-- One sync record per engine: the last synced role wins and its files replace the previous role's (documented; per-role records are in `docs/improve-later.md`).
-- `.claude/settings.local.json` is re-serialized (indent + trailing newline kept); non-standard spacing is normalised.
-- `agentos status` does not show synced-config freshness (doctor does).
+- Every existing workspace's guide is stale until its owner runs `agentos doctor --fix` with a 1.1 build.
+- `agentos context` reports a missing `task_scope` only as `Edit scope: (none…)` / `Source: (default: no task_scope declared)` in text output; the warning line is in `--json` only.
+- One sync record per engine (last synced role wins); `agentos status` does not show synced-config freshness (doctor does).
 - `doctor` diagnostics list this repo's three legacy agent cards (developer, tester, release-manager).
 
 ## Next exact action
 
-1. Phynceon: review slice 2 on `feat/1.1-safe-resync`; push/PR on approval.
-2. Then slice 3 (complete generated workflow guidance).
+1. Phynceon: review slice 3 on `feat/1.1-workflow-guidance`; push/PR on approval.
+2. Then the Claude + Codex validation run using only the guide.
 
 ## Protected files / do not touch
 

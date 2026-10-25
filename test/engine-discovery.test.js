@@ -98,6 +98,9 @@ test('every agentos command the guide recommends exists in the CLI help (no drif
   const root = await multiRepo(t);
   const guide = await read(root, GUIDE);
   const help = helpText();
+  // `agentos brain` prints its own sub-usage (the main help points there); its flags count as documented.
+  const brainUsage = spawnSync(process.execPath, [CLI, 'brain'], { encoding: 'utf8' });
+  const documented = help + brainUsage.stdout + brainUsage.stderr;
   const helpCommands = new Set([...help.matchAll(/^\s+agentos ([a-z][a-z-]*)/gm)].map((m) => m[1]));
   const recommended = [...guide.matchAll(/`(agentos [^`]+)`/g)].map((m) => m[1]);
   assert.ok(recommended.length >= 6, `expected the guide to recommend several commands, found ${recommended.length}`);
@@ -107,7 +110,7 @@ test('every agentos command the guide recommends exists in the CLI help (no drif
     if (tokens[0] === '--help' || tokens[0] === '--version') continue;
     assert.ok(helpCommands.has(tokens[0]), `\`${command}\`: unknown CLI command '${tokens[0]}'`);
     for (const flag of tokens.filter((tok) => tok.startsWith('--'))) {
-      assert.ok(help.includes(flag), `\`${command}\`: flag ${flag} is not in the CLI help`);
+      assert.ok(documented.includes(flag), `\`${command}\`: flag ${flag} is not in the CLI help`);
     }
   }
 });

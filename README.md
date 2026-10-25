@@ -250,11 +250,11 @@ More detail: [docs/quickstart.md](docs/quickstart.md).
 
 ## v1 workflow
 
-The path below is the one Phynceon's 2026-10-25 cross-engine trial walked (Claude Code 2.1.310 → Codex 0.156.1 and back, on a disposable root repo with `web/`, `api/`, `docs/adr/`; [report](docs/evidence/2026-10-25-cross-engine/REPORT.md), n=1). Steps 1–7 use the trial's commands; steps 8–9 were not part of the trial and are covered by tests only.
+The path below is the one Phynceon's 2026-10-25 cross-engine trial walked (Claude Code 2.1.310 → Codex 0.156.1 and back, on a disposable root repo with `web/`, `api/`, `docs/adr/`; [report](docs/evidence/2026-10-25-cross-engine/REPORT.md), n=1). Steps 1–7 use the trial's commands; steps 8–9 were not part of the trial and are covered by tests only. Engines learn the same loop (status → context → checkpoint/resume → brain propose → agents sync) from the generated `.agentos/guide.md`; `agentos doctor --fix` refreshes it in an existing workspace.
 
 1. **Init** the workspace once: `agentos init --existing`.
 2. **Role**: give the role a manifest card (catalog cards from `init` already have one): `agentos agents add developer` (or `agentos agents manifest developer --from-catalog` for an older card). See [docs/agents.md](docs/agents.md).
-3. **Task scope** in `.agentos/project.yaml` — what the task may read and edit (the trial used):
+3. **Task scope** in `.agentos/project.yaml` — what the task may read and edit; the owner sets it, engines do not edit that file (without it `context` reports an empty edit scope). The trial used:
 
    ```yaml
    task_scope:
@@ -273,7 +273,7 @@ The path below is the one Phynceon's 2026-10-25 cross-engine trial walked (Claud
 
    `--claim "<text>"` records something the engine reports but AgentOS did not observe.
 7. **Fresh Codex**: `agentos resume --task greeting` (accomplished / remaining / receipts / reconciliation, read-only), then `agentos context codex --task greeting`. The trial ran `codex exec -a never` with both as the prompt; Codex continued from the `observed-pass`/`claimed`/`not-run` receipts and wrote its own checkpoint (`--engine codex`).
-8. **Brain**: record what the task taught as a proposal and apply it after review: `agentos brain propose <id-or-path> --from - --summary "<why>"`, `agentos brain preview <proposal>`, `agentos brain apply <proposal>`. See [docs/brain.md](docs/brain.md).
+8. **Brain**: record what the task taught as a proposal; the engine proposes, the owner reviews and applies: `agentos brain propose <id-or-path> --from - --summary "<why>"`, `agentos brain preview <proposal>`, `agentos brain apply <proposal>`. See [docs/brain.md](docs/brain.md).
 9. **Obsidian (optional)**: `agentos obsidian init` (plain `knowledge/` folder) or `agentos obsidian link --vault <abs-path> --dest <sub/folder> [--canonical workspace|vault] --create`. See [docs/obsidian.md](docs/obsidian.md).
 
 What is enforced and what is only instruction, per engine: [docs/engines.md](docs/engines.md). Proven / not proven per scenario: [docs/acceptance-matrix.md](docs/acceptance-matrix.md).
