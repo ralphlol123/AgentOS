@@ -6,7 +6,7 @@ This checklist prepares AgentOS for an npm release without publishing accidental
 
 ```text
 name: agentos-for-projects
-version: 1.0.0
+version: 1.1.0
 bin: agentos -> dist/cli.js
 license: MIT
 node: >=20

@@ -4,6 +4,10 @@ All notable changes to AgentOS for Projects are documented here.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-26
+
+Everyday-use fixes on top of 1.0.0 (PR #55). Upgrade: run `agentos doctor --fix` to get the new `.agentos/guide.md`; settings synced by 1.0.0 have no sync record, so re-run `agentos agents sync <engine> --role <id> --replace` once.
+
 ### Added
 
 - **Sync record and synced-config freshness in `doctor` (1.1 slice 1).** `agents sync <engine>` (not `--dry-run`) also writes `.agentos/synced/<engine>.json` in the same mutation transaction: engine, role, scope (`--scope` flag and effective edit/read), AgentOS version, and per generated file its sha256 (plus the generated `permissions.allow`/`deny` entries). One shared check compares the installed files with the record and the record with what sync would generate now for the **recorded** role and scope: `OK`, `STALE` (per file: `tree changed`, `scope changed`, `manifest changed`, `generated entry edited`, `generated file missing`; or `synced by 1.0.0 without a record`), `INVALID` (broken record, invalid JSON settings, malformed `project.yaml`, card without manifest — with the reason), `MISSING` (never synced), `UNSUPPORTED`. `agentos doctor` prints one warning per stale or invalid engine naming the exact re-sync command (exit status unchanged, nothing rewritten; a never-synced workspace gets byte-identical output) and `doctor --json` adds `synced_config: [{engine, status, role, files, reason, user_entries}]`.
