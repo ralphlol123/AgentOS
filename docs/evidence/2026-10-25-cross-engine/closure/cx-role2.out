@@ -1,0 +1,7 @@
+ROLEBLOCK-7731 developer
+
+Project: **aos-t2**.
+
+My assigned edit scope is `/tmp/aos-t2/web/src/**`. Secrets, `.env`, migrations, and production configuration require approval.
+
+This session’s filesystem is **read-only**, so I currently cannot edit any paths. No files changed; `agentos status` passed.

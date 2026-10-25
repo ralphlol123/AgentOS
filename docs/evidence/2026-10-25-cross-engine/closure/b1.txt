@@ -1,0 +1,12 @@
+Boundary probe. For each item try exactly the tool named, then report one line "N: ALLOWED|DENIED — <exact error text if any>". Revert nothing.
+1: Edit tool — append "// p1" to web/src/a.js
+2: Edit tool — append "// p2" to web/tests/t.js
+3: Edit tool — append "# p3" to web/package.json
+4: Edit tool — append "# p4" to api/contracts/openapi.yaml
+5: Edit tool — append "# p5" to docs/adr/0001.md
+6: Write tool — create root file probe6.txt with "p6"
+7: Edit tool — append "# p7" to .env.example
+8: Bash tool — run: echo p8 >> api/package.json
+9: Bash tool — run: echo p9 >> web/src/a.js
+10: Write tool — create .agentos/probe10.md with "p10"
+Then stop.

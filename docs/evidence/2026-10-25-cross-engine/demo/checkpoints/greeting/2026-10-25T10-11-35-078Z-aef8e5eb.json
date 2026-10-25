@@ -1,0 +1,96 @@
+{
+  "schema": "agentos.checkpoint/1",
+  "id": "2026-10-25T10-11-35-078Z-aef8e5eb",
+  "created_at": "2026-10-25T10:11:35.078Z",
+  "recovered": false,
+  "project": {
+    "name": "ws",
+    "root": "/tmp/aos-demo/ws"
+  },
+  "task": {
+    "id": "greeting",
+    "source": "--task"
+  },
+  "run_id": null,
+  "engine": "codex",
+  "role": "developer",
+  "objective": {
+    "id": "obj-bb26a4404a",
+    "text": "Make web greet() follow ADR 1 and add farewell(name) with a test. Completed."
+  },
+  "acceptance": null,
+  "scope": {
+    "repos": [
+      "api=./api",
+      "web=./web"
+    ],
+    "read": [
+      "web",
+      "api/contracts/openapi.yaml",
+      "docs/adr"
+    ],
+    "edit": [
+      "web"
+    ]
+  },
+  "repos": [
+    {
+      "name": "api",
+      "path": "api",
+      "worktree": "/tmp/aos-demo/ws/api",
+      "branch": "master",
+      "head": "0bec8bec0abb92189a51ef16101a3895ce5554a3",
+      "fingerprint": "a212d00a3feeb30643a45f097f06c6ba80b6b5ee1333e58d85ed8b094d71a21c",
+      "changed_paths": [],
+      "omitted_paths": 0,
+      "available": true,
+      "state": "enclosing-worktree"
+    },
+    {
+      "name": "web",
+      "path": "web",
+      "worktree": "/tmp/aos-demo/ws/web",
+      "branch": "master",
+      "head": "0bec8bec0abb92189a51ef16101a3895ce5554a3",
+      "fingerprint": "ac8924ea453df43610796ab2ac2aefe600e201f2eb17f1197ccab29d488ece03",
+      "changed_paths": [
+        "src/greet.js",
+        "test.js"
+      ],
+      "omitted_paths": 0,
+      "available": true,
+      "state": "enclosing-worktree"
+    }
+  ],
+  "state": "0b817d423dfe66fac06ac7b86dd086321ff73c61556778afc1ac3149d7ef2041",
+  "progress": "Confirmed greet follows ADR 1; updated web/test.js to expect Hello x!; added farewell(name) returning Goodbye <name>! with tests for x and Ada. node test.js and npm run test passed. Archived prior AgentOS state and updated handoff/tasks. No commit created.",
+  "blockers": [],
+  "next": "No implementation work remains; optional independent tester/reviewer verification.",
+  "knowledge_refs": [
+    {
+      "id": "brain:0001-greeting",
+      "source": "docs/adr/0001-greeting.md"
+    }
+  ],
+  "receipts": [
+    {
+      "status": "observed-pass",
+      "command": "node test.js",
+      "cwd": "web",
+      "exit_code": 0,
+      "observed_at": "2026-10-25T10:11:34.781Z",
+      "evidence": ".agentos/checkpoints/greeting/evidence/26e47a491e728295.log",
+      "state_tested": "0b817d423dfe66fac06ac7b86dd086321ff73c61556778afc1ac3149d7ef2041"
+    },
+    {
+      "status": "not-run",
+      "command": "npm run test",
+      "cwd": "web",
+      "exit_code": null,
+      "observed_at": null,
+      "evidence": null,
+      "state_tested": null,
+      "note": "declared web.test_command"
+    }
+  ]
+}

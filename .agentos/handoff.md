@@ -12,24 +12,26 @@ AgentOS v1 is complete pending owner review: seven stacked slices (correctness/c
 
 ## Current state
 
-- Slice 7 on `feat/v1-final`: trial defects fixed — D1 `agents sync claude-code` writes deny rules (repo/read paths outside the edit scope; `/**` for read-only roles) and prints the trust note; D2 checkpoint/resume use the enclosing work tree for child directories (`state: enclosing-worktree`); D3 `checkpoint` ignores a bare `.`. Matrix rows from Phynceon's trial (`docs/evidence/2026-10-25-cross-engine/`): claude-code `permission_enforcement` + `tool_restrictions` verified, codex `permission_enforcement` verified (launch-time sandbox only), `native_agent_config` unverified for both.
-- Docs: README "v1 workflow" + "Documentation"; `docs/engines.md` (final matrix, what the trial did not prove), `docs/migration.md`, `docs/acceptance-matrix.md` (24 PASS, 0 FAIL, 2 BLOCKED), `docs/improve-later.md`; CHANGELOG `[Unreleased]` v1 entry (no version bump).
+- Closure 3 on `fix/v1-claude-deny-siblings` (local commits on `d7501a9`, not pushed; owner review of PR #53): `context --require-enforcement` exits 1 for every engine (`Enforcement: UNSUPPORTED — …`, reasons per engine; configuration presence is not proof of enforcement); the deny-set freshness check is `--require-synced-config` (OK/STALE/MISSING/UNSUPPORTED); `--json` carries `enforcement` and `synced_config`; the claude-code ADVISORY names the residual writable paths. Docs use configuration / discovery / invocation / instruction-following / enforcement (`docs/engines.md` "Enforcement vs synced configuration"). Plan file, "Closure 3" section.
+- Closure 2 on `fix/v1-claude-deny-siblings` (new local commits on `71cdb19`, not pushed): `Edit/Write(/*)` removed (Claude Code matches `/*` recursively, host re-trial T6b); `tools_requested` rendered as the Claude subagent `tools:` (read-only default `Read, Grep, Glob`); re-trials T6–T8 copied to `docs/evidence/2026-10-25-cross-engine/closure/` and reflected in the matrix and docs. Plan file, "Closure 2" section.
+- Closure (`71cdb19`, pushed): `agents sync claude-code` enumerates sibling denies (everything outside the edit scope; `.agentos/` state stays writable, `project.yaml`/`agents/**` denied); the synced deny-set hash check (renamed `--require-synced-config` in closure 3). Settings synced by `71cdb19` are STALE (contain `/*`).
+- Slice 7 on `feat/v1-final` (pushed, PR #52): trial defects fixed — D1 `agents sync claude-code` writes deny rules (repo/read paths outside the edit scope; `/**` for read-only roles) and prints the trust note; D2 checkpoint/resume use the enclosing work tree for child directories (`state: enclosing-worktree`); D3 `checkpoint` ignores a bare `.`. Matrix rows from Phynceon's trial (`docs/evidence/2026-10-25-cross-engine/`): claude-code `permission_enforcement` + `tool_restrictions` verified, codex `permission_enforcement` verified (launch-time sandbox only), `native_agent_config` now verified for both after T5/T7/T8 (instruction-following).
+- Docs: README "v1 workflow" + "Documentation"; `docs/engines.md` (final matrix, what the trial did not prove), `docs/migration.md`, `docs/acceptance-matrix.md` (27 PASS, 0 FAIL, 0 BLOCKED after closure 3), `docs/improve-later.md`; CHANGELOG `[Unreleased]` v1 entry (no version bump).
 - Gates on `feat/v1-final`: see the plan file, "Slice 7 — acceptance evidence". The developer sandbox has no `bun` on PATH; gates ran as `npm run ...` (same scripts).
 - Deprecated migration writers (0.10.0 removal) remain GATED: not scheduled, owner decision pending.
 - History: slice 1–6 handoff `.agentos/runs/2026-10-25-v1-slice6-handoff.md`; older (0.8–0.9, rollouts) `.agentos/runs/2026-10-25-v1-slice1-history.md`.
 
 ## Known warnings / failures
 
-- BLOCKED (host engine trial needed): engine-native agent config consumption (`.claude/agents/<id>.md`, Codex role block); Claude Code deny rules exactly as the fixed sync writes them (acceptance matrix S19, S20).
-- Engine evidence is n=1 per cell; enforcement is conditional (Claude Code: deny rules + trusted workspace; Codex: launch-time `--sandbox read-only`, no per-path scope). `context --require-enforcement` exits 1 for every engine.
+- No BLOCKED rows. The rendered `tools:` restricted the invoked Claude subagent (closure T9, n=1; not the top-level session).
+- Engine evidence is n=1 per probe (T7 n=2 + controls); enforcement is conditional (Claude Code: deny rules + trusted workspace, listed paths + siblings + Bash redirect to denied paths + read-only deny-all verified; residual advisory: new root files/dirs after sync, `.agentos/` state, other shell writes; Codex: launch-time `--sandbox read-only`, no per-path scope). `context --require-enforcement` exits 1 for every engine; `--require-synced-config` checks configuration presence only.
 - `doctor` diagnostics list this repo's three legacy agent cards (developer, tester, release-manager).
 - Refinements (no defects): `docs/improve-later.md`.
 
 ## Next exact action
 
-1. Owner/Phynceon: review `feat/v1-final`, push it and open its PR stacked on #51.
-2. Owner: merge PRs #46–#51 and the final PR in order; decide version and release.
-3. Optional host trial for the two BLOCKED rows (`docs/engines.md`, "Repeating the trial").
+1. Phynceon: review and push the closure-3 commits on `fix/v1-claude-deny-siblings` (PR #53, on `d7501a9`).
+2. Owner: merge PRs #46–#52 and the closure branch in order; decide version and release.
 
 ## Protected files / do not touch
 

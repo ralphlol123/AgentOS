@@ -1,0 +1,6 @@
+$ node test.js
+(cwd web)
+--- stdout ---
+
+--- stderr ---
+

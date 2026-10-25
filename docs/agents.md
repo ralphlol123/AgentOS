@@ -85,5 +85,7 @@ Everything else is refused with exit 1 and zero writes: `custom: true`, a body e
 ## Limits
 
 - Existing workspaces keep their legacy cards until `agents manifest` or `agents add` runs; nothing upgrades them automatically.
-- `knowledge_selectors`, `skills` and `tools_requested` are recorded but not used for context selection; only `tools_requested` reaches an engine (Claude Code subagent `tools:`, unverified).
+- `knowledge_selectors`, `skills` and `tools_requested` are recorded but not used for context selection; only `tools_requested` reaches an engine (Claude Code subagent `tools:`, verified for the invoked subagent — closure T9).
 - `import:<url>` provenance is accepted by the validator but `templates import` still writes legacy cards.
+
+What the Claude Code deny rules written by `agents sync claude-code` cover and do not cover (siblings, listed paths, Bash redirects, residual new root files/dirs, `.agentos/` state, trust requirement): see [`docs/engines.md`](engines.md#what-the-claude-code-deny-rules-cover--do-not-cover).
