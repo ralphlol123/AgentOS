@@ -22,8 +22,8 @@ export interface NativeConfigInput {
   edit: Array<{ path: string; dir: boolean }>;
   /** Workspace-relative directory whose AGENTS.md carries the role block (codex). */
   repoDir: string;
-  /** Repo and read-scope paths outside the edit scope (claude-code deny rules). */
-  outside?: Array<{ path: string; dir: boolean }>;
+  /** Everything outside the edit scope (claude-code deny rules); `tools` defaults to Edit, Write, NotebookEdit. */
+  outside?: Array<{ path: string; dir: boolean; tools?: string[] }>;
 }
 export interface NativeFile { path: string; content: string; merge: 'whole-file' | 'json-add-keys' | 'managed-block' }
 export interface EngineAdapter {
@@ -70,13 +70,18 @@ const WRITE_TOOLS = ['Edit', 'Write', 'NotebookEdit'];
 const claudePath = ({ path, dir }: { path: string; dir: boolean }) => path === '.' ? '/**' : `/${path}${dir ? '/**' : ''}`;
 /** Permission fragment. Allow rules alone do not restrict Claude Code and the file is ignored until the workspace is
  *  trusted (trial T3a); deny rules in a trusted workspace do (T3b), and deny wins over allow. `/path` is relative to
- *  the settings source. `outside` = repo and read paths outside the edit scope. */
+ *  the settings source. `outside` = every entry outside the edit scope (sync enumerates siblings), each with its
+ *  tools (default Edit, Write, NotebookEdit). */
 export function claudeSettingsFragment(edit: NativeConfigInput['edit'], outside: NativeConfigInput['outside'] = []) {
   if (!edit.length) return { permissions: { deny: WRITE_TOOLS.map((tool) => `${tool}(/**)`) } };
-  const deny = outside.flatMap((entry) => WRITE_TOOLS.map((tool) => `${tool}(${claudePath(entry)})`));
+  const deny = outside.flatMap((entry) => (entry.tools ?? WRITE_TOOLS).map((tool) => `${tool}(${claudePath(entry)})`));
   return { permissions: { allow: edit.map((entry) => `Edit(${claudePath(entry)})`), ...(deny.length ? { deny } : {}) } };
 }
 export const CLAUDE_TRUST_NOTE = 'Claude Code ignores `.claude/settings.local.json` until the workspace is trusted; run `claude` interactively once or set `projects[<root>].hasTrustDialogAccepted` in ~/.claude.json.';
+const CLAUDE_SYNC_LIMITS = [
+  'The deny rules enumerate the tree as it is now: re-run `agentos agents sync claude-code` after adding top-level directories (remove permissions.allow/deny from .claude/settings.local.json first; sync adds keys only). `agentos context claude-code --require-enforcement` reports STALE until then.',
+  'advisory: shell writes (Bash) are blocked only where Claude Code recognises a file write to a denied path; .agentos/ state files (handoff, tasks, checkpoints) stay writable.',
+].join('\n');
 
 function codexRoleBlock(input: NativeConfigInput): NativeFile {
   const { role, manifest, edit } = input;
@@ -105,14 +110,14 @@ const ADAPTERS: EngineAdapter[] = [
       native_agent_config: row('verified', `Verified for discovery only: after \`agentos agents sync claude-code\`, Claude Code 2.1.310 listed the synced agent from .claude/agents/<id>.md in a trusted workspace (${REPORT}#T5, n=1). Invoking the subagent and its tools: list were not tested.`),
       tool_restrictions: row('verified', `Verified (launch-time --allowedTools; see T1/T2): \`claude -p --allowedTools Read,Edit,Write,Bash(node:*),Bash(cd:*)\` blocked Bash git in Claude Code 2.1.310 (${REPORT}#T1, n=1). AgentOS passes no launch flags; the manifest tools_requested -> subagent tools: list is not covered (native_agent_config unverified).`),
       permission_enforcement: {
-        ...row('verified', `Verified for deny rules in a trusted workspace: with hasTrustDialogAccepted and permissions.deny [Edit(/api/**), Write(/api/**)], Claude Code 2.1.310 refused an edit under api/ and allowed web/ (${REPORT}#T3, T3b, n=1). Allow-only rules or an untrusted workspace do not restrict (T3a). \`agents sync claude-code\` writes deny rules for every repo/read path outside the edit scope.`),
-        edit_scope: 'enforced for claude-code only by the deny rules from `agentos agents sync claude-code` in a trusted workspace; otherwise instruction-only',
+        ...row('verified', `Verified for listed-path deny rules in a trusted workspace: with hasTrustDialogAccepted and permissions.deny [Edit(/api/**), Write(/api/**)], Claude Code 2.1.310 refused an edit under api/ and allowed web/ (${REPORT}#T3, T3b, n=1); the deny rules as sync wrote them for repo/read paths outside the edit scope refused api/package.json (${REPORT}#T5, n=1). Allow-only rules or an untrusted workspace do not restrict (T3a). Sibling denies (every other entry outside the edit scope, Edit/Write(/*) for new root files, .claude/settings*.json, .agentos/project.yaml, .agentos/agents/**): sibling enumeration added 2026-10-25; host re-trial pending (Phynceon). Shell writes: advisory (blocked only where Claude Code recognises a file write to a denied path; boundary probe, docs/acceptance-matrix.md S20).`),
+        edit_scope: 'enforced for claude-code only by the deny rules from `agentos agents sync claude-code` in a trusted workspace (listed paths verified; sibling denies pending re-trial; shell writes advisory); otherwise instruction-only',
       },
       launch: row('unsupported', NO_LAUNCH),
       native_session_resume: row('unsupported', NO_RESUME),
     },
     nativeConfig: (input) => [claudeAgentFile(input), { path: '.claude/settings.local.json', merge: 'json-add-keys', content: `${JSON.stringify(claudeSettingsFragment(input.edit, input.outside), null, 2)}\n` }],
-    syncNote: CLAUDE_TRUST_NOTE,
+    syncNote: `${CLAUDE_TRUST_NOTE}\n${CLAUDE_SYNC_LIMITS}`,
   },
   {
     id: 'codex', render: renderWith, capabilities: {

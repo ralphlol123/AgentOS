@@ -26,7 +26,8 @@ Measured on 2026-10-25: a two-directory workspace (`web/`, `api/`, one root git 
 Behaviour that changed for existing data:
 
 - `checkpoint`/`resume`: a repo path that is a directory inside one enclosing git work tree used to be `unavailable (not the top of a git work tree)`; it is now available with `state: enclosing-worktree` (HEAD/branch of the enclosing repo, git calls limited to the directory). A checkpoint taken before this change and resumed after it reports that repo as `drifted (was unavailable at checkpoint time)` once; take a new checkpoint.
-- `agentos context <engine>` ADVISORY line for claude-code and codex now states the conditional enforcement instead of `instruction-only`; `--require-enforcement` still exits 1 for every engine.
+- `agentos context <engine>` ADVISORY line for claude-code and codex now states the conditional enforcement instead of `instruction-only`. `--require-enforcement` exits 1 for every engine except claude-code with a current synced deny set.
+- `agents sync claude-code` now also denies every sibling entry outside the edit scope (v1 closure). A `.claude/settings.local.json` written by an earlier v1 sync has the listed-path deny list only: `context claude-code --require-enforcement` reports it `STALE`, and a re-sync refuses (add-keys-only) until you remove `permissions.allow`/`deny` from it; then sync again.
 
 ## Keep / simplify / remove inventory
 

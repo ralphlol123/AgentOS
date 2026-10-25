@@ -1947,30 +1947,91 @@ async function agentsAgentOSUnlocked(options: any = {}) {
   return { ok: true, root, id, dryRun, action: install.action, text: lines.join('\n') };
 }
 
+type DenyTarget = { path: string; dir: boolean; tools?: string[] };
+
+/** Claude Code deny targets for an edit scope: everything outside it. Deny wins over allow, so "deny /** + allow a
+ *  subset" cannot work; instead, for each edit path, every entry at each ancestor level that is not on the way to an
+ *  edit path (and not inside one) is denied, plus the listed repo/read paths outside the scope. Root-level new files:
+ *  Edit/Write(/*). Always: the settings files (a session must not lift its own rules) and the scope/role definitions
+ *  (.agentos/project.yaml, .agentos/agents/**); the rest of .agentos/ stays writable (handoff/tasks/checkpoints).
+ *  ponytail: snapshot of the tree at sync time; entries created later (and new files directly inside an ancestor such
+ *  as web/) are not covered until a re-sync. */
+async function claudeDenyTargets(root: string, edit: Array<{ path: string; dir: boolean }>, listed: DenyTarget[]): Promise<DenyTarget[]> {
+  const within = (path: string, base: string) => base === '.' || path === base || path.startsWith(`${base}/`);
+  const kept = (path: string) => edit.some((e) => within(path, e.path) || within(e.path, path));
+  const targets = new Map<string, DenyTarget>();
+  const add = (target: DenyTarget) => { if (!targets.has(target.path)) targets.set(target.path, target); };
+  for (const e of edit) {
+    const parts = e.path === '.' ? [] : e.path.split('/');
+    for (let depth = 0; depth < parts.length; depth++) {
+      const parent = parts.slice(0, depth).join('/');
+      const entries = await readdir(join(root, parent), { withFileTypes: true }).catch(() => null);
+      if (!entries) break;
+      for (const dirent of entries) {
+        const path = parent ? `${parent}/${dirent.name}` : dirent.name;
+        if (dirent.name === '.git' || dirent.name === 'node_modules' || path === '.agentos' || path === '.claude' || path === '.agentos-write.lock' || kept(path)) continue;
+        const dir = dirent.isDirectory() || (dirent.isSymbolicLink() && await stat(join(root, path)).then((info) => info.isDirectory()).catch(() => false));
+        add({ path, dir });
+      }
+    }
+  }
+  if (!kept('.claude')) add({ path: '.claude', dir: true }); // sync itself creates .claude/: deny it whether or not it exists yet
+  if (!edit.some((e) => e.path === '.')) add({ path: '*', dir: false, tools: ['Edit', 'Write'] });
+  for (const path of ['.claude/settings.json', '.claude/settings.local.json']) add({ path, dir: false, tools: ['Edit', 'Write'] });
+  add({ path: '.agentos/project.yaml', dir: false });
+  add({ path: '.agentos/agents', dir: true });
+  listed.forEach(add);
+  return [...targets.values()].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+}
+
+/** Role, effective edit scope and engine-native files, read-only. Shared by `agents sync` and `context --require-enforcement`. */
+async function nativeConfigPlan(root: string, engine: string, adapter: ReturnType<typeof engineAdapter>, options: any) {
+  const input = await contextInputFor(root, engine, { role: options.role, scope: options.scope });
+  const bundle = await buildContextBundle(input);
+  const role = bundle.role;
+  if (!role) throw new Error('No role: pass --role <agent-id>.');
+  const card = parseAgentCard(role, await safeRead(join(root, '.agentos/agents', `${role}.md`)));
+  if (!card.manifest) return { refused: `.agentos/agents/${role}.md has ${card.state === 'invalid' ? 'an invalid manifest' : 'no manifest'}; native config is generated from the manifest. Run \`agentos agents manifest ${role} --from-catalog\` (or --custom) first.` };
+  const repoPath = (entry: string) => (input.repos.find((repo) => repo.name === entry)?.path ?? entry).replace(/^\.\/(?=.)/, '').replace(/\/+$/, '') || '.';
+  const entry = async (path: string) => ({ path, dir: path === '.' || (await stat(join(root, path)).then((info) => info.isDirectory()).catch(() => true)) });
+  const edit = await Promise.all(bundle.scope.edit.map((scope) => entry(repoPath(scope))));
+  const childRepos = input.repos.map((repo) => repoPath(repo.name)).filter((path) => path !== '.');
+  const owners = [...new Set(edit.map(({ path }) => childRepos.find((repo) => path === repo || path.startsWith(`${repo}/`)) ?? '.'))];
+  // Listed paths outside the edit scope: every repo and read path not covered by an edit path. A path that *contains*
+  // an edit path is skipped (deny wins over allow in Claude Code, so denying it would block the edit scope).
+  const within = (path: string, base: string) => base === '.' || path === base || path.startsWith(`${base}/`);
+  const outsidePaths = [...new Set([...childRepos, ...bundle.scope.read.map(repoPath)])].filter((path) => path !== '.' && !edit.some((e) => within(path, e.path) || within(e.path, path)));
+  const outside = edit.length ? await claudeDenyTargets(root, edit, await Promise.all(outsidePaths.map(entry))) : [];
+  const files = adapter.nativeConfig!({ role, manifest: card.manifest, body: card.body, edit, outside, repoDir: owners.length === 1 ? owners[0] : '.' });
+  return { role, bundle, files };
+}
+
+/** `context claude-code --require-enforcement`: the deny set in .claude/settings.local.json must equal what sync
+ *  would generate now. Proves the configuration is present and current, not that Claude Code applies it (trust). */
+async function claudeEnforcementCheck(root: string, options: any) {
+  const conditional = 'permission_enforcement is verified for claude-code only conditionally';
+  let plan;
+  try { plan = await nativeConfigPlan(root, 'claude-code', engineAdapter('claude-code'), options); } catch (error) { return { status: 'UNSUPPORTED', why: `${conditional}: ${error.message}` }; }
+  if ('refused' in plan) return { status: 'UNSUPPORTED', why: `${conditional}: ${plan.refused}` };
+  const settings = plan.files.find((file) => file.path === '.claude/settings.local.json')!;
+  const digest = (deny: string[]) => sha256Hex(JSON.stringify([...deny].sort())).slice(0, 12);
+  const expected = digest(JSON.parse(settings.content).permissions.deny);
+  let current;
+  try { current = JSON.parse(await readFile(join(root, settings.path), 'utf8'))?.permissions?.deny; } catch { current = undefined; }
+  if (!Array.isArray(current)) return { status: 'UNSUPPORTED', why: `${conditional}: no permissions.deny in ${settings.path}. Run \`agentos agents sync claude-code\` and trust the workspace.` };
+  if (digest(current) !== expected) return { status: 'STALE', why: `${settings.path} deny set (sha256 ${digest(current)}) differs from what \`agents sync claude-code\` generates now (sha256 ${expected}): the tree or scope changed. Remove permissions.allow/deny from ${settings.path} (sync adds keys only), then re-run \`agentos agents sync claude-code\`.` };
+  return { status: 'OK', sha256: expected, line: `Enforcement: enforcement configuration present: ${settings.path} deny set matches \`agents sync claude-code\` (sha256 ${expected}). Claude Code applies it only in a trusted workspace, which AgentOS cannot confirm; shell writes are advisory.` };
+}
+
 /** `agentos agents sync <engine>`: the only path that writes engine-native agent config. Preflights every target;
  *  any conflict refuses the whole sync with zero writes. Never called by context/checkpoint. */
 async function syncAgentsUnlocked(root: string, options: any) {
   const engine = normalizeEngine(options.engine);
   const adapter = engineAdapter(engine);
   if (!adapter.nativeConfig) return { ok: false, text: `AgentOS agents sync: UNSUPPORTED\n${engine} has no native agent config (native_agent_config: ${adapter.capabilities.native_agent_config.status}). Supported: claude-code, codex.` };
-  const input = await contextInputFor(root, engine, { role: options.role, scope: options.scope });
-  const bundle = await buildContextBundle(input);
-  const role = bundle.role;
-  if (!role) throw new Error('No role: pass --role <agent-id>.');
-  const card = parseAgentCard(role, await safeRead(join(root, '.agentos/agents', `${role}.md`)));
-  if (!card.manifest) return { ok: false, text: `AgentOS agents sync: REFUSED\n.agentos/agents/${role}.md has ${card.state === 'invalid' ? 'an invalid manifest' : 'no manifest'}; native config is generated from the manifest. Run \`agentos agents manifest ${role} --from-catalog\` (or --custom) first.\nNothing was written.` };
-  const repoPath = (entry: string) => (input.repos.find((repo) => repo.name === entry)?.path ?? entry).replace(/^\.\/(?=.)/, '').replace(/\/+$/, '') || '.';
-  const entry = async (path: string) => ({ path, dir: path === '.' || (await stat(join(root, path)).then((info) => info.isDirectory()).catch(() => true)) });
-  const edit = await Promise.all(bundle.scope.edit.map((scope) => entry(repoPath(scope))));
-  const childRepos = input.repos.map((repo) => repoPath(repo.name)).filter((path) => path !== '.');
-  const owners = [...new Set(edit.map(({ path }) => childRepos.find((repo) => path === repo || path.startsWith(`${repo}/`)) ?? '.'))];
-  // Paths outside the edit scope: every repo and read path not covered by an edit path. A path that *contains* an
-  // edit path is skipped too (deny wins over allow in Claude Code, so denying it would block the edit scope).
-  // ponytail: siblings of a nested edit path (web/ when only web/src is editable) stay undenied; add per-child denies if it matters.
-  const within = (path: string, base: string) => base === '.' || path === base || path.startsWith(`${base}/`);
-  const outsidePaths = [...new Set([...childRepos, ...bundle.scope.read.map(repoPath)])].filter((path) => path !== '.' && !edit.some((e) => within(path, e.path) || within(e.path, path))).sort();
-  const outside = await Promise.all(outsidePaths.map(entry));
-  const files = adapter.nativeConfig({ role, manifest: card.manifest, body: card.body, edit, outside, repoDir: owners.length === 1 ? owners[0] : '.' });
+  const plan = await nativeConfigPlan(root, engine, adapter, options);
+  if ('refused' in plan) return { ok: false, text: `AgentOS agents sync: REFUSED\n${plan.refused}\nNothing was written.` };
+  const { role, bundle, files } = plan;
   const plans = [];
   const conflicts = [];
   for (const file of files) {
@@ -4422,8 +4483,14 @@ export async function contextAgentOS(options: any = {}) {
   const engine = normalizeEngine(options.engine ?? 'generic');
   const adapter = engineAdapter(engine);
   const enforcement = adapter.capabilities.permission_enforcement;
-  // Conditional enforcement (claude-code deny rules + trust, codex launch-time sandbox) cannot be confirmed from here.
-  if (options.requireEnforcement && (enforcement.status !== 'verified' || enforcement.edit_scope)) {
+  // claude-code: the synced deny set must be present and current (hash compare); trust still cannot be confirmed here.
+  // Codex launch-time sandbox and instruction-only engines cannot be confirmed at all.
+  let enforcementLine = '';
+  if (options.requireEnforcement && engine === 'claude-code') {
+    const check = await claudeEnforcementCheck(root, options);
+    if (check.status !== 'OK') return { ok: false, text: `AgentOS context: ${check.status}\n--require-enforcement: ${check.why}\nNo context was rendered. Without the flag, the edit scope is delivered as instructions only (see \`agentos engines\`).` };
+    enforcementLine = check.line!;
+  } else if (options.requireEnforcement && (enforcement.status !== 'verified' || enforcement.edit_scope)) {
     const why = enforcement.status !== 'verified' ? `permission_enforcement is ${enforcement.status} for ${engine}. ${enforcement.evidence}` : `permission_enforcement is verified for ${engine} only conditionally: edit scope is ${enforcement.edit_scope}. AgentOS cannot confirm that condition here.`;
     return { ok: false, text: `AgentOS context: UNSUPPORTED\n--require-enforcement: ${why}\nNo context was rendered. Without the flag, the edit scope is delivered as instructions only (see \`agentos engines\`).` };
   }
@@ -4437,8 +4504,8 @@ export async function contextAgentOS(options: any = {}) {
   // --require-complete: a bundle with Missing items (e.g. an unavailable vault) exits 1; the bundle itself stays `ok`.
   const incomplete = Boolean(options.requireComplete && bundle.ok && bundle.missing.length);
   const incompleteLine = incomplete ? `\n\nAgentOS context: INCOMPLETE (--require-complete): ${bundle.missing.length} missing item(s): ${bundle.missing.join('; ')}` : '';
-  if (options.json) return { ok: bundle.ok && !incomplete, bundle, text: JSON.stringify({ ...bundle, advisories: advisoryLines, ...(options.requireComplete ? { complete: !bundle.missing.length } : {}) }, null, 2) };
-  const footer = `\n\nBudget: ${bundle.budget.estimate} of ${bundle.budget.limit} tokens, ${bundle.budget.label}, including ${bundle.budget.overhead} assumed engine overhead.`;
+  if (options.json) return { ok: bundle.ok && !incomplete, bundle, text: JSON.stringify({ ...bundle, advisories: advisoryLines, ...(enforcementLine ? { enforcement: enforcementLine } : {}), ...(options.requireComplete ? { complete: !bundle.missing.length } : {}) }, null, 2) };
+  const footer = `\n\nBudget: ${bundle.budget.estimate} of ${bundle.budget.limit} tokens, ${bundle.budget.label}, including ${bundle.budget.overhead} assumed engine overhead.${enforcementLine ? `\n${enforcementLine}` : ''}`;
   return { ok: bundle.ok && !incomplete, bundle, text: `${adapter.render(bundle)}${bundle.ok ? footer : ''}${incompleteLine}` };
 }
 

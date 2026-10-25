@@ -22,8 +22,9 @@ Closed during v1 (evidence in the plan file and the named tests):
 
 ### Engines and agents
 
-- **Deny siblings of a nested edit path.** With edit `web/src`, the repo `web` is not denied (deny beats allow), so `web/other` stays editable for Claude Code. Do it when a task scope narrower than a repo is used with `agents sync`.
-- **`context --require-enforcement` that checks the condition.** It cannot pass today: it would have to confirm the synced deny rules match the current scope and the workspace is trusted. Do it when an owner wants a hard gate for Claude Code.
+- **New files directly inside an ancestor of a nested edit path.** With edit `web/src`, existing siblings in `web/` are denied (2026-10-25), but a new `web/new.txt` is not (`Write(/web/*)` would risk the same gitignore-style over-match question as `/*`). Do it after the host re-trial shows how `/*` is matched.
+- **Re-sync after the tree changes.** Sync adds keys only, so a changed deny list is refused until the owner removes `permissions.allow`/`deny`; `context --require-enforcement` reports `STALE` meanwhile. A marker for AgentOS-generated lists would allow in-place replacement. When re-syncing becomes routine.
+- **`context --require-enforcement` cannot confirm trust.** It checks that the synced deny set is current, not that the workspace is trusted or that Claude Code applies it.
 - **Codex per-path scope.** Not expressible with `--sandbox` (T4). Only if Codex gains a per-path mechanism.
 - **Per-tool allowlists.** `tools_requested` reaches only the Claude Code subagent `tools:` list; no Codex/OpenCode mapping, no per-tool ADVISORY. When a role needs a tool restriction enforced.
 - **`agents sync claude-code` re-sync after a card edit** refuses an existing `.claude/agents/<id>.md` (no managed marker, no `--replace`). When re-syncing becomes routine.

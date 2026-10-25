@@ -4,7 +4,7 @@ State on `feat/v1-final` (stacked on `feat/v1-obsidian` / PR #51). One row per p
 
 Status: **PASS** = a named test passes on the final commit and/or a recorded trial section shows it. **FAIL** = shown not to work. **BLOCKED** = cannot be shown from here (needs an engine run on a host, or an owner decision). Evidence kinds: *test* = `test/<file>` › test title (synthetic fixtures under the OS temp dir); *trial* = [`evidence/2026-10-25-cross-engine/REPORT.md`](evidence/2026-10-25-cross-engine/REPORT.md) section (real engines, n=1); *reviewer* = Phynceon's independent re-run recorded on the slice's PR (#46–#51) / card.
 
-Summary: **26 rows — 25 PASS, 0 FAIL, 1 partially BLOCKED (S19: Codex half)** (6 priorities, 20 scenarios). Every test-backed PASS rests on synthetic fixtures; the engine-backed rows (S1–S3, S17, S18) are n=1.
+Summary: **26 rows — 24 PASS, 0 FAIL, 2 partially BLOCKED (S19: Codex half; S20: sibling-enumeration half, host re-trial pending)** (6 priorities, 20 scenarios). Every test-backed PASS rests on synthetic fixtures; the engine-backed rows (S1–S3, S17, S18) are n=1.
 
 ## Priorities
 
@@ -40,7 +40,23 @@ Summary: **26 rows — 25 PASS, 0 FAIL, 1 partially BLOCKED (S19: Codex half)** 
 | S17 | Edit scope enforced by Claude Code | PASS | trial T3b; test: `v1-slice7.test.js` › "D1: …" (sync now writes deny rules of the T3b shape) | n=1; only with deny rules **and** a trusted workspace; T3b used hand-written rules — sync's exact output not re-run | — |
 | S18 | Writes blocked for Codex | PASS | trial T4 | Launch-time `--sandbox read-only` only; no per-path scope | — |
 | S19 | Engine-native agent config is consumed (`.claude/agents/<id>.md`, Codex role block) | PASS (Claude Code) / BLOCKED (Codex) | Claude Code listed the synced `developer` agent from `.claude/agents` — [REPORT.md T5](evidence/2026-10-25-cross-engine/REPORT.md), n=1, discovery only (invocation not tested); Codex role-block consumption not observed | Matrix: claude-code `native_agent_config: verified (discovery)`; codex stays `unverified` | Codex host trial still open (Phynceon); see [engines.md](engines.md#repeating-the-trial) |
-| S20 | Sync-generated deny rules re-trialled end to end | PASS | [REPORT.md T5](evidence/2026-10-25-cross-engine/REPORT.md): deny rules exactly as the fixed `agents sync claude-code` writes them; `api/package.json` DENIED, `web/package.json` ALLOWED (Claude Code 2.1.310, trusted workspace, n=1) | — | — |
+| S20 | Sync-generated deny rules re-trialled end to end | PASS (listed paths) / BLOCKED (sibling enumeration: host re-trial pending) | [REPORT.md T5](evidence/2026-10-25-cross-engine/REPORT.md): deny rules exactly as the D1-fixed `agents sync claude-code` writes them; `api/package.json` DENIED, `web/package.json` ALLOWED (Claude Code 2.1.310, trusted workspace, n=1). Boundary probe (Phynceon, Claude Code 2.1.310, trusted workspace, 2026-10-25; reported on the closure card, transcript not in the evidence folder) on `task_scope: {read: [web, api/contracts/openapi.yaml, docs/adr], edit: [web/src]}` with the pre-fix deny list `Edit\|Write\|NotebookEdit(/api/**, /api/contracts/openapi.yaml, /docs/adr/**)` — see the probe table below. Sibling enumeration added 2026-10-25 (test: `v1-claude-deny-siblings.test.js`); not yet run against Claude Code | Listed-path denies verified (T3b, T5). Sibling denies (incl. `Edit/Write(/*)`): **re-trial pending**. Shell writes: advisory (blocked only where Claude Code recognises a file write). Trusted workspace required | Phynceon: re-run the probe below on the fix commit, plus one in-scope edit (`web/src/a.js`) to confirm `/*` does not over-match |
 | S21 | Release | — | not part of v1 acceptance: no version bump, `CHANGELOG.md` entry is `[Unreleased]` | — | Owner: review and merge PRs #46–#51 and this branch, then decide version and publish |
 
 S21 is listed for the owner and not counted in the summary.
+
+### S20 boundary probe (2026-10-25, pre-fix deny list)
+
+Observations in the order the closure card lists them (the card names files `probe6.txt` and `probe10.md` but gives nine observations; the original item numbering was not on the card). "Fix" = what the sibling enumeration changes; every row is **re-trial pending** on the fix commit.
+
+| # | Action (Claude Code) | Observed (pre-fix) | Fix targets it? | Expected after fix (not yet observed) |
+|---|---|---|---|---|
+| 1 | Edit `api/contracts/openapi.yaml` | DENIED | no (listed path, already denied) | DENIED (`/api/**`, `/api/contracts/openapi.yaml`) |
+| 2 | Edit `docs/adr/0001.md` | DENIED | no (listed path, already denied) | DENIED (`/docs/**`, `/docs/adr/**`) |
+| 3 | Bash `echo >> api/package.json` | DENIED | no | DENIED (`/api/**`); shell writes stay advisory |
+| 4 | Edit `web/tests/t.js` | ALLOWED (gap) | **yes** | DENIED (`/web/tests/**`) |
+| 5 | Edit `web/package.json` | ALLOWED (gap) | **yes** | DENIED (`/web/package.json`) |
+| 6 | Write root `probe6.txt` (new file) | ALLOWED (gap) | **yes** | DENIED (`Write(/*)`) |
+| 7 | Edit `.env.example` | ALLOWED (gap) | **yes** | DENIED (`/.env.example`) |
+| 8 | Write `.agentos/probe10.md` | ALLOWED | no, by design (`.agentos/` is the state channel; only `project.yaml` and `agents/**` are denied) | ALLOWED |
+| 9 | Bash `echo >> web/src/a.js` (in scope) | ALLOWED | no (in scope) | ALLOWED — also confirms `/*` does not over-match the edit scope |

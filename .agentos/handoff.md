@@ -12,24 +12,25 @@ AgentOS v1 is complete pending owner review: seven stacked slices (correctness/c
 
 ## Current state
 
-- Slice 7 on `feat/v1-final`: trial defects fixed — D1 `agents sync claude-code` writes deny rules (repo/read paths outside the edit scope; `/**` for read-only roles) and prints the trust note; D2 checkpoint/resume use the enclosing work tree for child directories (`state: enclosing-worktree`); D3 `checkpoint` ignores a bare `.`. Matrix rows from Phynceon's trial (`docs/evidence/2026-10-25-cross-engine/`): claude-code `permission_enforcement` + `tool_restrictions` verified, codex `permission_enforcement` verified (launch-time sandbox only), `native_agent_config` unverified for both.
-- Docs: README "v1 workflow" + "Documentation"; `docs/engines.md` (final matrix, what the trial did not prove), `docs/migration.md`, `docs/acceptance-matrix.md` (24 PASS, 0 FAIL, 2 BLOCKED), `docs/improve-later.md`; CHANGELOG `[Unreleased]` v1 entry (no version bump).
+- Closure on `fix/v1-claude-deny-siblings` (stacked on `856b61f`): `agents sync claude-code` enumerates sibling denies (everything outside the edit scope; `.agentos/` state stays writable, `project.yaml`/`agents/**` denied); `context claude-code --require-enforcement` checks the synced deny set by hash (OK/STALE/UNSUPPORTED). Plan file, "Closure" section.
+- Slice 7 on `feat/v1-final` (pushed, PR #52): trial defects fixed — D1 `agents sync claude-code` writes deny rules (repo/read paths outside the edit scope; `/**` for read-only roles) and prints the trust note; D2 checkpoint/resume use the enclosing work tree for child directories (`state: enclosing-worktree`); D3 `checkpoint` ignores a bare `.`. Matrix rows from Phynceon's trial (`docs/evidence/2026-10-25-cross-engine/`): claude-code `permission_enforcement` + `tool_restrictions` verified, codex `permission_enforcement` verified (launch-time sandbox only), `native_agent_config` unverified for both.
+- Docs: README "v1 workflow" + "Documentation"; `docs/engines.md` (final matrix, what the trial did not prove), `docs/migration.md`, `docs/acceptance-matrix.md` (24 PASS, 0 FAIL, 2 partially BLOCKED), `docs/improve-later.md`; CHANGELOG `[Unreleased]` v1 entry (no version bump).
 - Gates on `feat/v1-final`: see the plan file, "Slice 7 — acceptance evidence". The developer sandbox has no `bun` on PATH; gates ran as `npm run ...` (same scripts).
 - Deprecated migration writers (0.10.0 removal) remain GATED: not scheduled, owner decision pending.
 - History: slice 1–6 handoff `.agentos/runs/2026-10-25-v1-slice6-handoff.md`; older (0.8–0.9, rollouts) `.agentos/runs/2026-10-25-v1-slice1-history.md`.
 
 ## Known warnings / failures
 
-- BLOCKED (host engine trial needed): engine-native agent config consumption (`.claude/agents/<id>.md`, Codex role block); Claude Code deny rules exactly as the fixed sync writes them (acceptance matrix S19, S20).
-- Engine evidence is n=1 per cell; enforcement is conditional (Claude Code: deny rules + trusted workspace; Codex: launch-time `--sandbox read-only`, no per-path scope). `context --require-enforcement` exits 1 for every engine.
+- BLOCKED (host engine trial needed): Codex role-block consumption (S19); the sibling-enumerated Claude Code deny rules from the closure fix — re-run the S20 boundary probe incl. one in-scope edit (`/*` over-match check).
+- Engine evidence is n=1 per cell; enforcement is conditional (Claude Code: deny rules + trusted workspace, listed-path denies verified, sibling denies pending, shell writes advisory; Codex: launch-time `--sandbox read-only`, no per-path scope). `context --require-enforcement` exits 1 for every engine except claude-code with a current synced deny set.
 - `doctor` diagnostics list this repo's three legacy agent cards (developer, tester, release-manager).
 - Refinements (no defects): `docs/improve-later.md`.
 
 ## Next exact action
 
-1. Owner/Phynceon: review `feat/v1-final`, push it and open its PR stacked on #51.
-2. Owner: merge PRs #46–#51 and the final PR in order; decide version and release.
-3. Optional host trial for the two BLOCKED rows (`docs/engines.md`, "Repeating the trial").
+1. Phynceon: re-run the S20 boundary probe on `fix/v1-claude-deny-siblings` (`docs/acceptance-matrix.md`); only then may the sibling denies be marked verified.
+2. Owner/Phynceon: review and push `fix/v1-claude-deny-siblings` (stacked on `feat/v1-final` = `856b61f`, PR #52).
+3. Owner: merge PRs #46–#52 and the closure branch in order; decide version and release.
 
 ## Protected files / do not touch
 

@@ -321,7 +321,7 @@ test('agentos engines --json: five engines, exactly the six rows each, statuses 
 test('context prints one ADVISORY line per unenforced hard requirement; --require-enforcement exits 1 UNSUPPORTED for every engine today', async (t) => {
   const { root } = await workspace(t);
   const advisory = {
-    'claude-code': 'edit scope is enforced for claude-code only by the deny rules from `agentos agents sync claude-code` in a trusted workspace; otherwise instruction-only',
+    'claude-code': 'edit scope is enforced for claude-code only by the deny rules from `agentos agents sync claude-code` in a trusted workspace (listed paths verified; sibling denies pending re-trial; shell writes advisory); otherwise instruction-only',
     codex: 'edit scope is instruction-only per path for codex (only the launch-time sandbox is enforced; --sandbox read-only refuses every write)',
   };
   for (const engine of ['claude-code', 'codex', 'opencode', 'hermes', 'generic']) {
@@ -361,7 +361,9 @@ test('agents sync claude-code: dry run writes nothing; sync writes the subagent 
   assert.match(agent, /^---\nname: developer\ndescription: "Implement scoped changes/);
   assert.ok(agent.includes(bodyOf(await read(root, '.agentos/agents/developer.md')).replace(/^\n+/, '')), 'agent file carries the card body');
   const settings = JSON.parse(await read(root, '.claude/settings.local.json'));
-  assert.deepEqual(settings, { model: 'opus', permissions: { ask: ['Bash'], allow: ['Edit(/web/**)'], deny: ['Edit(/backend/**)', 'Write(/backend/**)', 'NotebookEdit(/backend/**)'] } }, 'existing keys kept, only new keys added');
+  const rules = (path, tools = ['Edit', 'Write', 'NotebookEdit']) => tools.map((tool) => `${tool}(/${path})`);
+  const deny = [...rules('*', ['Edit', 'Write']), ...rules('.agentos/agents/**'), ...rules('.agentos/project.yaml'), ...rules('.claude/**'), ...rules('.claude/settings.json', ['Edit', 'Write']), ...rules('.claude/settings.local.json', ['Edit', 'Write']), ...rules('.hermes.md'), ...rules('AGENTS.md'), ...rules('CLAUDE.md'), ...rules('backend/**')];
+  assert.deepEqual(settings, { model: 'opus', permissions: { ask: ['Bash'], allow: ['Edit(/web/**)'], deny } }, 'existing keys kept, only new keys added');
   const synced = await snapshot(root);
   ok(cli(['agents', 'sync', 'claude-code'], root));
   assert.deepEqual(await snapshot(root), synced, 're-sync is a no-op');

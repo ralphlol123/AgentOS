@@ -66,7 +66,10 @@ async function workspace(t, { gitRoot = false, scope = 'task_scope:\n  read: [ap
 // --- D1: agents sync claude-code restricts with deny rules -------------------------------------------
 
 const TRUST = /Claude Code ignores `\.claude\/settings\.local\.json` until the workspace is trusted; run `claude` interactively once or set `projects\[<root>\]\.hasTrustDialogAccepted`/;
-const DENY_API = ['Edit(/api/**)', 'Write(/api/**)', 'NotebookEdit(/api/**)', 'Edit(/api/contracts/openapi.yaml)', 'Write(/api/contracts/openapi.yaml)', 'NotebookEdit(/api/contracts/openapi.yaml)'];
+const rules = (path, tools = ['Edit', 'Write', 'NotebookEdit']) => tools.map((tool) => `${tool}(/${path})`);
+/** Root entries every sibling-enumerated deny list carries for this fixture (closure fix; see v1-claude-deny-siblings.test.js). */
+const ROOT_DENY = [...rules('*', ['Edit', 'Write']), ...rules('.agentos/agents/**'), ...rules('.agentos/project.yaml'), ...rules('.claude/**'), ...rules('.claude/settings.json', ['Edit', 'Write']), ...rules('.claude/settings.local.json', ['Edit', 'Write']), ...rules('.hermes.md'), ...rules('AGENTS.md'), ...rules('CLAUDE.md')];
+const DENY_API = [...ROOT_DENY, ...rules('api/**'), ...rules('api/contracts/openapi.yaml')];
 
 test('D1: sync claude-code denies every repo and read path outside the edit scope, keeps the allow entry, prints the trust note; a read-only role denies everything', async (t) => {
   const { root } = await workspace(t);
@@ -97,7 +100,7 @@ test('D1: an existing different deny list refuses the sync with zero writes; an 
   const before = await snapshot(root);
   const conflict = cli(['agents', 'sync', 'claude-code'], root);
   fails(conflict);
-  assert.match(conflict.stdout, /permissions\.deny: existing \["Bash\(rm:\*\)"\] != proposed \["Edit\(\/api\/\*\*\)"/);
+  assert.match(conflict.stdout, /permissions\.deny: existing \["Bash\(rm:\*\)"\] != proposed \["Edit\(\/\*\)"/);
   assert.match(conflict.stdout, /Nothing was written/);
   assert.deepEqual(await snapshot(root), before, 'conflict: zero writes');
 
@@ -120,7 +123,9 @@ test('matrix: claude-code and codex rows match the 2026-10-25 trial; every verif
   const claude = out.matrix['claude-code'], codex = out.matrix.codex;
   assert.equal(claude.permission_enforcement.status, 'verified');
   assert.match(claude.permission_enforcement.evidence, /docs\/evidence\/2026-10-25-cross-engine\/REPORT\.md#T3/);
-  assert.match(claude.permission_enforcement.evidence, /deny rules in a trusted workspace/);
+  assert.match(claude.permission_enforcement.evidence, /listed-path deny rules in a trusted workspace/);
+  assert.match(claude.permission_enforcement.evidence, /sibling enumeration added 2026-10-25; host re-trial pending \(Phynceon\)/);
+  assert.match(claude.permission_enforcement.evidence, /Shell writes: advisory/);
   assert.equal(claude.tool_restrictions.status, 'verified');
   assert.match(claude.tool_restrictions.evidence, /launch-time --allowedTools; see T1\/T2/);
   assert.equal(codex.permission_enforcement.status, 'verified');
