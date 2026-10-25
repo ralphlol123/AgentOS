@@ -1,0 +1,38 @@
+Reading additional input from stdin...
+OpenAI Codex v0.156.1
+--------
+workdir: /tmp/aos-t2/web
+model: gpt-6-astra
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: low
+reasoning summaries: none
+session id: 01a171e1-8d1a-7d30-a3a5-86e1c7e4bb89
+--------
+user
+Report in two lines: the project name and which paths you are allowed to edit. Nothing else.
+exec
+/bin/bash -lc 'agentos status' in /tmp/aos-t2/web
+ succeeded in 109ms:
+AgentOS status: OK
+Root: /tmp/aos-t2
+Project: aos-t2
+Workspace kind: multi-repo
+Current handoff:
+No active AgentOS task yet. Existing project imported into AgentOS.
+Required files: all present
+You are in repo: web (./web)
+Repos in scope: api, web
+Verify this repo: dev=unknown; build=unknown; test=npm run test
+Open tasks (Now):
+- [ ] Choose the first AgentOS-managed task.
+More: `agentos handoff` (full handoff).
+
+codex
+Project: aos-t2
+Allowed edit paths: none (read-only sandbox; role scope is web/src).
+tokens used
+3,286
+Project: aos-t2
+Allowed edit paths: none (read-only sandbox; role scope is web/src).

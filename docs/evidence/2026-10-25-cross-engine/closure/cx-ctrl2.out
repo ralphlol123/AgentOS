@@ -1,0 +1,5 @@
+Project name: **aos-t2**.
+
+The project’s declared edit scope is **`/tmp/aos-t2/web/src/` only**. Secrets, `.env` files, migrations, and production configuration require explicit approval.
+
+However, this session’s filesystem is **read-only**, so I currently cannot edit any paths.

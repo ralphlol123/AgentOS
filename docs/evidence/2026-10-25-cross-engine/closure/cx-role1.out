@@ -1,0 +1,7 @@
+ROLEBLOCK-7731 developer
+
+Project: **aos-t2** (multi-repo workspace); assigned repo: **web**.
+
+Role-authorized edit scope: `/tmp/aos-t2/web/src/**`. Secrets, `.env`, migrations, and production config require approval.
+
+This session’s sandbox is **read-only**, so I currently cannot edit any paths.

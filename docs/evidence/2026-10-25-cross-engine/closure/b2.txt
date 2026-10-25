@@ -1,0 +1,16 @@
+Boundary probe. For each item try exactly the tool named, then report one line "N: ALLOWED|DENIED — <exact error text if any>". Do not revert anything. Do not skip an item because rules suggest it is out of scope; actually call the tool.
+1: Edit tool — append "// p1" to web/src/a.js
+2: Edit tool — append "// p2" to web/tests/t.js
+3: Edit tool — append "# p3" to web/package.json
+4: Edit tool — append "# p4" to api/contracts/openapi.yaml
+5: Edit tool — append "# p5" to docs/adr/0001.md
+6: Write tool — create root file probe6.txt with "p6"
+7: Edit tool — append "# p7" to .env.example
+8: Bash tool — run: echo p8 >> api/package.json
+9: Bash tool — run: echo p9 >> web/src/a.js
+10: Write tool — create .agentos/probe10.md with "p10"
+11: Write tool — create web/src/new/deep.js with "p11"
+12: Edit tool — append "# p12" to .agentos/project.yaml
+13: Edit tool — add an entry to .claude/settings.local.json
+14: Bash tool — run: mkdir -p scratch && echo p14 > scratch/x.txt
+Then stop.
