@@ -1,6 +1,6 @@
 # Context builder (`agentos context`)
 
-`agentos context <engine> [--task "<text>"] [--role <agent-id>] [--scope <repo-or-path>,...] [--budget <tokens>] [--json] [--include-superseded]`
+`agentos context <engine> [--task "<text>"] [--role <agent-id>] [--scope <repo-or-path>,...] [--budget <tokens>] [--json] [--include-superseded] [--require-synced-config] [--require-enforcement] [--require-complete]`
 
 Builds the context one engine needs for one task and one role. Read-only: it reads `.agentos/` state and never writes a file, lock or temp file (tested by hashing the whole fixture tree with a private `TMPDIR`). `agentos prompt` is unchanged. Code: `src/context-builder.ts`; wiring: `contextAgentOS` in `src/core.ts`.
 
@@ -13,6 +13,9 @@ Builds the context one engine needs for one task and one role. Read-only: it rea
 | `--role` | Must be listed in `agents.enabled`; otherwise exit 1. Default: `agents.capabilities.implementation`, else the first enabled agent. A missing `.agentos/agents/<role>.md` is a `missing` warning, not fatal. |
 | `--scope` | Comma list of repo IDs or workspace-relative paths, validated like `task_scope`. It replaces the read scope and keeps only the `task_scope.edit` entries it still covers, so it never widens edit. No `--scope` → `task_scope`; neither → read is the whole workspace (`.`) and edit is empty, with a warning. |
 | `--budget` | Positive whole number of tokens; default 24000 for every engine. |
+| `--require-synced-config` | Configuration presence: claude-code only, the synced deny set must equal what `agents sync claude-code` generates now (`Synced config: OK/STALE/MISSING/UNSUPPORTED`; exit 1 and nothing rendered unless OK). See [engines.md](engines.md#enforcement-vs-synced-configuration). |
+| `--require-enforcement` | Always exit 1 in v1, every engine (`Enforcement: UNSUPPORTED — …`, nothing rendered): AgentOS cannot establish enforcement. |
+| `--require-complete` | Exit 1 when the bundle has Missing items (the bundle is still printed). |
 
 ## Records
 
@@ -57,4 +60,4 @@ Optional: `acceptance` (`## Acceptance criteria` in `tasks.md`, else `handoff.md
 
 ## Known limits
 
-Ranking is plain term overlap: no stemming beyond a trailing `s`, no synonyms, no semantic deduplication. The overhead numbers are unmeasured. Scope is advisory, as in `prompt`: nothing stops an engine from editing outside it.
+Ranking is plain term overlap: no stemming beyond a trailing `s`, no synonyms, no semantic deduplication. The overhead numbers are unmeasured. Scope is advisory, as in `prompt`: nothing AgentOS renders stops an engine from editing outside it (engine-side enforcement: [engines.md](engines.md#enforcement-vs-synced-configuration)).

@@ -4,7 +4,7 @@ Collected from the slice records in `.agentos/plans/2026-10-25-v1-priorities.md`
 
 ## Defects and missing requirements
 
-**Open: none in code, no BLOCKED gate.** The closure re-trials (2026-10-25, [closure/REPORT-closure.md](evidence/2026-10-25-cross-engine/closure/REPORT-closure.md)) verified the sibling denies (T6c), the read-only deny-all (T6d), the Codex role block (T7) and the Claude subagent invocation (T8): acceptance matrix S19, S20, S22 PASS.
+**Open: none in code, no BLOCKED gate.** The closure re-trials (2026-10-25, [closure/REPORT-closure.md](evidence/2026-10-25-cross-engine/closure/REPORT-closure.md)) verified the sibling denies (T6c), the read-only deny-all (T6d), the Codex role block (T7) the Claude subagent invocation (T8), the final generator (T6e) and the subagent `tools:` list (T9): acceptance matrix S19, S20, S22 PASS.
 
 Closed during v1 (evidence in the plan file and the named tests):
 
@@ -18,16 +18,16 @@ Closed during v1 (evidence in the plan file and the named tests):
 | C1 | Claude deny rules covered only the listed repo/read paths; siblings such as `web/tests`, `web/package.json`, `.env.example` stayed editable (boundary probe T6a) | closure (`71cdb19`) | closure T6c; `test/v1-claude-deny-siblings.test.js` (exact list) |
 | C2 | Sibling denies pending a host re-trial | closure 2 | closure T6c/T6d (S20 PASS) |
 | C3 | `Edit(/*)`/`Write(/*)` over-match: Claude Code matches `/*` recursively, so every probe item was denied, including `web/src` (T6b) | closure 2 (rules removed) | closure T6b/T6c; `test/v1-claude-deny-siblings.test.js` › "closure 2: no (/*) rule is ever generated …" |
-| C4 | Manifest `tools_requested` never reached the Claude subagent in practice (catalog cards empty, names not mapped; T8 subagent had every tool) | closure 2 (`tools:` rendering with name mapping and the read-only default) | `test/v1-claude-deny-siblings.test.js` › "closure 2: tools_requested renders …"; consumption untested (below) |
+| C4 | Manifest `tools_requested` never reached the Claude subagent in practice (catalog cards empty, names not mapped; T8 subagent had every tool) | closure 2 (`tools:` rendering with name mapping and the read-only default) | `test/v1-claude-deny-siblings.test.js` › "closure 2: tools_requested renders …"; consumption closure T9 (invoked subagent, n=1) |
+| C5 | `context claude-code --require-enforcement` exited 0 on a matching synced deny set: configuration presence reported as enforcement (owner review of PR #53) | closure 3 (always exits 1; freshness check renamed `--require-synced-config`) | `test/v1-enforcement-contract.test.js` (RED on `d7501a9`: exit 0) |
 
 ## Optional refinements
 
 ### Engines and agents
 
 - **Residuals of deny-list enumeration (T6c).** New root-level files and directories (and new files directly inside an ancestor such as `web/new.txt` for edit `web/src`) created after the sync stay writable until a re-sync; `/*`-style patterns cannot close this, Claude Code matches them recursively (T6b). `.agentos/` state is writable by design; shell writes beyond recognised redirects are advisory. Options if it matters: a pre-tool hook, or a sandboxed launch.
-- **Re-trial `tools:` consumption.** Does a `Task`-invoked Claude subagent lose the tools not listed in the rendered `tools:`? Until observed, claude-code `tool_restrictions` stays verified for launch-time `--allowedTools` only.
-- **Re-sync after the tree changes.** Sync adds keys only, so a changed deny list is refused until the owner removes `permissions.allow`/`deny`; `context --require-enforcement` reports `STALE` meanwhile. An in-place re-sync marker for AgentOS-generated lists would allow replacement without hand-editing (also needed now: settings synced by `71cdb19` contain `/*` and must be re-synced, [migration.md](migration.md)). When re-syncing becomes routine.
-- **`context --require-enforcement` cannot confirm trust.** It checks that the synced deny set is current, not that the workspace is trusted or that Claude Code applies it.
+- **Re-sync after the tree changes.** Sync adds keys only, so a changed deny list is refused until the owner removes `permissions.allow`/`deny`; `context --require-synced-config` reports `STALE` meanwhile. An in-place re-sync marker for AgentOS-generated lists would allow replacement without hand-editing (also needed now: settings synced by `71cdb19` contain `/*` and must be re-synced, [migration.md](migration.md)). When re-syncing becomes routine.
+- **Hard enforcement (`context --require-enforcement` exiting 0).** v1 always exits 1: AgentOS cannot verify workspace trust, the residual paths above stay writable, and the deny rules bind only Claude Code's own tools (Codex: the sandbox is chosen at launch, no per-path scope). `--require-synced-config` checks configuration presence only. Justified when AgentOS controls the boundary itself: it launches the engine in a sandbox whose writable paths equal the edit scope (or installs a pre-tool hook that refuses every write outside it, shell included) and can read back that the boundary is active for the session; then a re-trial must show refusals for the residual paths before any exit 0.
 - **Codex per-path scope.** Not expressible with `--sandbox` (T4). Only if Codex gains a per-path mechanism.
 - **Per-tool allowlists.** `tools_requested` reaches only the Claude Code subagent `tools:` list (consumption verified for the invoked subagent, closure T9); no Codex/OpenCode mapping, no per-tool ADVISORY. Catalog cards ship with `tools_requested: []`, so edit roles get no `tools:` line. When a role needs a tool restriction enforced.
 - **`agents sync claude-code` re-sync after a card edit** refuses an existing `.claude/agents/<id>.md` (no managed marker, no `--replace`). When re-syncing becomes routine.
