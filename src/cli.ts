@@ -3,7 +3,8 @@ import { createInterface } from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
 import { parseFlagsAndPositionals, validateCommandFlags } from './cli-options.js';
 import { createRequire } from 'node:module';
-import { adaptersAgentOS, agentsAgentOS, compactAgentOS, doctorAgentOS, handoffAgentOS, initAgentOS, linkObsidianAgentOS, migrateClaudeAgentOS, normalizeRepoIdsAgentOS, obsidianAgentOS, promptAgentOS, runHandoffAgentOS, skillsAgentOS, statusAgentOS, templatesAgentOS } from './core.js';
+import { enginesReport } from './engines.js';
+import { adaptersAgentOS, agentsAgentOS, BRAIN_USAGE, brainAgentOS, checkpointAgentOS, compactAgentOS, contextAgentOS, doctorAgentOS, handoffAgentOS, initAgentOS, linkObsidianAgentOS, migrateClaudeAgentOS, normalizeRepoIdsAgentOS, obsidianAgentOS, promptAgentOS, resumeAgentOS, runHandoffAgentOS, skillsAgentOS, statusAgentOS, templatesAgentOS } from './core.js';
 
 const require = createRequire(import.meta.url);
 const VERSION = require('../package.json').version;
@@ -133,6 +134,8 @@ async function main() {
         dest: subFlags.dest,
         create: Boolean(subFlags.create),
         dryRun: subFlags['dry-run'],
+        canonical: subFlags.canonical,
+        dir: subFlags.dir,
       });
       console.log(result.text);
       process.exitCode = result.ok ? 0 : 1;
@@ -173,13 +176,19 @@ async function main() {
         process.exitCode = result.ok ? 0 : 1;
         return;
       }
-      if (sub !== 'add') {
-        console.log('Usage: agentos agents list | agentos agents add <agent-id|template-file> [--name id] [--dry-run]');
+      const lifecycle = ['show', 'enable', 'disable', 'remove', 'manifest', 'sync'];
+      if (sub !== 'add' && !lifecycle.includes(sub)) {
+        console.log(AGENTS_USAGE);
         process.exitCode = sub ? 1 : 0;
         return;
       }
       const { flags: subFlags, positionals } = parseFlagsAndPositionals(rest);
-      const result = await agentsAgentOS({ cwd: process.cwd(), add: positionals[0], name: subFlags.name, replace: subFlags.replace, dryRun: subFlags['dry-run'] });
+      const result = sub === 'add'
+        ? await agentsAgentOS({ cwd: process.cwd(), add: positionals[0], name: subFlags.name, replace: subFlags.replace, dryRun: subFlags['dry-run'] })
+        : await agentsAgentOS({
+          cwd: process.cwd(), command: sub, id: sub === 'sync' ? undefined : positionals[0], engine: sub === 'sync' ? positionals[0] : undefined,
+          role: subFlags.role, scope: subFlags.scope, json: subFlags.json, dryRun: subFlags['dry-run'], fromCatalog: subFlags['from-catalog'], custom: subFlags.custom,
+        });
       console.log(result.text);
       process.exitCode = result.ok ? 0 : 1;
       return;
@@ -242,6 +251,54 @@ async function main() {
       process.exitCode = result.ok ? 0 : 1;
       return;
     }
+    if (command === 'context') {
+      const { positionals } = parseFlagsAndPositionals(args);
+      const result = await contextAgentOS({ cwd: process.cwd(), engine: positionals[0] || 'generic', task: flags.task, role: flags.role, scope: flags.scope, budget: flags.budget, json: flags.json, includeSuperseded: flags['include-superseded'], requireEnforcement: flags['require-enforcement'], requireSyncedConfig: flags['require-synced-config'], requireComplete: flags['require-complete'] });
+      console.log(result.text);
+      process.exitCode = result.ok ? 0 : 1;
+      return;
+    }
+    if (command === 'engines') {
+      const result = enginesReport({ json: Boolean(flags.json) });
+      console.log(result.text);
+      return;
+    }
+    if (command === 'checkpoint') {
+      const { positionals, checks, claims } = parseFlagsAndPositionals(args);
+      // A bare `.` (habit from `git add .`) means "this workspace"; checkpoint always covers it.
+      const [sub, id] = positionals.filter((value) => value !== '.');
+      if (sub && sub !== 'list' && sub !== 'show') {
+        console.log(CHECKPOINT_USAGE);
+        process.exitCode = 1;
+        return;
+      }
+      const result = await checkpointAgentOS({
+        cwd: process.cwd(), subcommand: sub, id, task: flags.task, engine: flags.engine, role: flags.role,
+        progress: flags.progress, blocker: flags.blocker, next: flags.next, checks, claims,
+        json: flags.json, dryRun: flags['dry-run'], recover: flags.recover,
+      });
+      console.log(result.text);
+      process.exitCode = result.ok ? 0 : 1;
+      return;
+    }
+    if (command === 'brain') {
+      const { positionals } = parseFlagsAndPositionals(args);
+      const [sub, ...rest] = positionals;
+      if (!sub) { console.log(BRAIN_USAGE); return; }
+      const result = await brainAgentOS({
+        cwd: process.cwd(), subcommand: sub, args: rest, kind: flags.kind, scope: flags.scope, status: flags.status, by: flags.by, from: flags.from,
+        summary: flags.summary, supersedes: flags.supersedes, append: flags.append, json: flags.json, dryRun: flags['dry-run'], location: flags.location, stdin: readStdin,
+      });
+      console.log(result.text);
+      process.exitCode = result.ok ? 0 : 1;
+      return;
+    }
+    if (command === 'resume') {
+      const result = await resumeAgentOS({ cwd: process.cwd(), task: flags.task, engine: flags.engine, json: flags.json });
+      console.log(result.text);
+      process.exitCode = result.ok ? 0 : 1;
+      return;
+    }
     console.error(`Unknown command: ${command}`);
     printHelp();
     process.exitCode = 1;
@@ -250,6 +307,24 @@ async function main() {
     process.exitCode = 1;
   }
 }
+
+async function readStdin() {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)); } catch { throw new Error('stdin is not valid UTF-8.'); }
+}
+
+const AGENTS_USAGE = [
+  'Usage: agentos agents list [--installed]',
+  '       agentos agents add <agent-id|template-file> [--name id] [--replace] [--dry-run]',
+  '       agentos agents show <id> [--json]',
+  '       agentos agents enable|disable <id> [--dry-run]',
+  '       agentos agents remove <id> [--dry-run]',
+  '       agentos agents manifest <id> --from-catalog|--custom [--dry-run]',
+  '       agentos agents sync claude-code|codex [--role <id>] [--scope <repo-or-path>,...] [--dry-run]',
+].join('\n');
+
+const CHECKPOINT_USAGE = 'Usage: agentos checkpoint [--task <id>] [--engine <e>] [--role <r>] [--progress "<text>"] [--blocker "<text>"] [--next "<text>"] [--check "<cmd>" [--cwd <dir>]]... [--claim "<text>"]... [--json] [--dry-run] | agentos checkpoint --recover [--task <id>] [--dry-run] | agentos checkpoint list [--task <id>] [--json] | agentos checkpoint show <id> [--json]';
 
 async function resolveObsidianOptions(flags: Record<string, any>) {
   if (!process.stdin.isTTY) {
@@ -284,7 +359,7 @@ async function askDefault(rl: any, question: string, defaultValue: string) {
 }
 
 function printHelp() {
-  console.log(`AgentOS for Projects v${VERSION}\n\nUsage:\n  agentos init [--new|--existing] [--agents minimal|detected|developer,tester,reviewer,release-manager] [--refresh] [--dry-run]\n  agentos status\n  agentos handoff\n  agentos run handoff [--engine name] [--role role] [--repo repo] [--worktree path] [--phase slug] [--reason reason] [--dry-run]\n  agentos doctor [--fix] [--json]\n  agentos doctor --fix [--dry-run] [--adopt-custom-adapters] [--prune-retired]\n  agentos doctor --fix --normalize-repo-ids [--dry-run]\n  agentos adapters explain <file>\n  agentos compact [--objective <id>] [--expect-state <sha256>]\n  agentos compact [--objective <id>] --dry-run [--diff]\n  agentos compact --checkpoint [--dry-run]\n  agentos compact --rewrite ...  # compatibility alias for normal structural compaction\n  agentos link-obsidian [--vault <path> --dest <folder> --link <note> --create]\n  agentos obsidian link-workspace --vault <path> --dest <folder> [--create] [--dry-run]\n  agentos obsidian status\n  agentos skills list [--installed]\n  agentos skills remove <skill-id> [--dry-run]\n  agentos skills add [--detected] [skill-id|category-pack,...] [--mode summary|full] [--dry-run] [--replace]\n  agentos agents list [--installed]\n  agentos agents add <agent-id|template-file> [--name id] [--dry-run] [--replace]\n  agentos templates list\n  agentos templates show <id>\n  agentos templates copy <id> [--dry-run] [--replace]\n  agentos templates validate <file> --type agent|skill\n  agentos templates import <url-or-file> --type agent|skill --name <id> [--mode summary|full] [--dry-run] [--yes] [--replace] [--expected-sha256 hash]\n  agentos migrate claude --preserve [--dry-run]\n  agentos prompt [claude|codex|opencode|hermes]\n\nDeprecated, removed in 0.10.0 (to migrate an older workspace first, run npx agentos-for-projects@0.9):\n  --adopt-custom-adapters, --prune-retired, --normalize-repo-ids, and agentos migrate claude.\n\nCore rule:\n  One AgentOS per product/workspace.\n  Many repos inside it.\n  Each task declares which repo(s) are in scope.`);
+  console.log(`AgentOS for Projects v${VERSION}\n\nUsage:\n  agentos init [--new|--existing] [--agents minimal|detected|developer,tester,reviewer,release-manager] [--refresh] [--dry-run]\n  agentos status\n  agentos handoff\n  agentos run handoff [--engine name] [--role role] [--repo repo] [--worktree path] [--phase slug] [--reason reason] [--dry-run]\n  agentos doctor [--fix] [--json]\n  agentos doctor --fix [--dry-run] [--adopt-custom-adapters] [--prune-retired]\n  agentos doctor --fix --normalize-repo-ids [--dry-run]\n  agentos adapters explain <file>\n  agentos compact [--objective <id>] [--expect-state <sha256>]\n  agentos compact [--objective <id>] --dry-run [--diff]\n  agentos compact --checkpoint [--dry-run]\n  agentos compact --rewrite ...  # compatibility alias for normal structural compaction\n  agentos link-obsidian [--vault <path> --dest <folder> --link <note> --create]\n  agentos obsidian init [--dir <path>] [--dry-run]\n  agentos obsidian link --vault <abs-path> --dest <sub/folder> [--canonical workspace|vault] [--create] [--dry-run]\n  agentos obsidian link-workspace --vault <path> --dest <folder> [--create] [--dry-run]\n  agentos obsidian status\n  agentos skills list [--installed]\n  agentos skills remove <skill-id> [--dry-run]\n  agentos skills add [--detected] [skill-id|category-pack,...] [--mode summary|full] [--dry-run] [--replace]\n  agentos agents list [--installed]\n  agentos agents add <agent-id|template-file> [--name id] [--dry-run] [--replace]\n  agentos agents show <id> [--json] | enable <id> | disable <id> | remove <id> [--dry-run]\n  agentos agents manifest <id> --from-catalog|--custom [--dry-run]\n  agentos agents sync claude-code|codex [--role <id>] [--scope <repo-or-path>,...] [--dry-run]\n  agentos engines [--json]\n  agentos templates list\n  agentos templates show <id>\n  agentos templates copy <id> [--dry-run] [--replace]\n  agentos templates validate <file> --type agent|skill\n  agentos templates import <url-or-file> --type agent|skill --name <id> [--mode summary|full] [--dry-run] [--yes] [--replace] [--expected-sha256 hash]\n  agentos migrate claude --preserve [--dry-run]\n  agentos prompt [claude|codex|opencode|hermes]\n  agentos context [claude|codex|opencode|hermes] [--task "<text>"] [--role <agent-id>] [--scope <repo-or-path>,...] [--budget <tokens>] [--json] [--include-superseded] [--require-synced-config] [--require-enforcement] [--require-complete]\n  agentos checkpoint [--task <id>] [--engine <e>] [--role <r>] [--progress \"<text>\"] [--blocker \"<text>\"] [--next \"<text>\"] [--check \"<cmd>\" [--cwd <dir>]]... [--claim \"<text>\"]... [--json] [--dry-run]\n  agentos checkpoint --recover [--task <id>] [--dry-run]\n  agentos checkpoint list [--task <id>] [--json] | agentos checkpoint show <id> [--json]\n  agentos resume [--task <id>] [--engine <e>] [--json]\n  agentos brain init|register|list|show|search|propose|preview|validate|apply|check|verify ...  (agentos brain for details)\n\nDeprecated, removed in 0.10.0 (to migrate an older workspace first, run npx agentos-for-projects@0.9):\n  --adopt-custom-adapters, --prune-retired, --normalize-repo-ids, and agentos migrate claude.\n\nCore rule:\n  One AgentOS per product/workspace.\n  Many repos inside it.\n  Each task declares which repo(s) are in scope.`);
 }
 
 main();

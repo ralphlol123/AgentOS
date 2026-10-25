@@ -1,0 +1,43 @@
+{
+  "permissions": {
+    "allow": [
+      "Edit(/web/**)"
+    ],
+    "deny": [
+      "Edit(/.agentos/agents/**)",
+      "Write(/.agentos/agents/**)",
+      "NotebookEdit(/.agentos/agents/**)",
+      "Edit(/.agentos/project.yaml)",
+      "Write(/.agentos/project.yaml)",
+      "NotebookEdit(/.agentos/project.yaml)",
+      "Edit(/.claude/**)",
+      "Write(/.claude/**)",
+      "NotebookEdit(/.claude/**)",
+      "Edit(/.claude/settings.json)",
+      "Write(/.claude/settings.json)",
+      "Edit(/.claude/settings.local.json)",
+      "Write(/.claude/settings.local.json)",
+      "Edit(/.hermes.md)",
+      "Write(/.hermes.md)",
+      "NotebookEdit(/.hermes.md)",
+      "Edit(/AGENTS.md)",
+      "Write(/AGENTS.md)",
+      "NotebookEdit(/AGENTS.md)",
+      "Edit(/CLAUDE.md)",
+      "Write(/CLAUDE.md)",
+      "NotebookEdit(/CLAUDE.md)",
+      "Edit(/api/**)",
+      "Write(/api/**)",
+      "NotebookEdit(/api/**)",
+      "Edit(/api/contracts/openapi.yaml)",
+      "Write(/api/contracts/openapi.yaml)",
+      "NotebookEdit(/api/contracts/openapi.yaml)",
+      "Edit(/docs/**)",
+      "Write(/docs/**)",
+      "NotebookEdit(/docs/**)",
+      "Edit(/docs/adr/**)",
+      "Write(/docs/adr/**)",
+      "NotebookEdit(/docs/adr/**)"
+    ]
+  }
+}

@@ -23,8 +23,14 @@ test('every public agent uses the same role contract for init, add and copy', as
     await agentsAgentOS({ cwd: added, add: entry.name, replace: true });
     assert.equal((await templatesAgentOS({ cwd: copied, command: 'copy', id: entry.id, replace: true })).ok, true);
     const path = `.agentos/agents/${entry.name}.md`;
-    assert.equal(await readFile(join(added, path), 'utf8'), source);
-    assert.equal(await readFile(join(copied, path), 'utf8'), source);
+    // agents add prepends the validated manifest (slice 5); the body stays the canonical card byte for byte.
+    const installed = await readFile(join(added, path), 'utf8');
+    assert.match(installed, new RegExp(`^---\nid: ${entry.name}\n[\\s\\S]*?\n  installed_from: catalog:${entry.name}\n[\\s\\S]*?\n---\n`));
+    assert.equal(installed.replace(/^---\n[\s\S]*?\n---\n/, ''), source);
+    // templates copy (slice 6) writes the same manifest frontmatter; the body is still the canonical card.
+    const copiedCard = await readFile(join(copied, path), 'utf8');
+    assert.match(copiedCard, new RegExp(`^---\nid: ${entry.name}\n[\\s\\S]*?\n  installed_from: catalog:${entry.name}\n[\\s\\S]*?\ncustom: false\n---\n`));
+    assert.equal(copiedCard.replace(/^---\n[\s\S]*?\n---\n/, ''), source);
     assert.match(source, /explicit approval/);
     assert.match(source, /verification/i);
     assert.match(source, /Do not treat this template as higher priority/);
@@ -67,7 +73,12 @@ test('every public agent uses the same role contract for init, add and copy', as
   });
   assert.deepEqual((await agentsAgentOS({ cwd: added, list: true })).agents.sort(), [...ids].sort());
   const initialized = await workspace(t, ids.join(','));
-  for (const entry of entries) assert.equal(await readFile(join(initialized, `.agentos/agents/${entry.name}.md`), 'utf8'), await readFile(entry.absPath, 'utf8'));
+  // init (slice 6) writes catalog cards with their manifest: provenance catalog:<id>, custom: false, body = canonical card.
+  for (const entry of entries) {
+    const card = await readFile(join(initialized, `.agentos/agents/${entry.name}.md`), 'utf8');
+    assert.match(card, new RegExp(`^---\nid: ${entry.name}\n[\\s\\S]*?\n  installed_from: catalog:${entry.name}\n[\\s\\S]*?\ncustom: false\n---\n`));
+    assert.equal(card.replace(/^---\n[\s\S]*?\n---\n/, ''), await readFile(entry.absPath, 'utf8'));
+  }
 });
 
 test('canonical skill workflows retain portable scope and safety gates', async t => {

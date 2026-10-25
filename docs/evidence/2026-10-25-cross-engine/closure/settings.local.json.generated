@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Edit(/web/src/**)"
+    ],
+    "deny": [
+      "Edit(/api/**)",
+      "Write(/api/**)",
+      "NotebookEdit(/api/**)",
+      "Edit(/api/contracts/openapi.yaml)",
+      "Write(/api/contracts/openapi.yaml)",
+      "NotebookEdit(/api/contracts/openapi.yaml)",
+      "Edit(/docs/adr/**)",
+      "Write(/docs/adr/**)",
+      "NotebookEdit(/docs/adr/**)"
+    ]
+  }
+}

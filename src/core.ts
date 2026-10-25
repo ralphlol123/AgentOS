@@ -3,16 +3,22 @@ import { withWorkspaceWriter } from './workspace-lock.js';
 import { readImportSource } from './import-source.js';
 import { appendContextRecord, literalMarkdown, markdownHeadings, markdownSection } from './markdown.js';
 import { HANDOFF_ROLES, recognizeSections, resolveObjective, sectionText } from './context-sections.js';
+import { assertRelativeBoundaryPath, validateTaskScope } from './task-scope.js';
+import { buildContextBundle, findAcceptance } from './context-builder.js';
+import { applyBrain, splitFrontmatter, brainContextRecords, brainDoctor, brainMissing, checkBrain, initBrain, listBrain, loadBrain, previewBrain, proposeBrain, registerBrain, searchBrain, showBrain, validateBrain, verifyBrain, type BrainCtx, type VaultBinding } from './brain.js';
+import { checkpointContextRecord, checkpointProblems, listCheckpoints, resolveTask, resumeCheckpoint, showCheckpoint, writeCheckpoint, type CheckpointContext } from './checkpoint.js';
 import { planCompactRewrite } from './compact-rewrite.js';
 import { STATE_SIZE_WARN_CHARS, largestSections, sectionSizes, tasksShapeWarnings } from './state-size.js';
 import { dumpYaml, patchProjectYaml } from './project-yaml-edit.js';
 import { deprecation, mergeDeprecations, noticeLine, renderDeprecations, type Deprecation } from './legacy-deprecation.js';
 import { renderUnifiedDiff } from './compact-report.js';
+import { agentCardDoctor, diffSummary, manifestAgent, manifestFor, PACKAGE_VERSION, parseAgentCard, planCardInstall, provenanceFor, removeAgent, renderCard, ROLE_ID, setAgentEnabled, showAgent } from './agents.js';
+import { advisories, CLAUDE_RESIDUAL, engineAdapter, mergeAddKeysOnly, ROLE_BLOCK_END, ROLE_BLOCK_START } from './engines.js';
 import { resolveCompactMode } from './cli-options.js';
 import { collectRunHandoffGitState } from './git-evidence.js';
 import { canonicalAgentId, resolveAgentAlias, resolveSkillAlias, RETIRED_AGENT_IDS, RETIRED_SKILL_IDS, SKILL_ALIASES, agentDeprecationNotice, skillDeprecationNotice } from './aliases.js';
 import { LEGACY_SKILL_CARD_HASHES } from './legacy-skill-shapes.js';
-import { access, chmod, link, mkdir, open, readFile, readdir, rename, rm, stat, lstat, realpath, writeFile } from 'node:fs/promises';
+import { access, chmod, link, mkdir, open, readFile, readdir, rename, rm, stat, lstat, realpath } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomBytes } from 'node:crypto';
@@ -62,7 +68,7 @@ function currentMutationTransaction() {
   return mutationTransactionStorage.getStore();
 }
 
-async function withMutationTransaction(fn) {
+export async function withMutationTransaction(fn) {
   const tx = new MutationTransaction();
   try {
     return await mutationTransactionStorage.run(tx, fn);
@@ -154,13 +160,13 @@ async function restorePathSnapshot(path: string, snapshot: any) {
   for (const [name, child] of snapshot.children) await restorePathSnapshot(join(path, name), child);
 }
 
-async function mkdirTracked(path: string) {
+export async function mkdirTracked(path: string) {
   const tx = currentMutationTransaction();
   if (tx && !await exists(path)) await tx.track(path);
   return mkdir(path, { recursive: true });
 }
 
-async function removeTracked(path: string) {
+export async function removeTracked(path: string) {
   const tx = currentMutationTransaction();
   if (tx) await tx.track(path);
   return rm(path, { recursive: true, force: true });
@@ -175,7 +181,7 @@ async function removeTracked(path: string) {
 // call's link wins and its bytes/mode land exactly, or it loses and the file
 // that's already there (written by an earlier or concurrent caller) is left
 // completely untouched. The temp file is always removed either way.
-async function writeFileExclusiveAtomic(path: string, content: Buffer, mode?: number): Promise<{ created: boolean }> {
+export async function writeFileExclusiveAtomic(path: string, content: Buffer, mode?: number): Promise<{ created: boolean }> {
   const tx = currentMutationTransaction();
   if (tx) await tx.track(path);
   const tmpPath = uniqueTempPath(dirname(path), basename(path));
@@ -402,7 +408,7 @@ function parseFenceMarker(line: string): { char: string; length: number; rest: s
 // is delimited) is never treated as forming or extending an owned block; its
 // presence always makes the file ambiguous rather than silently ignored or
 // trusted.
-function locateManagedBlock(content: string, markerStart = MANAGED_BLOCK_START, markerEnd = MANAGED_BLOCK_END) {
+export function locateManagedBlock(content: string, markerStart = MANAGED_BLOCK_START, markerEnd = MANAGED_BLOCK_END) {
   const starts: number[] = [];
   const ends: number[] = [];
   let embedded = false;
@@ -894,7 +900,7 @@ async function initAgentOSUnlocked(options: any = {}) {
   const adapterTargets = [...rootAdapterTargets(cwd, workspaceKind, repos), ...childAdapterTargets(cwd, policy.pointers ? childRepos : [])];
   const adapterPlans = await planAdapterFiles(adapterTargets);
   const planned = [...new Set([
-    ...plannedFiles(mode, workspaceKind, repos),
+    ...plannedFiles(mode),
     ...agentSelection.agents.map(agent => `.agentos/agents/${agent.id}.md`),
     ...repos.map(repo => `.agentos/repos/${repo.name}.md`),
     ...adapterTargets.map(target => relative(cwd, target.path)),
@@ -937,7 +943,7 @@ async function initAgentOSUnlocked(options: any = {}) {
     }
 
     for (const agent of agentSelection.agents) {
-      await writeIfMissing(join(cwd, AGENTOS_DIR, 'agents', `${agent.id}.md`), agentMd(agent));
+      await writeIfMissing(join(cwd, AGENTOS_DIR, 'agents', `${agent.id}.md`), generatedCard(agent));
     }
     for (const repo of repos) {
       await writeIfMissing(join(cwd, AGENTOS_DIR, 'repos', `${repo.name}.md`), repoMd(repo));
@@ -1025,8 +1031,21 @@ export async function promptAgentOS(options: any = {}) {
   const project = await safeRead(join(root, '.agentos/project.yaml'));
   const handoff = await safeRead(join(root, '.agentos/handoff.md'));
   const tasks = await safeRead(join(root, '.agentos/tasks.md'));
-  const prompt = renderEnginePrompt({ engine, root, project, handoff, tasks });
+  // Same resolver as status/doctor/compact: broken objective state must never yield an OK-looking prompt.
+  const objective = resolveObjective(handoff);
+  let scope;
+  try { scope = taskScopeFromProject(project); } catch (error) { return promptFailure(`.agentos/project.yaml ${error.message}`); }
+  if (objective.kind !== 'resolved') return promptFailure(objective.diagnostic);
+  const prompt = renderEnginePrompt({ engine, root, project, objective: objective.selected.text, tasks, scope });
   return { ok: true, engine, text: prompt };
+}
+
+function promptFailure(diagnostic) {
+  return { ok: false, text: `AgentOS prompt: NEEDS ATTENTION\n- ${diagnostic}\nNo prompt was generated. Fix the file above (see \`agentos doctor\`), then re-run.` };
+}
+
+function taskScopeFromProject(project) {
+  return validateTaskScope(parseProjectYaml(project).task_scope, parseReposFromProjectYaml(project, { includeRoot: true }));
 }
 
 async function compactAgentOSUnlocked(options: any = {}) {
@@ -1475,10 +1494,83 @@ async function obsidianAgentOSUnlocked(options: any = {}) {
     };
   }
   if (command === 'link-workspace') return linkObsidianWorkspaceAgentOS(options);
+  if (command === 'link') return linkObsidianWorkspaceAgentOS({ ...options, index: true });
+  if (command === 'init') return obsidianInitAgentOS(options);
   if (command === 'status') return obsidianStatusAgentOS(options);
+  return { ok: false, text: OBSIDIAN_USAGE };
+}
+
+const OBSIDIAN_USAGE = [
+  'Usage: agentos obsidian init [--dir <path>] [--dry-run]',
+  '       agentos obsidian link --vault <abs-path> --dest <sub/folder> [--canonical workspace|vault] [--create] [--dry-run]',
+  '       agentos obsidian link-workspace --vault <path> --dest <folder> [--create] [--dry-run]   (boundary only, no index note)',
+  '       agentos obsidian status',
+].join('\n');
+
+const isInside = (dir: string, abs: string) => { const rel = relative(dir, abs); return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel)); };
+const toPosix = (path: string) => path.split(sep).join('/');
+
+/** The index note: links (relative paths) to the Brain records, never copies. Written once; never overwritten. */
+async function obsidianIndexText(root: string, projectText: string, indexAbs: string, canonical: string, binding: VaultBinding | null) {
+  const projectName = firstYamlValue(projectText, 'name') ?? basename(root);
+  const records = (await loadBrain(root, brainScopes(projectText), binding)).filter((record) => record.state !== 'invalid');
+  const link = (abs: string) => toPosix(relative(dirname(indexAbs), abs));
+  return [
+    `# ${title(projectName)} AgentOS Index`, '',
+    'Written once by `agentos obsidian init|link`; AgentOS never overwrites it. Edit it freely.', '',
+    `Canonical location of the Project Brain: **${canonical}**. Records live there only; this note holds links, never copies (no sync).`,
+    'Runtime state stays in the workspace `.agentos/`. Agents read only the notes a task needs, never the whole vault, and change records only through `agentos brain register|propose|apply`.', '',
+    '## Brain records', '',
+    ...(records.length ? records.map((record) => `- [${record.title}](<${link(record.abs)}>) — \`${record.id}\` (${record.kind}, ${record.status})`) : ['- None registered yet (`agentos brain init`, `agentos brain register <path>`).']),
+    '',
+  ].join('\n');
+}
+
+/** `agentos obsidian init`: no vault yet — a plain folder inside (or next to) the workspace, openable as a vault. */
+async function obsidianInitAgentOS(options: any = {}) {
+  const cwd = options.cwd ?? process.cwd();
+  const root = await findAgentOSRoot(cwd);
+  if (!root) return { ok: false, text: 'AgentOS obsidian init: FAIL\nNo .agentos directory found.' };
+  await assertWorkspaceBoundaries(root);
+  const projectPath = join(root, '.agentos/project.yaml');
+  await assertProjectYamlWellFormed(projectPath);
+  const project = await safeRead(projectPath);
+  const existing = obsidianConfigFromProject(project);
+  if (existing) return { ok: false, text: `AgentOS obsidian init: FAIL\nknowledge.obsidian is already configured (vault: ${existing.vault}, destination: ${existing.destination}); nothing was written. Use \`agentos obsidian status\`.` };
+  const dryRun = Boolean(options.dryRun);
+  const dir = options.dir ? resolve(cwd, String(options.dir)) : join(root, 'knowledge');
+  const inWorkspace = isInside(root, dir) && dir !== root;
+  if (inWorkspace) await assertBoundaryTarget(root, toPosix(relative(root, dir)));
+  const vaultValue = inWorkspace ? toPosix(relative(root, dir)) : dir;
+  const indexAbs = join(dir, 'index.md');
+  if (await exists(indexAbs)) return { ok: false, text: `AgentOS obsidian init: FAIL\n${indexAbs} already exists; refusing to overwrite it. Nothing was written.` };
+  const config = { mode: 'workspace-folder', vault: vaultValue, destination: '.', canonical: 'workspace', index: 'index.md' };
+  const patched = patchProjectYaml(project, (data) => {
+    if (!data.knowledge || typeof data.knowledge !== 'object') data.knowledge = {};
+    data.knowledge.obsidian = config;
+  });
+  const knowledge = reconcileKnowledge(await safeRead(join(root, '.agentos/knowledge.md')), knowledgeMd({ ...config, linked: [] }));
+  const index = await obsidianIndexText(root, project, indexAbs, 'workspace', null);
+  const shown = inWorkspace ? `${vaultValue}/index.md` : indexAbs;
+  const verb = (would: string, did: string) => (dryRun ? would : did);
+  if (!dryRun) {
+    await withMutationTransaction(async () => {
+      await mkdirTracked(dir);
+      if (!(await writeFileExclusiveAtomic(indexAbs, Buffer.from(index))).created) throw new Error(`${indexAbs} appeared while writing; nothing was written.`);
+      await writeFileAtomic(projectPath, patched);
+      await writeFileAtomic(join(root, '.agentos/knowledge.md'), knowledge);
+    });
+  }
   return {
-    ok: false,
-    text: 'Usage: agentos obsidian link-workspace --vault <path> --dest <folder> [--create] [--dry-run]\n       agentos obsidian status',
+    ok: true, dryRun, vault: vaultValue, text: [
+      `AgentOS obsidian init${dryRun ? ' dry run' : ''}`,
+      `${verb('Would create', 'Created')}: ${shown} (links to the Brain records by relative path)`,
+      `${verb('Would patch', 'Patched')}: .agentos/project.yaml knowledge.obsidian = {vault: ${vaultValue}, destination: ., canonical: workspace} (keys added only)`,
+      `${verb('Would write', 'Wrote')}: .agentos/knowledge.md`,
+      '',
+      'The folder is plain Markdown, useful without Obsidian. To use Obsidian, open it as a vault; .obsidian/ is not created here (Obsidian creates it on first open).',
+      'Canonical: workspace — records stay where they are; the index holds links, never copies.',
+    ].join('\n'),
   };
 }
 
@@ -1499,16 +1591,26 @@ async function linkObsidianWorkspaceAgentOS(options: any = {}) {
   const create = Boolean(options.create);
   const workspacePath = join(vault, destination);
   await assertBoundaryTarget(vault, destination);
+  // `obsidian link` (index: true) also writes one index note and records `canonical` + `index`; link-workspace stays boundary-only.
+  const canonical = String(options.canonical ?? 'workspace');
+  if (options.index && !['workspace', 'vault'].includes(canonical)) return { ok: false, text: 'AgentOS obsidian link: FAIL\n--canonical must be workspace or vault.' };
+  if (options.index && !create && !await exists(workspacePath)) return { ok: false, text: `AgentOS obsidian link: FAIL\nDestination folder does not exist: ${workspacePath}\nRe-run with --create to create it (only that folder and its index note are created). Nothing was written.` };
+  const indexRel = options.index ? `${destination}/${title(firstYamlValue(project, 'name') ?? basename(root))} AgentOS Index.md` : null;
+  if (indexRel) await assertBoundaryTarget(vault, indexRel);
+  const indexAbs = indexRel ? join(vault, indexRel) : null;
+  const writeIndexNote = Boolean(indexAbs && !await exists(indexAbs));
   for (const note of linked) {
     assertRelativeBoundaryPath(note);
     if (!note.startsWith(`${destination}/`)) throw new Error(`Unsafe linked note outside workspace boundary: ${note}`);
     await assertBoundaryTarget(vault, note);
   }
   await assertRepoBoundaries(root, parseReposFromProjectYaml(project, { includeRoot: true }));
-  const knowledge = reconcileKnowledge(await safeRead(join(root, '.agentos/knowledge.md')), knowledgeMd({ vault, destination, linked, mode: 'workspace-folder' }));
-  const projectPatched = ensureObsidianProjectConfig(project, { vault, destination, linked, mode: 'workspace-folder' });
+  const extra = indexRel ? { canonical, index: indexRel.slice(destination.length + 1) } : {};
+  const knowledge = reconcileKnowledge(await safeRead(join(root, '.agentos/knowledge.md')), knowledgeMd({ vault, destination, linked, mode: 'workspace-folder', ...extra }));
+  const projectPatched = ensureObsidianProjectConfig(project, { vault, destination, linked, mode: 'workspace-folder', ...extra });
+  const indexText = writeIndexNote ? await obsidianIndexText(root, project, indexAbs, canonical, { vault, dest: destination, dir: workspacePath, canonical: canonical as any }) : '';
   const lines = [
-    `AgentOS obsidian link-workspace${dryRun ? ' dry run' : ''}`,
+    `AgentOS obsidian ${indexRel ? 'link' : 'link-workspace'}${dryRun ? ' dry run' : ''}`,
     `Root: ${root}`,
     `Vault: ${vault}`,
     `Destination: ${destination}`,
@@ -1516,7 +1618,8 @@ async function linkObsidianWorkspaceAgentOS(options: any = {}) {
     '',
     `${dryRun ? 'Would write' : 'Wrote'}: .agentos/knowledge.md`,
     `${dryRun ? 'Would patch' : 'Patched'}: .agentos/project.yaml`,
-    create ? `${dryRun ? 'Would create' : 'Created'} workspace folder: ${destination}` : 'Workspace folder creation: skipped (use --create to mkdir only; no notes are created)',
+    create ? `${dryRun ? 'Would create' : 'Created'} workspace folder: ${destination}` : `Workspace folder creation: skipped (use --create to mkdir only${indexRel ? '' : '; no notes are created'})`,
+    ...(indexRel ? [writeIndexNote ? `${dryRun ? 'Would create' : 'Created'} index note: ${indexRel} (links only)` : `Index note exists, left unchanged: ${indexRel}`, `Canonical: ${canonical} — records live ${canonical === 'vault' ? `in ${destination} (vault-relative paths); the workspace holds links` : 'in the workspace; the vault folder holds links'}, never copies. Nothing else in the vault is touched.`] : []),
     '',
     'Safety: AgentOS confines Obsidian reads/writes to this workspace folder. It does not bulk-load the vault.',
     'Note creation: intentionally delegated to Claude Code, Codex, OpenCode, or Hermes when explicitly tasked.',
@@ -1527,6 +1630,7 @@ async function linkObsidianWorkspaceAgentOS(options: any = {}) {
       await mkdir(join(root, '.agentos'), { recursive: true });
       await withMutationTransaction(async () => {
         if (create) await mkdirTracked(workspacePath);
+        if (writeIndexNote && !(await writeFileExclusiveAtomic(indexAbs, Buffer.from(indexText))).created) throw new Error(`${indexAbs} appeared while writing; nothing was written.`);
         await writeFileAtomic(join(root, '.agentos/knowledge.md'), knowledge);
         await writeFileAtomic(join(root, '.agentos/project.yaml'), projectPatched);
         await fixAgentOSAdapters(root);
@@ -1541,7 +1645,7 @@ async function linkObsidianWorkspaceAgentOS(options: any = {}) {
     }
   }
 
-  return { ok: true, mode: 'workspace-folder', vault, destination, linked, workspacePath, text: lines.join('\n') };
+  return { ok: true, mode: 'workspace-folder', vault, destination, linked, workspacePath, ...extra, text: lines.join('\n') };
 }
 
 async function obsidianStatusAgentOS(options: any = {}) {
@@ -1554,6 +1658,7 @@ async function obsidianStatusAgentOS(options: any = {}) {
   const diagnostics = [];
   if (config.vault && !await exists(config.vault)) diagnostics.push(`Vault missing: ${config.vault}`);
   if (workspace && !await exists(workspace)) diagnostics.push(`Workspace folder missing: ${workspace}`);
+  else diagnostics.push(...await obsidianIndexWarnings(root, project));
   const ok = diagnostics.length === 0;
   return {
     ok,
@@ -1567,6 +1672,7 @@ async function obsidianStatusAgentOS(options: any = {}) {
       `Workspace: ${config.destination}`,
       workspace ? `Workspace path: ${workspace}` : null,
       `Linked notes: ${config.linked.length ? config.linked.join(', ') : 'none; engines may create/edit files inside the workspace when explicitly tasked'}`,
+      config.managed ? `Canonical: ${config.canonical}; index note: ${config.index || '(none)'}` : null,
       'Safety: no bulk vault access; writes confined to workspace folder',
       diagnostics.length ? `Diagnostics:\n${diagnostics.map((d) => `- ${d}`).join('\n')}` : null,
     ].filter(Boolean).join('\n'),
@@ -1693,7 +1799,8 @@ async function installedCards(root: string, type: 'agent' | 'skill') {
     .filter(name => name.endsWith('.md')).map(name => ({ id: basename(name, '.md'), abs: join(root, '.agentos/agents', name), relPath: `.agentos/agents/${name}` }));
   const entries = [];
   for (const item of local) {
-    const content = await safeRead(item.abs);
+    const raw = await safeRead(item.abs);
+    const content = type === 'agent' ? parseAgentCard(item.id, raw).body : raw;
     const skill = type === 'skill' ? SKILL_BY_ID[item.id] : undefined;
     const agent = type === 'agent' ? AGENT_DEFINITIONS[item.id] : undefined;
     const candidates = skill ? [renderSkillTemplate(skill, 'summary'), renderSkillTemplate(skill, 'full')] : agent ? [agentMd(agent)] : [];
@@ -1786,14 +1893,25 @@ async function agentsAgentOSUnlocked(options: any = {}) {
   if (!root) return { ok: false, text: 'AgentOS agents: FAIL\nNo .agentos directory found.' };
   await assertWorkspaceBoundaries(root);
   if (options.list) return options.installed ? installedCards(root, 'agent') : listAgentTemplates(root);
+  const actx = { root, catalog: Object.fromEntries(Object.values(AGENT_DEFINITIONS).map((agent: any) => [agent.id, { content: agentMd(agent) }])), repos: brainScopes(await safeRead(join(root, '.agentos/project.yaml'))) };
+  const lifecycleId = options.id === undefined ? undefined : String(options.id);
+  if (options.command === 'show') return showAgent(actx, lifecycleId, options);
+  if (options.command === 'enable' || options.command === 'disable') return setAgentEnabled(actx, lifecycleId, options.command === 'enable', options);
+  if (options.command === 'remove') return removeAgent(actx, lifecycleId, options);
+  if (options.command === 'manifest') return manifestAgent(actx, lifecycleId, options);
+  if (options.command === 'sync') return syncAgentsUnlocked(root, options);
   const raw = String(options.add || '').trim();
   if (!raw) throw new Error('agentos agents add requires an agent id or template file.');
   const dryRun = Boolean(options.dryRun);
   const id = normalizeAgentAlias(options.name || (isPathLike(raw) ? basename(raw, extname(raw)) : raw));
-  const content = await agentTemplateContent(raw, id);
+  if (!ROLE_ID.test(id)) throw new Error(`Invalid agent id: ${id} (expected lowercase letters, digits and hyphens).`);
+  const content = await agentTemplateContent(raw);
   validateAgentTemplate(content, id);
+  if (splitFrontmatter(content).has) throw new Error(`Agent template ${raw} already starts with frontmatter; AgentOS writes the manifest itself. Remove the frontmatter from the template and retry.`);
   const relPath = `.agentos/agents/${id}.md`;
-  await assertCardReplacement(join(root, relPath), content, options.replace);
+  const existingCard = await exists(join(root, relPath)) ? await safeRead(join(root, relPath)) : null;
+  const installedFrom = isPathLike(raw) ? `template:${raw}` : `catalog:${normalizeAgentAlias(raw)}`;
+  const install = planCardInstall(id, existingCard, content, installedFrom, { catalog: !isPathLike(raw) && Boolean(AGENT_DEFINITIONS[normalizeAgentAlias(raw)]), replace: Boolean(options.replace), raw });
   const projectPath = join(root, '.agentos/project.yaml');
   await assertProjectYamlWellFormed(projectPath);
   const projectText = await safeRead(projectPath);
@@ -1805,19 +1923,167 @@ async function agentsAgentOSUnlocked(options: any = {}) {
   if (id === 'planner' && !capabilities.planning) capabilities.planning = 'planner';
   const nextAgents = { profile: 'custom', capabilities, enabled: [...enabled] };
   const deprecation = (!isPathLike(raw) && !options.name) ? resolveAgentAlias(raw) : { id, deprecated: false };
+  const backup = install.action === 'replace' ? `.agentos/runs/replaced-agents/${new Date().toISOString().replace(/[:.]/g, '-')}-${id}.md` : null;
+  const verb = { create: dryRun ? 'Would write' : 'Wrote', upgrade: dryRun ? 'Would upgrade' : 'Upgraded', replace: dryRun ? 'Would replace' : 'Replaced', noop: 'Already installed (unchanged)' }[install.action];
   const lines = [
     `AgentOS agents add${dryRun ? ' dry run' : ''}`, `Root: ${root}`, `Agent: ${id}`,
     ...(deprecation.deprecated ? [`Note: ${agentDeprecationNotice(deprecation.from!, id)}`] : []),
-    '', `${dryRun ? 'Would write' : 'Wrote'}: ${relPath}`, `${dryRun ? 'Would patch' : 'Patched'}: .agentos/project.yaml`,
+    '', `${verb}: ${relPath} (manifest: installed_from ${installedFrom}, version ${PACKAGE_VERSION}; ${install.reason})`,
+    ...(install.action === 'replace' || install.action === 'upgrade' ? diffSummary(install.diff) : []),
+    ...(backup ? [`${dryRun ? 'Would keep' : 'Kept'} the old card: ${backup}`] : []),
+    `${dryRun ? 'Would patch' : 'Patched'}: .agentos/project.yaml`,
   ];
   if (!dryRun) {
     await withMutationTransaction(async () => {
       await mkdirTracked(dirname(join(root, relPath)));
-      await writeFileAtomic(join(root, relPath), content);
+      if (backup) {
+        await mkdirTracked(join(root, '.agentos/runs/replaced-agents'));
+        await writeFileExclusiveAtomic(join(root, backup), Buffer.from(existingCard!, 'utf8'));
+      }
+      if (install.action !== 'noop') await writeFileAtomic(join(root, relPath), install.content);
       await writeFileAtomic(projectPath, patchProjectYaml(projectText, (data) => { data.agents = nextAgents; }));
     });
   }
-  return { ok: true, root, id, dryRun, text: lines.join('\n') };
+  return { ok: true, root, id, dryRun, action: install.action, text: lines.join('\n') };
+}
+
+type DenyTarget = { path: string; dir: boolean; tools?: string[] };
+
+/** Claude Code deny targets for an edit scope: everything outside it. Deny wins over allow, so "deny /** + allow a
+ *  subset" cannot work; instead, for each edit path, every entry at each ancestor level that is not on the way to an
+ *  edit path (and not inside one) is denied, plus the listed repo/read paths outside the scope. No `/*` rule: Claude
+ *  Code matches it recursively and it denied the edit scope too (host re-trial T6b). Always: the settings files (a session must not lift its own rules) and the scope/role definitions
+ *  (.agentos/project.yaml, .agentos/agents/**); the rest of .agentos/ stays writable (handoff/tasks/checkpoints).
+ *  ponytail: snapshot of the tree at sync time; entries created later (new root files/dirs, new files directly inside
+ *  an ancestor such as web/) are not covered until a re-sync (T6c residual; --require-synced-config reports STALE). */
+async function claudeDenyTargets(root: string, edit: Array<{ path: string; dir: boolean }>, listed: DenyTarget[]): Promise<DenyTarget[]> {
+  const within = (path: string, base: string) => base === '.' || path === base || path.startsWith(`${base}/`);
+  const kept = (path: string) => edit.some((e) => within(path, e.path) || within(e.path, path));
+  const targets = new Map<string, DenyTarget>();
+  const add = (target: DenyTarget) => { if (!targets.has(target.path)) targets.set(target.path, target); };
+  for (const e of edit) {
+    const parts = e.path === '.' ? [] : e.path.split('/');
+    for (let depth = 0; depth < parts.length; depth++) {
+      const parent = parts.slice(0, depth).join('/');
+      const entries = await readdir(join(root, parent), { withFileTypes: true }).catch(() => null);
+      if (!entries) break;
+      for (const dirent of entries) {
+        const path = parent ? `${parent}/${dirent.name}` : dirent.name;
+        if (dirent.name === '.git' || dirent.name === 'node_modules' || path === '.agentos' || path === '.claude' || path === '.agentos-write.lock' || kept(path)) continue;
+        const dir = dirent.isDirectory() || (dirent.isSymbolicLink() && await stat(join(root, path)).then((info) => info.isDirectory()).catch(() => false));
+        add({ path, dir });
+      }
+    }
+  }
+  if (!kept('.claude')) add({ path: '.claude', dir: true }); // sync itself creates .claude/: deny it whether or not it exists yet
+  for (const path of ['.claude/settings.json', '.claude/settings.local.json']) add({ path, dir: false, tools: ['Edit', 'Write'] });
+  add({ path: '.agentos/project.yaml', dir: false });
+  add({ path: '.agentos/agents', dir: true });
+  listed.forEach(add);
+  return [...targets.values()].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+}
+
+/** Role, effective edit scope and engine-native files, read-only. Shared by `agents sync` and `context --require-synced-config`. */
+async function nativeConfigPlan(root: string, engine: string, adapter: ReturnType<typeof engineAdapter>, options: any) {
+  const input = await contextInputFor(root, engine, { role: options.role, scope: options.scope });
+  const bundle = await buildContextBundle(input);
+  const role = bundle.role;
+  if (!role) throw new Error('No role: pass --role <agent-id>.');
+  const card = parseAgentCard(role, await safeRead(join(root, '.agentos/agents', `${role}.md`)));
+  if (!card.manifest) return { refused: `.agentos/agents/${role}.md has ${card.state === 'invalid' ? 'an invalid manifest' : 'no manifest'}; native config is generated from the manifest. Run \`agentos agents manifest ${role} --from-catalog\` (or --custom) first.` };
+  const repoPath = (entry: string) => (input.repos.find((repo) => repo.name === entry)?.path ?? entry).replace(/^\.\/(?=.)/, '').replace(/\/+$/, '') || '.';
+  const entry = async (path: string) => ({ path, dir: path === '.' || (await stat(join(root, path)).then((info) => info.isDirectory()).catch(() => true)) });
+  const edit = await Promise.all(bundle.scope.edit.map((scope) => entry(repoPath(scope))));
+  const childRepos = input.repos.map((repo) => repoPath(repo.name)).filter((path) => path !== '.');
+  const owners = [...new Set(edit.map(({ path }) => childRepos.find((repo) => path === repo || path.startsWith(`${repo}/`)) ?? '.'))];
+  // Listed paths outside the edit scope: every repo and read path not covered by an edit path. A path that *contains*
+  // an edit path is skipped (deny wins over allow in Claude Code, so denying it would block the edit scope).
+  const within = (path: string, base: string) => base === '.' || path === base || path.startsWith(`${base}/`);
+  const outsidePaths = [...new Set([...childRepos, ...bundle.scope.read.map(repoPath)])].filter((path) => path !== '.' && !edit.some((e) => within(path, e.path) || within(e.path, path)));
+  const outside = edit.length ? await claudeDenyTargets(root, edit, await Promise.all(outsidePaths.map(entry))) : [];
+  const files = adapter.nativeConfig!({ role, manifest: card.manifest, body: card.body, edit, outside, repoDir: owners.length === 1 ? owners[0] : '.' });
+  return { role, bundle, files };
+}
+
+/** `context --require-synced-config`: the deny set in .claude/settings.local.json must equal what sync would
+ *  generate now. Configuration presence only: it says nothing about trust or residual writes. */
+async function syncedConfigCheck(root: string, engine: string, options: any) {
+  const sync = `agentos agents sync ${engine}`;
+  if (engine !== 'claude-code') return { status: 'unsupported', line: `Synced config: UNSUPPORTED — ${engine} has no synced config` };
+  const missing = { status: 'missing', line: `Synced config: MISSING — run ${sync}` };
+  let plan;
+  try { plan = await nativeConfigPlan(root, engine, engineAdapter(engine), options); } catch { return missing; }
+  if ('refused' in plan) return missing;
+  const settings = plan.files.find((file) => file.path === '.claude/settings.local.json')!;
+  const digest = (deny: string[]) => sha256Hex(JSON.stringify([...deny].sort())).slice(0, 8);
+  const expected = digest(JSON.parse(settings.content).permissions.deny ?? []);
+  let current;
+  try { current = JSON.parse(await readFile(join(root, settings.path), 'utf8'))?.permissions?.deny; } catch { current = undefined; }
+  if (!Array.isArray(current)) return missing;
+  if (digest(current) !== expected) return { status: 'stale', line: `Synced config: STALE — re-run ${sync} (installed deny set sha256 ${digest(current)}, generated now ${expected}; remove permissions.allow/deny from ${settings.path} first, sync adds keys only)` };
+  return { status: 'ok', sha256: expected, line: `Synced config: OK (${engine}, sha256 ${expected})` };
+}
+
+/** `context --require-enforcement`: no engine passes in v1. AgentOS can check configuration, not enforcement. */
+function enforcementCheck(engine: string) {
+  const reasons = engine === 'claude-code'
+    ? ['workspace trust is not verifiable from AgentOS', `residual writable paths (${CLAUDE_RESIDUAL})`, "deny rules apply only to Claude Code's own tools"]
+    : engine === 'codex'
+      ? ['the launch-time sandbox is chosen outside AgentOS', 'no per-path scope']
+      : [`permission_enforcement is ${engineAdapter(engine).capabilities.permission_enforcement.status} for ${engine}: edit scope and tool rules are instruction text only`];
+  return { status: 'unsupported', reasons, line: `Enforcement: UNSUPPORTED — AgentOS cannot establish enforcement for ${engine}: ${reasons.join('; ')}. --require-synced-config is the available check (configuration presence, not enforcement).` };
+}
+
+/** `agentos agents sync <engine>`: the only path that writes engine-native agent config. Preflights every target;
+ *  any conflict refuses the whole sync with zero writes. Never called by context/checkpoint. */
+async function syncAgentsUnlocked(root: string, options: any) {
+  const engine = normalizeEngine(options.engine);
+  const adapter = engineAdapter(engine);
+  if (!adapter.nativeConfig) return { ok: false, text: `AgentOS agents sync: UNSUPPORTED\n${engine} has no native agent config (native_agent_config: ${adapter.capabilities.native_agent_config.status}). Supported: claude-code, codex.` };
+  const plan = await nativeConfigPlan(root, engine, adapter, options);
+  if ('refused' in plan) return { ok: false, text: `AgentOS agents sync: REFUSED\n${plan.refused}\nNothing was written.` };
+  const { role, bundle, files } = plan;
+  const plans = [];
+  const conflicts = [];
+  for (const file of files) {
+    await assertBoundaryTarget(root, file.path);
+    const abs = join(root, file.path);
+    const current = await exists(abs) ? await readFile(abs, 'utf8') : null;
+    let next = file.content;
+    if (current !== null && file.merge === 'whole-file' && current !== file.content) conflicts.push(`${file.path}: exists with different content; delete or move it, then sync again`);
+    if (current !== null && file.merge === 'json-add-keys') {
+      let existing;
+      try { existing = JSON.parse(current); } catch (error) { conflicts.push(`${file.path}: not valid JSON (${error.message})`); continue; }
+      if (!existing || typeof existing !== 'object' || Array.isArray(existing)) { conflicts.push(`${file.path}: not a JSON object`); continue; }
+      const merged = mergeAddKeysOnly(existing, JSON.parse(file.content));
+      conflicts.push(...merged.conflicts.map((conflict) => `${file.path}: ${conflict}`));
+      next = JSON.stringify(merged.merged, null, 2) + '\n';
+      if (JSON.stringify(merged.merged) === JSON.stringify(existing)) next = current;
+    }
+    if (current !== null && file.merge === 'managed-block') {
+      const block = locateManagedBlock(current, ROLE_BLOCK_START, ROLE_BLOCK_END);
+      if (block.kind === 'conflict') { conflicts.push(`${file.path}: ${block.reason}`); continue; }
+      if (block.kind === 'valid') {
+        const lineEnd = current.indexOf('\n', block.endIdx);
+        next = current.slice(0, block.startIdx) + file.content + (lineEnd < 0 ? '' : current.slice(lineEnd + 1));
+      } else next = current + (current.endsWith('\n') ? '\n' : '\n\n') + file.content;
+    }
+    plans.push({ path: file.path, abs, next, action: current === null ? 'create' : next === current ? 'unchanged' : 'update' });
+  }
+  const head = [`AgentOS agents sync ${engine}${options.dryRun ? ' dry run' : ''}`, `Role: ${role}; edit scope: ${bundle.scope.edit.join(', ') || '(none; read-only)'}`, ...files.flatMap((file) => file.warnings ?? []).map((warning) => `Warning: ${warning}`)];
+  const enforcement = adapter.capabilities.permission_enforcement;
+  const caveat = [`Generated configuration is not proof of enforcement on its own: permission_enforcement is ${enforcement.status} for ${engine}${enforcement.edit_scope ? `; edit scope is ${enforcement.edit_scope}` : ''} (agentos engines).`, ...(adapter.syncNote ? [adapter.syncNote] : [])].join('\n');
+  if (conflicts.length) return { ok: false, conflicts, text: [...head, 'REFUSED (existing values conflict; add-keys-only):', ...conflicts.map((c) => `- ${c}`), 'Nothing was written.'].join('\n') };
+  if (!options.dryRun) {
+    await withMutationTransaction(async () => {
+      for (const plan of plans.filter((p) => p.action !== 'unchanged')) {
+        await mkdirTracked(dirname(plan.abs));
+        await writeFileAtomic(plan.abs, plan.next);
+      }
+    });
+  }
+  const verb = (action: string) => action === 'unchanged' ? 'Unchanged' : options.dryRun ? `Would ${action}` : action === 'create' ? 'Created' : 'Updated';
+  return { ok: true, dryRun: Boolean(options.dryRun), files: plans.map(({ path, action }) => ({ path, action })), text: [...head, ...plans.flatMap((plan) => [`${verb(plan.action)}: ${plan.path}`, ...(options.dryRun && plan.action !== 'unchanged' ? files.find((f) => f.path === plan.path)!.content.trimEnd().split('\n').map((line) => `  | ${line}`) : [])]), caveat].join('\n') };
 }
 
 function listAgentTemplates(root) {
@@ -1827,10 +2093,7 @@ function listAgentTemplates(root) {
   return { ok: true, root, agents: Object.keys(AGENT_DEFINITIONS), text: lines.join('\n') };
 }
 
-async function assertCardReplacement(path: string, content: string, replace: boolean = false) {
-  if (!replace && await exists(path) && await safeRead(path) !== content) throw new Error(`Existing card differs: ${path}. Review it and use --replace to overwrite local content.`);
-}
-async function agentTemplateContent(raw, id) {
+async function agentTemplateContent(raw) {
   if (isPathLike(raw)) return await readFile(resolve(raw), 'utf8');
   const agent = AGENT_DEFINITIONS[normalizeAgentAlias(raw)];
   if (!agent) throw new Error(`Unknown agent template: ${raw}. Run \`agentos agents list\`.`);
@@ -1936,11 +2199,13 @@ async function templatesCopyAgentOS(root, options: any = {}) {
   // copy is already satisfied: proceed idempotently with the deprecation
   // notice instead of a spurious overwrite refusal. Customized cards
   // (differing bytes) and direct copies remain protected by the refusal below.
-  const alreadyCanonical = !replace && existsTarget && resolved.deprecated && (await safeRead(targetPath)) === content;
+  const catalogAgent = entry.type === 'agent' && AGENT_DEFINITIONS[entry.name] && agentMd(AGENT_DEFINITIONS[entry.name]) === content ? AGENT_DEFINITIONS[entry.name] : null;
+  const onDisk = existsTarget ? await safeRead(targetPath) : '';
+  const alreadyCanonical = !replace && existsTarget && resolved.deprecated && (entry.type === 'agent' ? parseAgentCard(entry.name, onDisk).body : onDisk) === content;
   if (existsTarget && !replace && !alreadyCanonical) {
     return { ok: false, root, dryRun, entry, text: [`AgentOS templates copy: FAIL`, `Root: ${root}`, `Template: ${entry.id}`, '', `Target already exists: ${relPath}`, 'Refusing to overwrite local project context by default.', 'Use --replace only after reviewing the existing file and confirming replacement is intended.'].join('\n') };
   }
-  const files = entry.type === 'skill' ? skillInstallFiles(SKILL_BY_ID[entry.name], 'full') : [{ relPath, content }];
+  const files = entry.type === 'skill' ? skillInstallFiles(SKILL_BY_ID[entry.name], 'full') : [{ relPath, content: alreadyCanonical ? onDisk : catalogAgent ? generatedCard(catalogAgent) : content }];
   await preflightSkillFiles(root, files, replace);
   const action = alreadyCanonical ? 'Already installed' : dryRun ? (replace ? 'Would replace' : 'Would copy') : (replace ? 'Replaced' : 'Copied');
   const note = resolved.deprecated
@@ -2355,23 +2620,9 @@ function renderRunHandoffStateUpdate({ engine, role, phase, repo, reason, handof
   ].join('\n'));
 }
 
-function sectionLines(section) {
-  return String(section || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-}
-
-function appendUniqueTask(lines, task) {
-  return lines.includes(task) ? lines : [...lines, task];
-}
-
 function slug(value) {
   const text = String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   return text || 'run';
-}
-
-function clipText(value, max) {
-  const text = String(value || '');
-  if (max <= 0) return '[diff truncated]';
-  return text.length > max ? `${text.slice(0, max).trimEnd()}\n[diff truncated]` : text;
 }
 
 export async function handoffAgentOS(options: any = {}) {
@@ -2518,6 +2769,7 @@ async function doctorAgentOSUnlocked(options: any = {}) {
     if (!/^name:/m.test(project)) problems.push('.agentos/project.yaml missing name');
     if (!/^workspace_kind:/m.test(project)) warnings.push('.agentos/project.yaml missing workspace_kind');
     if (!project.includes('- opencode')) warnings.push('.agentos/project.yaml engines.allowed does not list opencode');
+    try { taskScopeFromProject(project); } catch (error) { problems.push(`.agentos/project.yaml ${error.message}`); }
     await checkAgentAndSkillConfig(root, project, warnings);
     await checkLegacyCatalogState(root, project, warnings);
   }
@@ -2616,6 +2868,17 @@ async function doctorAgentOSUnlocked(options: any = {}) {
   const diagnostics = [];
   for (const note of migrationNotes) diagnostics.push(`migrated: ${note}`);
   await checkTasksAndHandoff(root, problems, warnings, diagnostics);
+  problems.push(...await checkpointProblems(root));
+  const cards = await agentCardDoctor(root, Object.fromEntries(Object.values(AGENT_DEFINITIONS).map((agent: any) => [agent.id, { content: agentMd(agent) }])));
+  problems.push(...cards.problems);
+  diagnostics.push(...cards.diagnostics);
+  const doctorProject = await safeRead(join(root, '.agentos/project.yaml'));
+  let binding: VaultBinding | null = null;
+  try { binding = obsidianBinding(root, doctorProject); } catch (error) { problems.push(error.message); }
+  const brain = await brainDoctor(root, brainScopes(doctorProject), binding);
+  problems.push(...brain.problems);
+  warnings.push(...brain.warnings);
+  if (binding) warnings.push(...await obsidianIndexWarnings(root, doctorProject));
   await checkRepoCommands(repos, warnings, diagnostics);
   await checkGitState(root, repos, warnings, diagnostics);
   await checkPorts(repos, warnings, diagnostics);
@@ -2790,7 +3053,7 @@ async function checkGitState(root, repos, warnings, diagnostics) {
     const dirty = status.stdout.split(/\r?\n/).slice(1).filter(Boolean);
     const trackedDirty = dirty.filter((line) => !line.startsWith('??'));
     if (trackedDirty.length) warnings.push(`${repo.name} has tracked working-tree changes (${trackedDirty.length})`);
-    await checkUntrackedAdapters(abs, repo, dirty, warnings, diagnostics);
+    await checkUntrackedAdapters(repo, dirty, warnings, diagnostics);
     const upstream = await runGit(abs, ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}']);
     if (!upstream.ok) {
       warnings.push(`${repo.name} branch ${branch.stdout || '(detached)'} has no upstream`);
@@ -2805,7 +3068,7 @@ async function checkGitState(root, repos, warnings, diagnostics) {
   }
 }
 
-async function checkUntrackedAdapters(abs, repo, dirty, warnings, diagnostics) {
+async function checkUntrackedAdapters(repo, dirty, warnings, diagnostics) {
   const adapters = dirty.filter((line) => /^\?\?\s+(.hermes\/|\.hermes\.md$|AGENTS\.md$|CLAUDE\.md$)/.test(line));
   if (adapters.length) {
     warnings.push(`${repo.name} has untracked AgentOS adapter files: ${adapters.map((line) => line.replace(/^\?\?\s+/, '')).join(', ')}`);
@@ -2852,13 +3115,6 @@ async function runCommand(command: string, args: string[], cwd?: string) {
   }
 }
 
-
-function assertRelativeBoundaryPath(value: string) {
-  // Validate the original token, before normalizing away absolute/traversal syntax.
-  if (!value || value.includes('\0') || value.includes('\\') || value.startsWith('/') || /^[a-z]:/i.test(value) || value.split('/').includes('..')) {
-    throw new Error(`Unsafe boundary path; expected a workspace-relative path: ${value}`);
-  }
-}
 
 // Reject symlink components, including dangling links, before any mutation.
 // The selected root may itself be reached through an alias; anchor it once.
@@ -2926,13 +3182,13 @@ async function fixAgentOSAdapters(root, options: { allowAdopt?: boolean } = {}) 
   await mkdirTracked(join(root, '.agentos/agents'));
   await mkdirTracked(join(root, '.agentos/repos'));
   for (const repo of allRepos) await writeIfMissing(join(root, '.agentos/repos', `${repo.name}.md`), repoMd(repo));
-  await ensureProjectYamlEngine(projectPath, 'opencode');
+  // engines.allowed is the owner's preference: --fix never adds an engine (every generated default already listed opencode).
   await writeIfMissing(join(root, '.agentos/knowledge.md'), knowledgeMd());
   const agentSelection = await agentSelectionFromProject(project, allRepos, root);
   await ensureProjectYamlAgents(projectPath, agentSelection);
   await writeIfMissing(join(root, '.agentos/skills.md'), skillsMd(agentSelection));
   for (const agent of agentSelection.agents) {
-    await writeIfMissing(join(root, '.agentos/agents', `${agent.id}.md`), agentMd(agent));
+    await writeIfMissing(join(root, '.agentos/agents', `${agent.id}.md`), generatedCard(agent));
   }
   await applyAdapterPlans(adapterPlans);
   if (policy.gitignore === 'ignore') for (const repo of childRepos) await ensureChildRepoGitignore(join(root, repo.path));
@@ -3047,7 +3303,7 @@ async function fixLegacyCatalogState(root, options: { pruneRetired?: boolean } =
       await removeTracked(source);
       actions.push(`removed stale generated agent card ${file} ('${canonical}.md' already present)`);
     } else {
-      await writeFileAtomic(target, agentMd(AGENT_DEFINITIONS[canonical]));
+      await writeFileAtomic(target, generatedCard(AGENT_DEFINITIONS[canonical]));
       await removeTracked(source);
       actions.push(`migrated generated agent card ${file} -> ${canonical}.md`);
     }
@@ -4033,7 +4289,10 @@ function knowledgeMd(options: any = {}) {
   const linked = options.linked || [];
   const mode = options.mode || 'link-only';
   const workspacePath = options.vault && options.destination ? join(options.vault, options.destination) : '';
-  const obsidian = options.vault && mode === 'workspace-folder'
+  // Slice 6 (`obsidian init|link`): portable wording — the machine-specific vault path stays in project.yaml only.
+  const obsidian = options.vault && options.canonical
+    ? `\n## Obsidian\n\nMode: \`workspace-folder\`; canonical: \`${options.canonical}\`\nLinked folder: \`${options.destination}\` in the vault bound by \`.agentos/project.yaml\` (knowledge.obsidian.vault; machine-specific, not repeated here)\nIndex note: \`${options.index}\`\n\nRules:\n- Brain records live in exactly one place (the canonical location); the other side holds links, never copies. No sync.\n- Read, create or update notes in the linked folder only through \`agentos brain register|propose|apply\`; nothing else in the vault.\n- Do not bulk-load the Obsidian vault.\n- Runtime state stays in \`.agentos/\`.\n`
+    : options.vault && mode === 'workspace-folder'
     ? `\n## Obsidian\n\nVault: \`${options.vault}\`\nDestination: \`${options.destination}\`\nMode: \`workspace-folder\`\nWorkspace folder: \`${workspacePath}\`\n\nRules:\n- Agents may read/write only inside this folder unless the user explicitly allows another path.\n- Do not bulk-load the Obsidian vault.\n- Runtime state stays in \`.agentos/\`.\n- Durable notes, plans, summaries, decisions, and runbooks for this AgentOS workspace may be written here when the task explicitly allows it.\n\nLinked notes:\n${linked.map((note) => `- [[${note.replace(/\.md$/, '')}]]`).join('\n') || '- None linked yet; engines may create files inside the workspace when explicitly tasked.'}\n`
     : options.vault ? `\n## Obsidian\n\nVault: \`${options.vault}\`\nDestination: \`${options.destination}\`\nMode: \`link-only\`\n\nLinked notes:\n${linked.map((note) => `- [[${note.replace(/\.md$/, '')}]]`).join('\n') || '- None linked yet.'}\n` : '';
   return `# Knowledge\n\nLong-term knowledge links for this project.\n\nRules:\n- Do not bulk-load external vaults or folders.\n- Read only linked notes or the linked workspace folder relevant to the current task.\n- Keep runtime context small; use handoff/tasks for current state.\n${obsidian}`;
@@ -4148,6 +4407,14 @@ function agentConfigObject(agentSelection) {
   };
 }
 
+/** Cards that init / doctor --fix / templates copy generate for catalog agents carry their manifest (provenance
+ *  catalog:<id>, custom: false; the body is the catalog card byte for byte). Custom ids keep the plain card. */
+function generatedCard(agent) {
+  if (AGENT_DEFINITIONS[agent.id] !== agent) return agentMd(agent);
+  const body = agentMd(agent);
+  return renderCard(manifestFor(agent.id, body, provenanceFor(`catalog:${agent.id}`, body), { catalog: true }), body);
+}
+
 function agentMd(agent) {
   if (agent.content) return agent.content;
   return `# ${title(agent.id)}\n\nMandate: ${agent.mandate}\n\n## Responsibilities in\n\n- Work only inside declared task scope.\n- Read AgentOS project, memory, handoff, and tasks first; then load only relevant skills, repo, role, and engine context.\n- Report files changed, verification run, failures, and next action before stopping.\n\n## Responsibilities out\n\n- Do not touch secrets, .env files, production config, migrations, or unrelated repos without explicit approval.\n- Do not commit or push unless explicitly assigned.\n\n## Skills\n\nUse .agentos/skills.md as an on-demand index. Load only skills relevant to this role and task.\n`;
@@ -4155,17 +4422,6 @@ function agentMd(agent) {
 
 function repoMd(repo) { return `# ${title(repo.name)} Repo\n\nPath: \`${repo.path}\`; type: ${repo.type}; framework: ${repo.framework}; package manager: ${repo.packageManager}.\nCommands: dev=\`${repo.devCommand || repo.commands?.dev_command || 'unknown'}\`; build=\`${repo.buildCommand || repo.commands?.build_command || 'unknown'}\`; test=\`${repo.testCommand || repo.commands?.test_command || 'unknown'}\`${repo.testE2eCommand ? `; e2e=\`${repo.testE2eCommand}\`` : ''}${repo.generateCommand ? `; generate=\`${repo.generateCommand}\`` : ''}${repo.previewCommand ? `; preview=\`${repo.previewCommand}\`` : ''}.\nScope: edit only when task includes \`${repo.name}\`.\n`; }
 
-
-async function ensureProjectYamlEngine(path, engine) {
-  if (!await exists(path)) return;
-  const content = await readFile(path, 'utf8');
-  const patched = patchProjectYaml(content, (data) => {
-    data.engines = data.engines && typeof data.engines === 'object' ? data.engines : {};
-    data.engines.allowed = Array.isArray(data.engines.allowed) ? data.engines.allowed : [];
-    if (!data.engines.allowed.includes(engine)) data.engines.allowed.push(engine);
-  });
-  if (patched !== content) await writeFileAtomic(path, patched);
-}
 
 async function ensureProjectYamlAgents(path, agentSelection) {
   if (!await exists(path)) return;
@@ -4202,21 +4458,80 @@ function normalizeEngine(engine) {
   return value === 'generic' ? 'generic' : value;
 }
 
-function renderEnginePrompt({ engine, root, project, handoff, tasks }) {
+const PROMPT_RULES = 'Rules: declare role + scope before editing; edit only in scope; no secrets/.env/migrations/prod config without approval; no commit/push unless asked; verify; update handoff/tasks if state changes.';
+
+function promptHeaderLines(engine, root, project) {
   const projectName = firstYamlValue(project, 'name') ?? basename(root);
   const workspaceKind = firstYamlValue(project, 'workspace_kind') ?? 'unknown';
-  const currentObjective = extractSection(handoff, 'Current objective') || '(none)';
-  const now = extractSection(tasks, 'Now') || '(none)';
-  const obsidianLine = obsidianPromptLine(project);
   return [
     'Follow AgentOS for Projects.',
     `Project: ${projectName}; root: ${root}; kind: ${workspaceKind}; engine: ${engine}.`,
     `Read: AGENTS.md${engineAdapterLine(engine) ? `; ${engineAdapterLine(engine)}` : ''}; .agentos/project.yaml; memory.md; handoff.md; tasks.md. Then load skills.md plus only the assigned repo/agent context needed for the task.`,
+  ];
+}
+
+async function contextInputFor(root: string, engine: string, options: any) {
+  const projectText = await safeRead(join(root, '.agentos/project.yaml'));
+  const project = parseProjectYaml(projectText);
+  const agents = project.agents && typeof project.agents === 'object' ? project.agents : {};
+  return {
+    root, engine, project, projectText,
+    repos: parseReposFromProjectYaml(projectText, { includeRoot: true }),
+    enabledAgents: Array.isArray(agents.enabled) ? agents.enabled.map((id) => normalizeAgentAlias(String(id))) : [],
+    defaultRole: agents.capabilities?.implementation ? normalizeAgentAlias(String(agents.capabilities.implementation)) : undefined,
+    header: promptHeaderLines(engine, root, projectText),
+    rules: [PROMPT_RULES, ...engineSpecificRules(engine), obsidianPromptLine(projectText)].filter(Boolean),
+    task: options.task, role: options.role ? normalizeAgentAlias(String(options.role)) : undefined, scope: options.scope, budget: options.budget, includeSuperseded: Boolean(options.includeSuperseded),
+    brain: await brainContextRecords(root, brainScopes(projectText), obsidianBinding(root, projectText)),
+    missing: await brainMissing(root, obsidianBinding(root, projectText)),
+  };
+}
+
+/** `agentos context`: read-only wiring around src/context-builder.ts. */
+export async function contextAgentOS(options: any = {}) {
+  const root = await findAgentOSRoot(options.cwd ?? process.cwd());
+  if (!root) return { ok: false, text: 'AgentOS context: FAIL\nNo .agentos directory found here or in parent directories.' };
+  const engine = normalizeEngine(options.engine ?? 'generic');
+  const adapter = engineAdapter(engine);
+  // Configuration presence (--require-synced-config) is not proof of enforcement (--require-enforcement, never passes in v1).
+  const synced = options.requireSyncedConfig ? await syncedConfigCheck(root, engine, options) : null;
+  const enforced = options.requireEnforcement ? enforcementCheck(engine) : null;
+  const gate = { ...(enforced ? { enforcement: { status: enforced.status, reasons: enforced.reasons } } : {}), ...(synced ? { synced_config: { status: synced.status, ...(synced.sha256 ? { sha256: synced.sha256 } : {}) } } : {}) };
+  const gateLines = [synced?.line, enforced?.line].filter(Boolean).join('\n');
+  if (enforced || (synced && synced.status !== 'ok')) {
+    if (options.json) return { ok: false, text: JSON.stringify({ ok: false, rendered: false, ...gate }, null, 2) };
+    return { ok: false, text: `AgentOS context: FAIL\n${gateLines}\nNo context was rendered. Without the flags, the edit scope is delivered with the ADVISORY lines (see \`agentos engines\`).` };
+  }
+  const input = await contextInputFor(root, engine, options);
+  const objective = resolveObjective(await safeRead(join(root, '.agentos/handoff.md')));
+  let checkpointTask: string | null = null;
+  try { checkpointTask = resolveTask(options.task, objective.selected ?? null).id; } catch { /* no task id: no checkpoint record */ }
+  const checkpoint = checkpointTask ? await checkpointContextRecord(root, checkpointTask) : null;
+  const bundle = await buildContextBundle({ ...input, checkpoint: checkpoint ?? undefined });
+  const advisoryLines = bundle.ok ? advisories(adapter) : [];
+  // --require-complete: a bundle with Missing items (e.g. an unavailable vault) exits 1; the bundle itself stays `ok`.
+  const incomplete = Boolean(options.requireComplete && bundle.ok && bundle.missing.length);
+  const incompleteLine = incomplete ? `\n\nAgentOS context: INCOMPLETE (--require-complete): ${bundle.missing.length} missing item(s): ${bundle.missing.join('; ')}` : '';
+  if (options.json) return { ok: bundle.ok && !incomplete, bundle, text: JSON.stringify({ ...bundle, advisories: advisoryLines, ...gate, ...(options.requireComplete ? { complete: !bundle.missing.length } : {}) }, null, 2) };
+  const footer = `\n\nBudget: ${bundle.budget.estimate} of ${bundle.budget.limit} tokens, ${bundle.budget.label}, including ${bundle.budget.overhead} assumed engine overhead.${gateLines ? `\n${gateLines}` : ''}`;
+  return { ok: bundle.ok && !incomplete, bundle, text: `${adapter.render(bundle)}${bundle.ok ? footer : ''}${incompleteLine}` };
+}
+
+function renderEnginePrompt({ engine, root, project, objective, tasks, scope }) {
+  const now = extractSection(tasks, 'Now') || '(none)';
+  const obsidianLine = obsidianPromptLine(project);
+  return [
+    ...promptHeaderLines(engine, root, project),
     `Commands and workflows: ${GUIDE_PATH} (load on demand; run \`agentos status\` first).`,
     obsidianLine,
-    'Rules: declare role + scope before editing; edit only in scope; no secrets/.env/migrations/prod config without approval; no commit/push unless asked; verify; update handoff/tasks if state changes.',
+    PROMPT_RULES,
     ...engineSpecificRules(engine),
-    `Current objective: ${oneLine(currentObjective)}`,
+    ...(scope ? [
+      `Repos (inventory, not permission): ${scope.repos.join('; ')}`,
+      `Read scope: ${scope.read.join(', ') || '(none)'}`,
+      `Edit scope: ${scope.edit.join(', ') || '(none; read-only task)'}. Do not edit anything outside it.`,
+    ] : []),
+    `Current objective: ${oneLine(objective)}`,
     `Now: ${oneLine(now)}`,
     'If a user task is included, perform only that task under these rules; otherwise wait for the task.',
   ].filter(Boolean).join('\n');
@@ -4368,7 +4683,7 @@ function obsidianNoteTemplate(note, projectName, linked) {
   return `# ${titleText}\n\n${body}\n`;
 }
 
-function ensureObsidianProjectConfig(project, { vault, destination, linked, mode = 'link-only' }) {
+function ensureObsidianProjectConfig(project, { vault, destination, linked, mode = 'link-only', canonical = undefined, index = undefined }) {
   return patchProjectYaml(String(project || ''), (data) => {
     data.knowledge = data.knowledge && typeof data.knowledge === 'object' ? data.knowledge : {};
     data.knowledge.obsidian = {
@@ -4376,6 +4691,7 @@ function ensureObsidianProjectConfig(project, { vault, destination, linked, mode
       vault,
       destination,
       linked,
+      ...(canonical ? { canonical, index } : {}),
     };
     if (mode === 'workspace-folder') {
       data.knowledge.obsidian.rules = {
@@ -4395,9 +4711,33 @@ function obsidianConfigFromProject(project) {
   return {
     mode: stringValue(obsidian.mode, 'link-only'),
     vault: stringValue(obsidian.vault),
-    destination: normalizeVaultRelativePath(obsidian.destination),
+    destination: normalizeVaultRelativePath(obsidian.destination ?? obsidian.dest),
     linked: Array.isArray(obsidian.linked) ? obsidian.linked.map((note) => normalizeVaultRelativePath(note)).filter(Boolean) : [],
+    canonical: stringValue(obsidian.canonical, 'workspace'),
+    index: obsidian.index ? normalizeVaultRelativePath(obsidian.index) : '',
+    /** Written by `obsidian init|link` (slice 6); older link-workspace configs have no `canonical`/`index`. */
+    managed: 'canonical' in obsidian,
   };
+}
+
+/** The linked folder as a Brain location (workspace-folder mode only; link-only notes are not a location).
+ *  A relative `vault` (from `obsidian init`) is relative to the workspace root. */
+function obsidianBinding(root: string, projectText: string): VaultBinding | null {
+  const config = obsidianConfigFromProject(projectText);
+  if (!config || config.mode !== 'workspace-folder' || !config.vault) return null;
+  if (!['workspace', 'vault'].includes(config.canonical)) throw new Error(`.agentos/project.yaml knowledge.obsidian.canonical must be workspace or vault (got ${config.canonical})`);
+  const vault = resolve(root, config.vault);
+  const dest = config.destination || '.';
+  return { vault, dest, dir: resolve(vault, dest), canonical: config.canonical as VaultBinding['canonical'] };
+}
+
+/** A linked folder that exists but lacks its index note is reported, not treated as linked. */
+async function obsidianIndexWarnings(root: string, projectText: string) {
+  const config = obsidianConfigFromProject(projectText);
+  const binding = obsidianBinding(root, projectText);
+  if (!config?.managed || !binding || !await exists(binding.dir)) return [];
+  const index = config.index ? join(binding.dir, config.index) : '';
+  return index && await exists(index) ? [] : [`Obsidian linked folder ${binding.dir} has no index note${config.index ? ` (${config.index})` : ''}; it is not treated as linked. ${config.destination === '.' ? 'Restore the note (any Markdown index), or remove knowledge.obsidian and re-run `agentos obsidian init`.' : 'Re-run `agentos obsidian link` with the same --vault/--dest (it creates only the missing note).'}`];
 }
 
 function firstYamlValue(text, key) {
@@ -4405,7 +4745,7 @@ function firstYamlValue(text, key) {
   return value === undefined || value === null ? undefined : String(value);
 }
 
-function parseProjectYaml(text) {
+export function parseProjectYaml(text) {
   try {
     const parsed = parseYaml(String(text || ''));
     return parsed && typeof parsed === 'object' ? parsed : {};
@@ -4421,7 +4761,7 @@ class ProjectConfigError extends Error {}
 // treated as `{}` and serialized back as a partial/empty config. A missing file is not an error
 // here — callers that create project.yaml from scratch (or skip patching an absent file) still
 // get to do that; only an *existing* file held to empty/invalid content is treated as malformed.
-async function assertProjectYamlWellFormed(path) {
+export async function assertProjectYamlWellFormed(path) {
   let text;
   try {
     text = await readFile(path, 'utf8');
@@ -4487,7 +4827,6 @@ function oneLine(text, max = 700) {
   const compact = String(text).replace(/\s+/g, ' ').trim();
   return compact.length > max ? `${compact.slice(0, max - 1)}…` : compact;
 }
-function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 function safeId(s) { return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'project'; }
 
 // Two repository IDs that differ only in case or punctuation (`frontend_client`
@@ -4507,7 +4846,7 @@ function repoIdCollisions(ids: string[]): string[] {
     .map(([canonical, group]) => `Unsafe repository IDs collide after normalization: ${group.map((id) => `'${id}'`).join(', ')} all normalize to '${canonical}'; rename one of them by hand, then re-run.`);
 }
 function title(s) { return s.split('-').map((p) => p[0]?.toUpperCase() + p.slice(1)).join(' '); }
-function plannedFiles(mode, workspaceKind, repos) { return [...REQUIRED_FILES, '.agentos/skills.md', '.agentos/runs/README.md', '.hermes.md', ...(mode === 'new' ? ['.agentos/product.md', '.agentos/architecture.md'] : [])]; }
+function plannedFiles(mode) { return [...REQUIRED_FILES, '.agentos/skills.md', '.agentos/runs/README.md', '.hermes.md', ...(mode === 'new' ? ['.agentos/product.md', '.agentos/architecture.md'] : [])]; }
 function renderDryRun({ cwd, mode, workspaceKind, repos, agentSelection }: any) {
   return `AgentOS dry run\nRoot: ${cwd}\nMode: ${mode}\nWorkspace: ${workspaceKind}\nAgents: ${agentSelection?.profile || 'detected'} (${agentSelection?.enabled?.join(', ') || 'unknown'})\nRepos:\n${repos.map((r) => `- ${r.name}: ${r.path}`).join('\n')}\nWould create/patch AgentOS context files. App source files would not be touched.`;
 }
@@ -4620,7 +4959,7 @@ export async function linkObsidianAgentOS(options: any = {}) {
 export async function obsidianAgentOS(options: any = {}) {
   const root = await findAgentOSRoot(options.cwd ?? process.cwd());
   const action = () => obsidianAgentOSUnlocked(options);
-  return root && (!options.dryRun && options.command === 'link-workspace') ? withWorkspaceWriter(root, action) : action();
+  return root && (!options.dryRun && ['link-workspace', 'link', 'init'].includes(options.command)) ? withWorkspaceWriter(root, action) : action();
 }
 
 export async function migrateClaudeAgentOS(options: any = {}) {
@@ -4639,7 +4978,7 @@ export async function skillsAgentOS(options: any = {}) {
 export async function agentsAgentOS(options: any = {}) {
   const root = await findAgentOSRoot(options.cwd ?? process.cwd());
   const action = () => agentsAgentOSUnlocked(options);
-  return root && (!options.dryRun && !options.list) ? withWorkspaceWriter(root, action) : action();
+  return root && (!options.dryRun && !options.list && options.command !== 'show') ? withWorkspaceWriter(root, action) : action();
 }
 
 export async function templatesAgentOS(options: any = {}) {
@@ -4652,6 +4991,83 @@ export async function runHandoffAgentOS(options: any = {}) {
   const root = await findAgentOSRoot(options.cwd ?? process.cwd());
   const action = () => runHandoffAgentOSUnlocked(options);
   return root && (!options.dryRun) ? withWorkspaceWriter(root, action) : action();
+}
+
+async function checkpointContextFor(root: string, options: any): Promise<CheckpointContext> {
+  const engine = options.engine ? normalizeEngine(options.engine) : null;
+  const input = await contextInputFor(root, engine ?? 'generic', { role: options.role });
+  const handoffText = await safeRead(join(root, '.agentos/handoff.md'));
+  const resolved = resolveObjective(handoffText).selected;
+  const objective = resolved ? { id: resolved.id, text: resolved.text } : null;
+  const task = resolveTask(options.task, objective);
+  const excluded = input.project.handoff?.exclude_paths ?? [];
+  if (!Array.isArray(excluded) || excluded.some((path) => typeof path !== 'string')) throw new Error('handoff.exclude_paths must be a list of relative paths.');
+  for (const path of excluded) assertRelativeBoundaryPath(path);
+  const bundle = await buildContextBundle({ ...input, task: task.id.replace(/-/g, ' ') });
+  return {
+    root, engine, repos: input.repos, excluded, handoffText, objective, task, bundle,
+    projectName: firstYamlValue(input.projectText, 'name') ?? basename(root),
+    acceptance: findAcceptance(await safeRead(join(root, '.agentos/tasks.md')), handoffText),
+  };
+}
+
+/** `agentos checkpoint`: writes under the workspace writer lock; list/show/--dry-run are read-only and lock-free. */
+export async function checkpointAgentOS(options: any = {}) {
+  const root = await findAgentOSRoot(options.cwd ?? process.cwd());
+  if (!root) return { ok: false, text: 'AgentOS checkpoint: FAIL\nNo .agentos directory found here or in parent directories.' };
+  if (options.subcommand === 'list') return listCheckpoints(root, options);
+  if (options.subcommand === 'show') return showCheckpoint(root, options.id, options);
+  const action = async () => { await assertWorkspaceBoundaries(root); return writeCheckpoint(await checkpointContextFor(root, options), options); };
+  return options.dryRun ? action() : withWorkspaceWriter(root, action);
+}
+
+const brainScopes = (projectText: string) => parseReposFromProjectYaml(projectText, { includeRoot: true }).map((repo) => repo.name);
+const BRAIN_WRITES = new Set(['init', 'register', 'propose', 'apply', 'verify']);
+
+/** `agentos brain`: writes (init/register/propose/apply/verify) take the workspace lock unless --dry-run; the rest are read-only. */
+export async function brainAgentOS(options: any = {}) {
+  const cwd = options.cwd ?? process.cwd();
+  const root = await findAgentOSRoot(cwd);
+  if (!root) return { ok: false, text: 'AgentOS brain: FAIL\nNo .agentos directory found here or in parent directories.' };
+  const projectText = await safeRead(join(root, '.agentos/project.yaml'));
+  const ctx: BrainCtx = { root, cwd, repos: brainScopes(projectText), vault: obsidianBinding(root, projectText) };
+  const [ref] = options.args ?? [];
+  const run = () => {
+    switch (options.subcommand) {
+      case 'init': return initBrain(ctx, options);
+      case 'register': return registerBrain(ctx, ref, options);
+      case 'list': return listBrain(ctx, options);
+      case 'show': return showBrain(ctx, ref, options);
+      case 'search': return searchBrain(ctx, (options.args ?? []).join(' '), options);
+      case 'propose': return proposeBrain(ctx, ref, options);
+      case 'preview': return previewBrain(ctx, ref, options);
+      case 'validate': return validateBrain(ctx, ref, options);
+      case 'apply': return applyBrain(ctx, ref, options);
+      case 'check': return checkBrain(ctx, options);
+      case 'verify': return verifyBrain(ctx, ref, options);
+      default: return { ok: false, text: BRAIN_USAGE };
+    }
+  };
+  if (!BRAIN_WRITES.has(options.subcommand)) return run();
+  const action = async () => { await assertWorkspaceBoundaries(root); return run(); };
+  return options.dryRun ? action() : withWorkspaceWriter(root, action);
+}
+
+export const BRAIN_USAGE = [
+  'Usage: agentos brain init [--location workspace|vault] [--dry-run]   (vault: only with knowledge.obsidian.canonical: vault)',
+  '       agentos brain register <path> [--kind architecture|decision|adr|convention|feature|note] [--scope <repo-id|.>] [--status proposed|accepted] [--by <name>] [--dry-run]',
+  '       agentos brain list [--status <s>] [--kind <k>] | show <id-or-path> | search <terms…> | check   (read-only; all take --json)',
+  '       agentos brain propose <id-or-path> --from <file|-> [--summary "<text>"] [--supersedes <id>[,<id>]] [--append] [--by <name>] [--dry-run]',
+  '       agentos brain preview <proposal> | validate <proposal>   (read-only)',
+  '       agentos brain apply <proposal> [--dry-run]',
+  '       agentos brain verify <id-or-path> [--by <name>] [--dry-run]',
+].join('\n');
+
+/** `agentos resume`: read-only. */
+export async function resumeAgentOS(options: any = {}) {
+  const root = await findAgentOSRoot(options.cwd ?? process.cwd());
+  if (!root) return { ok: false, text: 'AgentOS resume: FAIL\nNo .agentos directory found here or in parent directories.' };
+  return resumeCheckpoint(await checkpointContextFor(root, options), { engine: options.engine ? normalizeEngine(options.engine) : undefined, json: options.json });
 }
 
 export async function doctorAgentOS(options: any = {}) {

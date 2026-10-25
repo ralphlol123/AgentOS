@@ -15,12 +15,14 @@ export function protectedEvidencePath(path: string, excluded: string[] = []): bo
     || /(?:\.(?:pem|key|p12|pfx)|(?:^|[./_-])(?:prod|production)[._-].*(?:config|settings)|(?:^|\/)(?:credentials|secrets)[._-])/i.test(normalized)
     || excluded.map(prefix => prefix.replace(/\\/g, '/').replace(/^(?:\.\/)+/, '').replace(/\/$/, '')).some(prefix => normalized === prefix || normalized.startsWith(`${prefix}/`));
 }
-export async function collectRunHandoffGitState(worktree: string, excluded: string[] = []) {
+/** `pathspec` limits every command to one directory of the work tree (paths stay relative to the work tree top). */
+export async function collectRunHandoffGitState(worktree: string, excluded: string[] = [], pathspec?: string) {
+  const git = (args: string[]) => runReadOnlyGit(worktree, pathspec ? ['--literal-pathspecs', ...args, '--', pathspec] : args);
   const [status, stats, cachedStats, names, cachedNames] = await Promise.all([
-    runReadOnlyGit(worktree, ['status', '--porcelain=v1', '-z', '--branch']),
-    runReadOnlyGit(worktree, ['diff', '--no-ext-diff', '--no-textconv', '--stat']),
-    runReadOnlyGit(worktree, ['diff', '--no-ext-diff', '--no-textconv', '--cached', '--stat']),
-    runReadOnlyGit(worktree, ['diff', '--name-only', '-z']), runReadOnlyGit(worktree, ['diff', '--cached', '--name-only', '-z']),
+    git(['status', '--porcelain=v1', '-z', '--branch']),
+    git(['diff', '--no-ext-diff', '--no-textconv', '--stat']),
+    git(['diff', '--no-ext-diff', '--no-textconv', '--cached', '--stat']),
+    git(['diff', '--name-only', '-z']), git(['diff', '--cached', '--name-only', '-z']),
   ]);
   const statusLines: string[] = [], statusFiles: string[] = [], blockedRenames = new Set<string>();
   const tokens = (status.ok ? status.stdout : '').split('\0').filter(Boolean);

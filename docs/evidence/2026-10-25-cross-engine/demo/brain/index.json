@@ -1,0 +1,16 @@
+{
+  "schema": "agentos.brain-index/1",
+  "note": "Derived from record frontmatter by agentos brain; never authoritative. Safe to delete; the next brain write regenerates it.",
+  "records": [
+    {
+      "id": "brain:0001-greeting",
+      "kind": "adr",
+      "status": "verified",
+      "scope": ".",
+      "title": "ADR 1: Greeting format",
+      "path": "docs/adr/0001-greeting.md",
+      "source_hash": "872528548f63f4885fca02a2b88aef169a043de887b8c7b0a8ca846afde32dbe"
+    }
+  ],
+  "invalid": []
+}

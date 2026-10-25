@@ -603,7 +603,7 @@ test('doctor --json CLI prints parseable JSON only', async () => {
 });
 
 
-test('doctor --fix adds opencode to engines.allowed in older workspaces without creating an engine stub', async () => {
+test('doctor --fix keeps engines.allowed as the owner set it and creates no engine stub', async () => {
   const root = await tempProject();
   await initAgentOS({ cwd: root, mode: 'new', yes: true });
   const projectPath = join(root, '.agentos/project.yaml');
@@ -619,7 +619,7 @@ test('doctor --fix adds opencode to engines.allowed in older workspaces without 
   const fixed = await doctorAgentOS({ cwd: root, fix: true });
   assert.equal(fixed.ok, true);
   assert.equal(await exists(join(root, '.agentos/engines/opencode.md')), false, 'no stub is created');
-  assert.match(await readFile(projectPath, 'utf8'), /- opencode/);
+  assert.equal(await readFile(projectPath, 'utf8'), projectYaml, 'engine preference preserved');
 });
 
 

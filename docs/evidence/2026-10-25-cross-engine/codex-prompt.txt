@@ -1,0 +1,133 @@
+AgentOS resume: greeting
+Record: .agentos/checkpoints/greeting/2026-10-24T21-16-10-353Z-0c7689e0.json (created 2026-10-24T21:16:10.353Z; engine claude-code; role developer)
+Objective: Make web greet() follow ADR 1 (trailing "!") and add a farewell(name) function with a test.
+Reconciliation: unavailable
+- api: unavailable (not the top of a git work tree)
+- web: unavailable (not the top of a git work tree)
+Accomplished:
+- Progress: greet() returns Hello <name>! per ADR 1; web/test.js updated
+- observed-pass: `node test.js` (cwd web, exit 0, evidence .agentos/checkpoints/greeting/evidence/1977201f70da0117.log)
+Remaining:
+- Next: implement farewell(name) -> Goodbye <name>! with test in web; update handoff/tasks
+- Blockers: none
+- claimed: `Claude reported: out-of-scope Edit of api/contracts/openapi.yaml was ALLOWED then reverted` (cwd ., engine-reported; not observed by AgentOS)
+- not-run: `npm run test` (cwd web, declared web.test_command)
+Next: agentos context claude-code --task greeting
+
+Follow AgentOS for Projects.
+Project: aos-xeng; root: /tmp/aos-xeng; kind: multi-repo; engine: codex.
+Read: AGENTS.md; .agentos/project.yaml; memory.md; handoff.md; tasks.md. Then load skills.md plus only the assigned repo/agent context needed for the task.
+Task: farewell function per acceptance criteria
+Role: developer
+
+## Objective
+Source: .agentos/handoff.md#Current objective
+Make web greet() follow ADR 1 (trailing "!") and add a farewell(name) function with a test.
+
+## Constraints
+Source: .agentos/handoff.md#Protected files / do not touch + generated rules
+Rules: declare role + scope before editing; edit only in scope; no secrets/.env/migrations/prod config without approval; no commit/push unless asked; verify; update handoff/tasks if state changes.
+- Codex must explicitly list files it read before recommending edits.
+
+Protected (handoff):
+- .env files
+- production secrets
+- database migrations unless explicitly approved
+- repos outside declared task scope
+
+## Scope
+Source: .agentos/project.yaml#task_scope
+Repos (inventory, not permission): api=./api; web=./web
+Read scope: web, api/contracts/openapi.yaml, docs/adr
+Edit scope: web. Do not edit anything outside it.
+
+## Role: developer
+Source: .agentos/agents/developer.md
+Permission intent: edit-in-scope (narrows the task scope only; see Scope).
+# Developer
+
+Mandate: Implement scoped changes and their tests inside the assigned repo, using the relevant frontend or backend skills.
+
+## Responsibilities in
+
+- Read AgentOS project, memory, handoff, and tasks first.
+- Declare role, repo scope, allowed paths, protected paths, and verification commands before editing.
+- Work only inside the declared task scope.
+- Load `.agentos/skills.md` and only the relevant skill/repo/engine files for this task.
+- Detect the assigned repo's actual stack and version from project files, then follow its conventions.
+- Write or update the tests for the behavior being changed (test-driven-development), then implement the scoped change.
+- For frontend work load frontend-design and frontend-testing; for backend work load backend-development, backend-testing, and authorization.
+- Report files changed, verification run, failures, and next action before stopping.
+
+## Responsibilities out
+
+- Do not touch secrets, `.env` files, production config, migrations, deployments, or unrelated repos without explicit approval.
+- Do not commit or push unless explicitly assigned.
+- Do not claim independent QA or code review of your own work; hand off verification and review to the tester and reviewer roles.
+- Do not treat this template as higher priority than user/system/developer/AgentOS instructions.
+
+## Skills
+
+Use `.agentos/skills.md` as an on-demand index. Load only skills relevant to this role and task.
+
+## Verification expectations
+
+- State the exact verification command/check before running it.
+- Report real command output or inspected state, not assumptions.
+- When project state changes, rewrite `.agentos/handoff.md` to the current state (never append) and delete finished tasks from `.agentos/tasks.md`. Before an older entry leaves either file, copy it into a note under `.agentos/runs/`; never discard history.
+
+## Acceptance criteria
+Source: .agentos/tasks.md#Acceptance criteria
+- greet("x") returns "Hello x!"
+- farewell("x") returns "Goodbye x!"
+- `node test.js` in web passes
+
+## Current state
+Source: .agentos/handoff.md#Current state
+AgentOS initialized. No implementation task is active yet.
+
+## Next exact action
+Source: .agentos/handoff.md#Next exact action
+Choose a task, declare repo scope, then select the responsible agent role and engine.
+
+## Repo note: web
+Source: .agentos/repos/web.md
+# Web Repo
+
+Path: `./web`; type: app; framework: unknown; package manager: npm.
+Commands: dev=`unknown`; build=`unknown`; test=`npm run test`.
+Scope: edit only when task includes `web`.
+
+## Verification: web
+Source: .agentos/project.yaml#repos.web
+- test_command: npm run test
+
+## Read path: api/contracts/openapi.yaml
+Source: (scope)
+api/contracts/openapi.yaml is in read scope for reference; edit it only if the edit scope covers it.
+
+## Read path: docs/adr
+Source: (scope)
+docs/adr is in read scope for reference; edit it only if the edit scope covers it.
+
+## Omitted (13)
+- repo:api (repo-note): out-of-scope
+- skill:debugging (skill): no-match
+- skill:test-driven-development (skill): no-match
+- skill:frontend-design (skill): no-match
+- skill:frontend-testing (skill): no-match
+- skill:backend-development (skill): no-match
+- skill:backend-testing (skill): no-match
+- skill:authorization (skill): no-match
+- skill:integration-testing (skill): no-match
+- skill:git-safety (skill): no-match
+- skill:code-review (skill): no-match
+- skill:pull-request-workflow (skill): no-match
+- brain:0001-greeting (brain): no-match
+
+ADVISORY: edit scope is instruction-only for codex
+
+Budget: 2699 of 24000 tokens, estimate (chars/4), including 1500 assumed engine overhead.
+
+
+USER TASK: You are a fresh session continuing someone else's work. Using ONLY the AgentOS state above (and files on disk), first state in 4 lines: ACCOMPLISHED / REMAINING / CHECKS-RUN-BEFORE (with status words from the receipts) / NEXT. Then do the NEXT step: implement farewell(name) in web/src/greet.js returning "Goodbye <name>!", add a test to web/test.js, run `node test.js` in web. Then run `node /tmp/aos-v1/dist/cli.js checkpoint --task greeting --engine codex --role developer --progress "<what you did>" --next "<what remains>" --check "node test.js" --cwd web` from the workspace root. Do not commit. Finish with the checkpoint command output.

@@ -12,7 +12,7 @@ These checks protect against existing unsafe paths, not concurrent filesystem re
 
 Every critical AgentOS text file — `.agentos/project.yaml`, `handoff.md`, `tasks.md`, `knowledge.md`, `skills.md`, managed agent/repo markdown, and root/child adapter files (`AGENTS.md`, `CLAUDE.md`, `.hermes.md`, child repo pointers) plus their `.agentos.bak` backups — is replaced through a single atomic-write primitive: the new content is written to a uniquely named temporary file in the *same directory* as the destination, flushed and fsync'd, closed, given the destination's existing file mode (or the OS default for a brand-new file), then renamed over the destination in one filesystem `rename()` call. `rename()` never follows a symlink at the destination — it replaces the link entry itself — and this primitive does not change Task 2's symlink/boundary checks, which still run before any of this. If the temp file can't be renamed (or any earlier step fails), the temp file is removed; no partial or zero-byte destination file is ever left behind.
 
-Commands that touch more than one output — `agentos init`, `doctor --fix`, `agentos obsidian link` / `link-workspace`, `agents add` and agent template copy, `skills add` / `skills remove` and skill template copy/import, `compact`, and `agentos run handoff` — run their entire write phase as one in-process mutation transaction. For `init`, that includes every filesystem mutation it makes, not just the adapter files: the `.agentos` scaffold directories and files, per-agent/engine/repo files, root/child adapters and their one-time backups, and child `.gitignore` blocks are all one transaction, so a fault partway through leaves the workspace exactly as it was before `init` ran. Before each write/create/remove, the transaction snapshots either the target's existing bytes and mode (if it already existed) or its topmost not-yet-existing ancestor directory (if it's new), so a brand-new nested folder can be removed as a whole on rollback. If any later step in the same command throws, every tracked path is restored to its pre-command bytes, mode, or absence, in reverse order, before the error is re-raised; dry-run and dependency/config validation still happen before any of this and are unaffected.
+Commands that touch more than one output — `agentos init`, `doctor --fix`, `agentos obsidian link` / `link-workspace`, `agents add` and agent template copy, `skills add` / `skills remove` and skill template copy/import, `compact`, `agentos run handoff`, and `agentos checkpoint` — run their entire write phase as one in-process mutation transaction. For `init`, that includes every filesystem mutation it makes, not just the adapter files: the `.agentos` scaffold directories and files, per-agent/engine/repo files, root/child adapters and their one-time backups, and child `.gitignore` blocks are all one transaction, so a fault partway through leaves the workspace exactly as it was before `init` ran. Before each write/create/remove, the transaction snapshots either the target's existing bytes and mode (if it already existed) or its topmost not-yet-existing ancestor directory (if it's new), so a brand-new nested folder can be removed as a whole on rollback. If any later step in the same command throws, every tracked path is restored to its pre-command bytes, mode, or absence, in reverse order, before the error is re-raised; dry-run and dependency/config validation still happen before any of this and are unaffected.
 
 Guarantees:
 
@@ -175,6 +175,7 @@ AgentOS is a TypeScript CLI/package that supports:
 - reusable repository templates under `templates/`;
 - guarded import of useful web/file agents or skills;
 - Obsidian workspace-folder knowledge/output setup;
+- a managed Project Brain: existing Markdown knowledge registered by reference, changed through validated proposals;
 - deterministic live-context compaction;
 - engine-neutral run handoff notes with read-only Git grounding;
 - doctor/status/handoff checks and JSON health output;
@@ -247,6 +248,51 @@ agentos prompt hermes
 
 More detail: [docs/quickstart.md](docs/quickstart.md).
 
+## v1 workflow
+
+The path below is the one Phynceon's 2026-10-25 cross-engine trial walked (Claude Code 2.1.310 → Codex 0.156.1 and back, on a disposable root repo with `web/`, `api/`, `docs/adr/`; [report](docs/evidence/2026-10-25-cross-engine/REPORT.md), n=1). Steps 1–7 use the trial's commands; steps 8–9 were not part of the trial and are covered by tests only.
+
+1. **Init** the workspace once: `agentos init --existing`.
+2. **Role**: give the role a manifest card (catalog cards from `init` already have one): `agentos agents add developer` (or `agentos agents manifest developer --from-catalog` for an older card). See [docs/agents.md](docs/agents.md).
+3. **Task scope** in `.agentos/project.yaml` — what the task may read and edit (the trial used):
+
+   ```yaml
+   task_scope:
+     read: [web, api/contracts/openapi.yaml, docs/adr]
+     edit: [web]
+   ```
+
+4. **Context** for the first engine: `agentos context claude-code --task greeting` (objective, constraints, scope, role card, relevant decisions/Brain records, budget). Optionally write Claude Code's deny rules with `agentos agents sync claude-code` and trust the workspace (see [Engines](#engines)).
+5. **Work in Claude Code** with that context as the prompt prefix. The trial launched `claude -p "<context + task>" --allowedTools Read,Edit,Write,Bash(node:*),Bash(cd:*) --output-format json --no-session-persistence`.
+6. **Checkpoint** before stopping, with real checks:
+
+   ```bash
+   agentos checkpoint --task greeting --engine claude-code --role developer \
+     --progress "<what you did>" --next "<what remains>" --check "node test.js" --cwd web
+   ```
+
+   `--claim "<text>"` records something the engine reports but AgentOS did not observe.
+7. **Fresh Codex**: `agentos resume --task greeting` (accomplished / remaining / receipts / reconciliation, read-only), then `agentos context codex --task greeting`. The trial ran `codex exec -a never` with both as the prompt; Codex continued from the `observed-pass`/`claimed`/`not-run` receipts and wrote its own checkpoint (`--engine codex`).
+8. **Brain**: record what the task taught as a proposal and apply it after review: `agentos brain propose <id-or-path> --from - --summary "<why>"`, `agentos brain preview <proposal>`, `agentos brain apply <proposal>`. See [docs/brain.md](docs/brain.md).
+9. **Obsidian (optional)**: `agentos obsidian init` (plain `knowledge/` folder) or `agentos obsidian link --vault <abs-path> --dest <sub/folder> [--canonical workspace|vault] --create`. See [docs/obsidian.md](docs/obsidian.md).
+
+What is enforced and what is only instruction, per engine: [docs/engines.md](docs/engines.md). Proven / not proven per scenario: [docs/acceptance-matrix.md](docs/acceptance-matrix.md).
+
+## Documentation
+
+- [docs/quickstart.md](docs/quickstart.md) — install and first run
+- [docs/context-builder.md](docs/context-builder.md) — `agentos context`: selection, scope, budget
+- [docs/checkpoints.md](docs/checkpoints.md) — `agentos checkpoint` / `resume`: records, receipts, reconciliation
+- [docs/brain.md](docs/brain.md) — `agentos brain`: records, proposals, stale/duplicate checks
+- [docs/agents.md](docs/agents.md) — agent manifests and lifecycle
+- [docs/engines.md](docs/engines.md) — engine adapters and the trial-backed capability matrix
+- [docs/obsidian.md](docs/obsidian.md) — optional Obsidian location for the Brain
+- [docs/migration.md](docs/migration.md) — adopting v1 in an existing workspace; keep / simplify / remove inventory
+- [docs/acceptance-matrix.md](docs/acceptance-matrix.md) — v1 acceptance per priority and scenario (PASS / FAIL / BLOCKED)
+- [docs/improve-later.md](docs/improve-later.md) — consolidated backlog
+- [docs/compaction.md](docs/compaction.md), [docs/templates.md](docs/templates.md), [docs/safe-imports.md](docs/safe-imports.md), [docs/release-readiness.md](docs/release-readiness.md), [docs/reliability-acceptance.md](docs/reliability-acceptance.md)
+- [docs/evidence/2026-10-25-cross-engine/](docs/evidence/2026-10-25-cross-engine/README.md) — engine trial report, prompts, transcripts, checkpoint records
+
 ## Commands
 
 ```bash
@@ -263,13 +309,21 @@ agentos compact [--objective <id>] --dry-run [--diff]
 agentos compact --checkpoint [--dry-run]
 agentos compact --rewrite ...  # compatibility alias for normal compact
 agentos link-obsidian [--vault <path> --dest <folder> --link <note> --create]
+agentos obsidian init [--dir <path>] [--dry-run]
+agentos obsidian link --vault <abs-path> --dest <sub/folder> [--canonical workspace|vault] [--create] [--dry-run]
 agentos obsidian link-workspace --vault <path> --dest <folder> [--create] [--dry-run]
 agentos obsidian status
 agentos skills list
 agentos skills add [--detected] [skill-id|category-pack,...] [--mode summary|full] [--dry-run]
 agentos skills remove <skill-id> [--dry-run]
 agentos agents list
-agentos agents add <agent-id|template-file> [--name id] [--dry-run]
+agentos agents add <agent-id|template-file> [--name id] [--replace] [--dry-run]
+agentos agents show <id> [--json]
+agentos agents enable|disable <id> [--dry-run]
+agentos agents remove <id> [--dry-run]
+agentos agents manifest <id> --from-catalog|--custom [--dry-run]
+agentos agents sync claude-code|codex [--role <id>] [--scope <repo-or-path>,...] [--dry-run]
+agentos engines [--json]
 agentos templates list
 agentos templates show <id>
 agentos templates copy <id> [--dry-run] [--replace]
@@ -277,7 +331,77 @@ agentos templates validate <file> --type agent|skill
 agentos templates import <url-or-file> --type agent|skill --name <id> [--mode summary|full] [--dry-run] [--yes] [--replace]
 agentos migrate claude --preserve [--dry-run]
 agentos prompt [claude|codex|opencode|hermes]
+agentos context [claude|codex|opencode|hermes] [--task "<text>"] [--role <agent-id>] [--scope <repo-or-path>,...] [--budget <tokens>] [--json] [--include-superseded] [--require-synced-config] [--require-enforcement] [--require-complete]
+agentos checkpoint [--task <id>] [--engine <e>] [--role <r>] [--progress "<text>"] [--blocker "<text>"] [--next "<text>"] [--check "<cmd>" [--cwd <dir>]]... [--claim "<text>"]... [--json] [--dry-run]
+agentos checkpoint --recover [--task <id>] [--dry-run]
+agentos checkpoint list [--task <id>] [--json]
+agentos checkpoint show <id> [--json]
+agentos resume [--task <id>] [--engine <e>] [--json]
+agentos brain init [--location workspace|vault] [--dry-run]
+agentos brain register <path> [--kind architecture|decision|adr|convention|feature|note] [--scope <repo-id|.>] [--status proposed|accepted] [--by <name>] [--dry-run]
+agentos brain list [--status <s>] [--kind <k>] [--json] | show <id-or-path> [--json] | search <terms...> [--json] | check [--json]
+agentos brain propose <id-or-path> --from <file|-> [--summary "<text>"] [--supersedes <id>] [--append] [--by <name>] [--dry-run]
+agentos brain preview <proposal> | validate <proposal> [--json]
+agentos brain apply <proposal> [--dry-run]
+agentos brain verify <id-or-path> [--by <name>] [--dry-run]
 ```
+
+## Task-specific context
+
+`agentos prompt` prints a short generic prefix. `agentos context` builds a context bundle for one task and one role, read-only (no file, lock or temp file is created):
+
+```bash
+agentos context claude --task "rotate auth tokens in the settings page" --role developer --scope web,api/contracts/openapi.yaml
+agentos context codex --task "..." --json      # structured bundle only
+```
+
+- Mandatory records come first and are never truncated: objective (same resolver as `status`/`doctor`), constraints (handoff "Protected files / do not touch" plus the generated rules), scope, and the role's agent card.
+- Optional records are filtered before ranking: out of read scope → `out-of-scope`; `superseded`/`deprecated` heading or `status:` line → `superseded` (shown labelled with `--include-superseded`); decisions, skills and linked notes that share no term with `--task` → `no-match`. The rest (acceptance criteria, handoff current state / next action, repo notes and verification commands for repos in scope, decisions, skills, linked notes by reference) is ranked by term overlap, then freshness, and added until the budget is reached; the rest is listed as `budget`.
+- `--scope` narrows `task_scope`: it replaces the read scope and keeps only the edit entries it still covers, so it never widens edit. Without any scope the read scope is the whole workspace and edit scope is empty.
+- Tokens are `estimate (chars/4)` plus a fixed per-engine overhead; default budget 24000. If the mandatory records alone exceed the budget, the command exits 1 with `overflow` and renders nothing. A missing objective also exits 1; a missing agent card or scope path is listed under `missing` as a warning; two current decisions with the same heading subject are listed under `conflicts`.
+
+Selection signals, budget numbers and the JSON shape: [`docs/context-builder.md`](docs/context-builder.md).
+
+## Checkpoints and resume
+
+`agentos checkpoint` records where a task stands; `agentos resume` reads it back against the repos as they are now, so the same or another engine can continue without restarting:
+
+```bash
+agentos checkpoint --task token-rotation --engine claude --progress "Endpoint drafted" --next "Wire the settings page" \
+  --check "npm run test" --cwd web --claim "manual login flow works"
+agentos resume --task token-rotation          # read-only
+agentos checkpoint --recover --task token-rotation   # the engine died without a summary
+```
+
+- Each checkpoint is an immutable JSON record (`agentos.checkpoint/1`) under `.agentos/checkpoints/<task>/`, plus a `current.json` pointer and one bounded `## Checkpoint (managed)` section in `.agentos/handoff.md` that is replaced in place, never appended. `tasks.md` is not touched.
+- Per repo it stores branch, HEAD and a working-tree fingerprint (staged, unstaged and untracked), using the same bounded, sensitive-path-aware git evidence as `run handoff`. A repo that is a directory inside one enclosing work tree (`web/`, `api/` in a root repo) uses that work tree limited to the directory (`state: enclosing-worktree`); only a path outside any work tree is `unavailable`.
+- Verification receipts say exactly what is known: `observed-pass` / `observed-fail` (AgentOS ran the `--check`; output saved as evidence), `claimed` (`--claim`, engine-reported), `not-run` (declared build/test commands of in-scope repos nobody ran), `unavailable` (could not start). Each receipt records the state it tested.
+- `resume` reports `clean`, `drifted` (HEAD moved, fingerprint differs, new changed paths) or `unavailable`, lists what is accomplished (progress plus current passes) and what remains (next action, blockers, failed/claimed/not-run receipts, passes marked `stale (recheck)`), and prints the `agentos context <engine> --task <id>` line to run next. A missing pointer or damaged record is reported as `incomplete` with the files and error, never skipped.
+- `agentos context` includes the current checkpoint; `doctor` fails on a pointer to a missing or invalid record.
+- One active writer per workspace; concurrent engines are not supported. Each file is written atomically, but several files are not one crash-safe transaction.
+
+Schema, receipt vocabulary, reconciliation states and limits: [`docs/checkpoints.md`](docs/checkpoints.md).
+
+## Project Brain
+
+`agentos brain` keeps durable project knowledge (architecture, decisions, ADRs, conventions, feature notes) in ordinary Markdown files, registered by reference:
+
+```bash
+agentos brain init                                   # templates for a project without knowledge files
+agentos brain register docs/adr/0003-use-postgres.md --kind adr
+agentos brain propose brain:0003-use-postgres --from new-text.md --summary "pin Postgres 16"   # an engine writes the text
+agentos brain preview <proposal>   &&   agentos brain apply <proposal>
+agentos brain check                                  # changed / invalid records
+agentos brain verify brain:0003-use-postgres --by ralph
+```
+
+- A record is the file itself plus a small validated frontmatter (`id: brain:<slug>`, `kind`, `scope`, `status`, `sources`, `source_hash`, …). `register` adds only that block; the body stays byte-identical. Unknown keys such as `task_scope`, rules or permissions are refused: Brain content is data, not instructions. `.agentos/brain/index.json` is derived, never authoritative.
+- Lifecycle `proposed → accepted → verified → superseded`. Changes go through proposals under `.agentos/brain/proposals/`; `apply` validates identity, scope, schema, references, exact duplicates and stale writes (a proposal whose `base_hash` no longer matches is refused with both hashes, zero writes), flags ambiguous same-subject records, then updates the target, supersession links and the index in one transaction and keeps the proposal under `applied/`. Applying twice is a no-op.
+- A different `source_hash` means "source changed since verification — recheck", not "wrong". Humans may edit bodies freely; `brain check` and `doctor` report it, `brain verify` refreshes the hash explicitly. Invalid frontmatter is reported with `file:line` and the file is left alone (`doctor` problem).
+- `agentos context` lists Brain records by reference: superseded ones omitted by default, proposed ones labelled and ranked lower, changed ones labelled.
+- One writer per workspace; no database, embeddings or vault ingestion.
+
+Metadata keys, validation table and limits: [`docs/brain.md`](docs/brain.md).
 
 ## Compaction
 
@@ -346,9 +470,48 @@ Profiles:
 
 `planner` is optional and planning-only. It is not enabled by the default detected profile.
 
+### Task scope (optional)
+
+`repos:` in `.agentos/project.yaml` is an inventory; it grants no permission. To scope the current task, add an optional `task_scope` mapping (repo IDs or workspace-relative paths; `edit` implies `read`):
+
+```yaml
+task_scope:
+  read: [api/contracts/openapi.yaml]
+  edit: [web]
+```
+
+`agentos prompt` then prints the repo inventory, read scope and edit scope separately, so a frontend task can read a backend contract without gaining backend edit scope. `prompt` and `doctor` fail on a malformed `task_scope` (unknown keys, non-lists, absolute or `..` paths). `doctor --fix` never edits `engines.allowed`.
+
 ```bash
 agentos agents add planner
 ```
+
+## Agents
+
+An agent card `.agentos/agents/<id>.md` is readable instructions; its YAML frontmatter, when present, is a validated manifest (`id`, `name`, `purpose`, `responsibilities`, `knowledge_selectors`, `skills`, `tools_requested`, `permission_intent: read-only|edit-in-scope|release`, `expected_output`, `provenance`, `custom`, optional `edit_request`). Unknown keys and any other `permission_intent` are rejected; `doctor` fails on an invalid manifest.
+
+```bash
+agentos agents add developer                  # writes the manifest: installed_from catalog:developer, package version, source_hash
+agentos agents show developer --json
+agentos agents disable tester                 # edits agents.enabled only; the card stays on disk
+agentos agents remove tester --dry-run        # refuses while anything still references tester
+agentos agents manifest reviewer --from-catalog   # legacy card that byte-matches the catalog
+```
+
+- The task decides the scope (`task_scope` / `--scope`). A manifest can only narrow it: `read-only` empties the edit scope; `edit_request` entries outside the task's edit scope are ignored with a warning.
+- `agents add` and `doctor --fix` never overwrite a card marked `custom: true` or whose body changed since install (`provenance.source_hash`). `agents add <id> --replace --dry-run` prints a diff and writes nothing; `--replace` keeps the old card under `.agentos/runs/replaced-agents/`.
+- Cards written by `init` have no frontmatter (legacy). They keep working; `doctor` lists them with the command that adds a manifest. Provenance is never inferred for a card that does not byte-match its source: use `agents manifest <id> --custom` (provenance `unknown`).
+- `disable` leaves the card; `context`/`checkpoint --role <disabled>` exit 1 naming `agentos agents enable <id>`. `remove` refuses while `agents.enabled`, `agents.capabilities`, a current checkpoint role or a Brain record (`scope`, or a tag `<id>`/`agent:<id>`) points at the id, and moves the card to `.agentos/runs/removed-agents/<ts>-<id>.md` instead of deleting it.
+
+Keys, lifecycle and preservation rules: [`docs/agents.md`](docs/agents.md).
+
+## Engines
+
+`agentos engines [--json]` prints what AgentOS can make each engine (`claude-code`, `codex`, `opencode`, `hermes`, `generic`) do, per row `context_rendering`, `native_agent_config`, `tool_restrictions`, `permission_enforcement`, `launch`, `native_session_resume`, with status `verified | advisory | unsupported | unverified` and the evidence. `verified` cells come from the 2026-10-25 trials (n=1 per probe; T7 n=2): Claude Code `permission_enforcement` (deny rules in a trusted workspace: listed paths, siblings, Bash redirects to denied paths, read-only deny-all; T3, T5, T6c, T6d) and `tool_restrictions` (launch-time `--allowedTools`, T1/T2); Codex `permission_enforcement` (launch-time `--sandbox read-only` only; per-path scope unsupported, T4); `native_agent_config` for both (Claude: discovery T5, invocation T8/T9, instruction-following T8; Codex: instruction-following T7); the rendered subagent `tools:` restricted the invoked subagent (T9). `agentos context <engine>` ends with one ADVISORY line saying how far the edit scope is enforced and which paths stay writable. `--require-synced-config` checks configuration presence: `Synced config: OK (claude-code, sha256 …)` while `.claude/settings.local.json` carries the deny set `agents sync claude-code` would generate now, otherwise `STALE`, `MISSING`, or `UNSUPPORTED` (every other engine). `--require-enforcement` always exits 1 (`Enforcement: UNSUPPORTED — …`) for every engine in v1: AgentOS cannot verify workspace trust, residual paths stay writable, and the rules bind only the engine's own tools. Configuration presence is not proof of enforcement ([`docs/engines.md`](docs/engines.md#enforcement-vs-synced-configuration)).
+
+`agentos agents sync claude-code [--dry-run]` writes `.claude/agents/<role>.md` and merges a `.claude/settings.local.json` permission fragment by adding keys only: `Edit(/<path>/**)` allow rules for the edit scope plus `Edit`/`Write`/`NotebookEdit` **deny** rules for everything outside it — listed repo/read paths, every sibling entry at each ancestor level of the edit path, `.claude/` with its settings files, `.agentos/project.yaml` and `.agentos/agents/**` (a read-only role denies `/**`). Listed-path and sibling denies are trial-verified (T5, T6c); new root files/dirs created after the sync, `.agentos/` state and other shell writes are advisory — re-run it after adding top-level directories. The subagent gets `tools:` from the manifest's `tools_requested` (read-only roles: `Read, Grep, Glob`; the invoked subagent had exactly the listed tools in T9, n=1; the top-level session is not restricted). A conflicting existing value refuses the whole sync with zero writes. Claude Code ignores `.claude/settings.local.json` until the workspace is trusted; run `claude` interactively once or set `projects[<root>].hasTrustDialogAccepted`. `agentos agents sync codex` writes a managed role block (`<!-- agentos:role:start/end -->`) into the in-scope repo's `AGENTS.md` and prints that Codex enforces only its launch-time sandbox. Only `agents sync` writes these files; `context` and `checkpoint` never do.
+
+Matrix, evidence and what the trial did not prove: [`docs/engines.md`](docs/engines.md).
 
 ## Local skills
 
@@ -503,9 +666,16 @@ agentos templates import ./external-skill.md --type skill --name external-review
 
 Safe-import docs: [docs/safe-imports.md](docs/safe-imports.md).
 
-## Obsidian workspace-folder knowledge
+## Obsidian (optional)
 
-Preferred setup links one Obsidian folder/workspace per AgentOS workspace:
+Obsidian is a second location for the same Project Brain, never a second store; nothing needs it. Details: [docs/obsidian.md](docs/obsidian.md).
+
+- **No vault yet:** `agentos obsidian init [--dir <path>] [--dry-run]` creates a plain `knowledge/` folder with an `index.md` that links the Brain records by relative path, and registers it as `knowledge.obsidian` (keys added only). Open the folder in Obsidian if you like; `.obsidian/` is created by Obsidian, not by AgentOS.
+- **Existing vault:** `agentos obsidian link --vault <abs-path> --dest <sub/folder> [--canonical workspace|vault] [--create] [--dry-run]` registers one project folder. It creates only that folder and `<Project> AgentOS Index.md` in it; nothing else in the vault is touched.
+- **Canonical location** (`knowledge.obsidian.canonical`, default `workspace`): every record is one file in one place; the other side holds links, never copies; no sync. With `canonical: vault`, notes in the linked folder are Brain records with portable identity (`id`, vault-relative `sources`); the absolute vault path lives only in `project.yaml`. Notes are read and changed only through `agentos brain register|propose|apply`, and only inside `<vault>/<dest>`.
+- **Unavailable vault:** its records are `unavailable` in `brain check`, listed under Missing by `agentos context` (`--require-complete` exits 1), and `doctor` warns. An edit made in Obsidian shows up as `changed`.
+
+The boundary-only form (no index note) still works:
 
 ```bash
 agentos obsidian link-workspace \

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile, readdir, lstat, symlink, rm, readlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { initAgentOS, doctorAgentOS, linkObsidianAgentOS, obsidianAgentOS, skillsAgentOS, templatesAgentOS, compactAgentOS, agentsAgentOS, migrateClaudeAgentOS, normalizeRepoIdsAgentOS } from '../dist/core.js';
+import { initAgentOS, brainAgentOS, checkpointAgentOS, doctorAgentOS, linkObsidianAgentOS, obsidianAgentOS, skillsAgentOS, templatesAgentOS, compactAgentOS, agentsAgentOS, migrateClaudeAgentOS, normalizeRepoIdsAgentOS } from '../dist/core.js';
 
 async function snapshot(dir) {
   const result = {};
@@ -39,11 +39,18 @@ test('boundary: symlinked managed targets fail before writes or deletions', asyn
   const cases = [
     ['.agentos/skills', root => skillsAgentOS({ cwd: root, add: 'core-pack' })],
     ['.agentos/agents', root => agentsAgentOS({ cwd: root, add: 'planner' })],
+    ['.agentos/runs', root => agentsAgentOS({ cwd: root, command: 'remove', id: 'reviewer' })],
+    ['.agentos/agents', root => agentsAgentOS({ cwd: root, command: 'manifest', id: 'developer', fromCatalog: true })],
     ['.agentos/skills.md', root => templatesAgentOS({ cwd: root, command: 'copy', id: 'skill:core/debugging', replace: true })],
     ['.agentos/runs', root => compactAgentOS({ cwd: root, checkpoint: true })],
     ['.agentos/runs', root => compactAgentOS({ cwd: root, rewrite: true })],
     ['.agentos/repos', root => normalizeRepoIdsAgentOS({ cwd: root })],
+    ['.agentos/checkpoints', root => checkpointAgentOS({ cwd: root, task: 'boundary', progress: 'p' })],
+    ['.agentos/brain', root => brainAgentOS({ cwd: root, subcommand: 'init' })],
+    ['.agentos/brain', root => brainAgentOS({ cwd: root, subcommand: 'register', args: ['.agentos/decisions.md'] })],
     ['AGENTS.md', root => doctorAgentOS({ cwd: root, fix: true })],
+    ['knowledge', root => obsidianAgentOS({ cwd: root, command: 'init' })],
+    ['.agentos/knowledge.md', root => obsidianAgentOS({ cwd: root, command: 'init' })],
   ];
   for (const [target, action] of cases) {
     const { base, root, outside } = await fixture(t);
@@ -57,7 +64,7 @@ test('boundary: symlinked managed targets fail before writes or deletions', asyn
 });
 
 test('boundary: Obsidian rejects raw escapes and symlink destinations without partial writes', async t => {
-  for (const command of ['legacy', 'workspace']) {
+  for (const command of ['legacy', 'workspace', 'link']) {
     for (const dest of ['../outside', '/absolute', 'C:/outside', 'escape/new']) {
       const { base, root, outside } = await fixture(t);
       const vault = join(base, 'vault'); await mkdir(vault);
@@ -65,7 +72,7 @@ test('boundary: Obsidian rejects raw escapes and symlink destinations without pa
       const options = { cwd: root, vault, dest, create: true };
       await rejectedWithoutChanges(base, () => command === 'legacy'
         ? linkObsidianAgentOS(options)
-        : obsidianAgentOS({ ...options, command: 'link-workspace' }));
+        : obsidianAgentOS({ ...options, command: command === 'link' ? 'link' : 'link-workspace' }));
     }
   }
 });

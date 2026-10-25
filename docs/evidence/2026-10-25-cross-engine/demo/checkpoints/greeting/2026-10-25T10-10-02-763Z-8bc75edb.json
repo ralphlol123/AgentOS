@@ -1,0 +1,101 @@
+{
+  "schema": "agentos.checkpoint/1",
+  "id": "2026-10-25T10-10-02-763Z-8bc75edb",
+  "created_at": "2026-10-25T10:10:02.763Z",
+  "recovered": false,
+  "project": {
+    "name": "ws",
+    "root": "/tmp/aos-demo/ws"
+  },
+  "task": {
+    "id": "greeting",
+    "source": "--task"
+  },
+  "run_id": null,
+  "engine": "claude-code",
+  "role": "developer",
+  "objective": {
+    "id": "obj-2283b1ff49",
+    "text": "Make web greet() follow ADR 1 and add farewell(name) with a test."
+  },
+  "acceptance": {
+    "source": ".agentos/tasks.md#Acceptance criteria",
+    "text": "- greet(\"x\") returns \"Hello x!\"\n- farewell(\"x\") returns \"Goodbye x!\"\n- `node test.js` in web passes"
+  },
+  "scope": {
+    "repos": [
+      "api=./api",
+      "web=./web"
+    ],
+    "read": [
+      "web/src",
+      "web",
+      "api/contracts/openapi.yaml",
+      "docs/adr"
+    ],
+    "edit": [
+      "web/src"
+    ]
+  },
+  "repos": [
+    {
+      "name": "api",
+      "path": "api",
+      "worktree": "/tmp/aos-demo/ws/api",
+      "branch": "master",
+      "head": "d348a4323a55b68059a7e235969dbb05604ced73",
+      "fingerprint": "a212d00a3feeb30643a45f097f06c6ba80b6b5ee1333e58d85ed8b094d71a21c",
+      "changed_paths": [],
+      "omitted_paths": 0,
+      "available": true,
+      "state": "enclosing-worktree"
+    },
+    {
+      "name": "web",
+      "path": "web",
+      "worktree": "/tmp/aos-demo/ws/web",
+      "branch": "master",
+      "head": "d348a4323a55b68059a7e235969dbb05604ced73",
+      "fingerprint": "927c2987a12d4471c76b2c6c5a39d5751813fa5e2283bcc5394ac0ab3642b7b5",
+      "changed_paths": [
+        "src/greet.js"
+      ],
+      "omitted_paths": 0,
+      "available": true,
+      "state": "enclosing-worktree"
+    }
+  ],
+  "state": "327d004c89d59706acd1d58e213c2f68721602b45cb14feba6f9e175c51be0f7",
+  "progress": "web/src/greet.js: greet(name) now returns \"Hello <name>!\" per ADR 1 (verified greet(\"x\") === \"Hello x!\"). web/test.js NOT updated: it is outside edit scope (web/src) and denied by .claude/settings.local.json, so it still asserts \"Hello x\" and node test.js exits 1.",
+  "blockers": [
+    "web/test.js is outside task edit scope and denied by Claude Code rules; widen task_scope.edit to include web/test.js (then re-run agentos agents sync claude-code) or have an in-scope role change its assertion to \"Hello x!\""
+  ],
+  "next": "implement farewell(name) -> Goodbye <name>! with a test",
+  "knowledge_refs": [
+    {
+      "id": "brain:0001-greeting",
+      "source": "docs/adr/0001-greeting.md"
+    }
+  ],
+  "receipts": [
+    {
+      "status": "observed-fail",
+      "command": "node test.js",
+      "cwd": "web",
+      "exit_code": 1,
+      "observed_at": "2026-10-25T10:10:02.490Z",
+      "evidence": ".agentos/checkpoints/greeting/evidence/e065d42faa4da3a6.log",
+      "state_tested": "327d004c89d59706acd1d58e213c2f68721602b45cb14feba6f9e175c51be0f7"
+    },
+    {
+      "status": "not-run",
+      "command": "npm run test",
+      "cwd": "web",
+      "exit_code": null,
+      "observed_at": null,
+      "evidence": null,
+      "state_tested": null,
+      "note": "declared web.test_command"
+    }
+  ]
+}

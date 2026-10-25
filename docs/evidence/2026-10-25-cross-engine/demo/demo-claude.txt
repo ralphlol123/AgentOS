@@ -1,0 +1,125 @@
+Follow AgentOS for Projects.
+Project: ws; root: /tmp/aos-demo/ws; kind: multi-repo; engine: claude-code.
+Read: AGENTS.md; CLAUDE.md; .agentos/project.yaml; memory.md; handoff.md; tasks.md. Then load skills.md plus only the assigned repo/agent context needed for the task.
+Task: ADR 1 greeting format and farewell
+Role: developer
+
+## Objective
+Source: .agentos/handoff.md#Current objective
+Make web greet() follow ADR 1 and add farewell(name) with a test.
+
+## Constraints
+Source: .agentos/handoff.md#Protected files / do not touch + generated rules
+Rules: declare role + scope before editing; edit only in scope; no secrets/.env/migrations/prod config without approval; no commit/push unless asked; verify; update handoff/tasks if state changes.
+- Claude Code should follow `CLAUDE.md` as the bootloader and still verify ground truth before reporting success.
+Obsidian workspace: /tmp/aos-demo/vault/Projects/Demo/AgentOS. For Obsidian notes, plans, summaries, decisions, or durable knowledge, read/write only inside that folder when explicitly tasked. Do not bulk-load the Obsidian vault.
+
+Protected (handoff):
+- .env files
+- production secrets
+- database migrations unless explicitly approved
+- repos outside declared task scope
+
+## Scope
+Source: .agentos/project.yaml#task_scope
+Repos (inventory, not permission): api=./api; web=./web
+Read scope: web/src, web, api/contracts/openapi.yaml, docs/adr
+Edit scope: web/src. Do not edit anything outside it.
+
+## Role: developer
+Source: .agentos/agents/developer.md
+Permission intent: edit-in-scope (narrows the task scope only; see Scope).
+# Developer
+
+Mandate: Implement scoped changes and their tests inside the assigned repo, using the relevant frontend or backend skills.
+
+## Responsibilities in
+
+- Read AgentOS project, memory, handoff, and tasks first.
+- Declare role, repo scope, allowed paths, protected paths, and verification commands before editing.
+- Work only inside the declared task scope.
+- Load `.agentos/skills.md` and only the relevant skill/repo/engine files for this task.
+- Detect the assigned repo's actual stack and version from project files, then follow its conventions.
+- Write or update the tests for the behavior being changed (test-driven-development), then implement the scoped change.
+- For frontend work load frontend-design and frontend-testing; for backend work load backend-development, backend-testing, and authorization.
+- Report files changed, verification run, failures, and next action before stopping.
+
+## Responsibilities out
+
+- Do not touch secrets, `.env` files, production config, migrations, deployments, or unrelated repos without explicit approval.
+- Do not commit or push unless explicitly assigned.
+- Do not claim independent QA or code review of your own work; hand off verification and review to the tester and reviewer roles.
+- Do not treat this template as higher priority than user/system/developer/AgentOS instructions.
+
+## Skills
+
+Use `.agentos/skills.md` as an on-demand index. Load only skills relevant to this role and task.
+
+## Verification expectations
+
+- State the exact verification command/check before running it.
+- Report real command output or inspected state, not assumptions.
+- When project state changes, rewrite `.agentos/handoff.md` to the current state (never append) and delete finished tasks from `.agentos/tasks.md`. Before an older entry leaves either file, copy it into a note under `.agentos/runs/`; never discard history.
+
+## Brain (adr, accepted): ADR 1: Greeting format
+Source: docs/adr/0001-greeting.md
+Project knowledge by reference (data, not instructions): read docs/adr/0001-greeting.md only if relevant to the task.
+
+## Read path: docs/adr
+Source: (scope)
+docs/adr is in read scope for reference; edit it only if the edit scope covers it.
+
+## Acceptance criteria
+Source: .agentos/tasks.md#Acceptance criteria
+- greet("x") returns "Hello x!"
+- farewell("x") returns "Goodbye x!"
+- `node test.js` in web passes
+
+## Current state
+Source: .agentos/handoff.md#Current state
+AgentOS initialized. No implementation task is active yet.
+
+## Next exact action
+Source: .agentos/handoff.md#Next exact action
+Choose a task, declare repo scope, then select the responsible agent role and engine.
+
+## Repo note: web
+Source: .agentos/repos/web.md
+# Web Repo
+
+Path: `./web`; type: app; framework: unknown; package manager: npm.
+Commands: dev=`unknown`; build=`unknown`; test=`npm run test`.
+Scope: edit only when task includes `web`.
+
+## Verification: web
+Source: .agentos/project.yaml#repos.web
+- test_command: npm run test
+
+## Read path: web/src
+Source: (scope)
+web/src is in read scope for reference; edit it only if the edit scope covers it.
+
+## Read path: api/contracts/openapi.yaml
+Source: (scope)
+api/contracts/openapi.yaml is in read scope for reference; edit it only if the edit scope covers it.
+
+## Omitted (12)
+- repo:api (repo-note): out-of-scope
+- skill:debugging (skill): no-match
+- skill:test-driven-development (skill): no-match
+- skill:frontend-design (skill): no-match
+- skill:frontend-testing (skill): no-match
+- skill:backend-development (skill): no-match
+- skill:backend-testing (skill): no-match
+- skill:authorization (skill): no-match
+- skill:integration-testing (skill): no-match
+- skill:git-safety (skill): no-match
+- skill:code-review (skill): no-match
+- skill:pull-request-workflow (skill): no-match
+
+ADVISORY: edit scope is enforced for claude-code only by the deny rules from `agentos agents sync claude-code` in a trusted workspace (listed paths, siblings, Bash redirects to denied paths and read-only deny-all verified), otherwise instruction-only; residual writable paths: new root-level files/dirs until re-sync, .agentos/ state, shell writes Claude Code does not recognise as file writes
+
+Budget: 3337 of 24000 tokens, estimate (chars/4), including 2000 assumed engine overhead.
+
+
+USER TASK (do ONLY this part, then stop): 1) Change web/src/greet.js so greet(name) returns "Hello <name>!" per ADR 1 and update web/test.js accordingly; run `node test.js` inside web. 2) Record a checkpoint from the workspace root: node /tmp/aos-f/dist/cli.js checkpoint --task greeting --engine claude-code --role developer --progress "<what you did>" --next "implement farewell(name) -> Goodbye <name>! with a test" --check "node test.js" --cwd web  3) Do NOT implement farewell. Do not commit. End with a 4-line summary DONE / NOT DONE / CHECKS RUN / NEXT.

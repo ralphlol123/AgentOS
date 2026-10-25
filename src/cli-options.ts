@@ -1,8 +1,9 @@
 export type FlagValue = string | boolean;
-const booleans = new Set(['new', 'existing', 'dry-run', 'yes', 'y', 'detected', 'replace', 'preserve', 'fix', 'json', 'create', 'refresh', 'installed', 'normalize-repo-ids', 'adopt-custom-adapters', 'prune-retired', 'rewrite', 'checkpoint', 'diff']);
-const values = new Set(['agents', 'engine', 'role', 'repo', 'worktree', 'phase', 'reason', 'vault', 'dest', 'link', 'mode', 'name', 'type', 'expected-sha256', 'objective', 'expect-state']);
-export function parseFlagsAndPositionals(args: string[]): { flags: Record<string, FlagValue>; positionals: string[] } {
-  const flags: Record<string, FlagValue> = {}, positionals: string[] = [];
+const booleans = new Set(['new', 'existing', 'dry-run', 'yes', 'y', 'detected', 'replace', 'preserve', 'fix', 'json', 'create', 'refresh', 'installed', 'normalize-repo-ids', 'adopt-custom-adapters', 'prune-retired', 'rewrite', 'checkpoint', 'diff', 'include-superseded', 'recover', 'append', 'from-catalog', 'custom', 'require-enforcement', 'require-synced-config', 'require-complete']);
+const values = new Set(['agents', 'engine', 'role', 'repo', 'worktree', 'phase', 'reason', 'vault', 'dest', 'link', 'mode', 'name', 'type', 'expected-sha256', 'objective', 'expect-state', 'task', 'scope', 'budget', 'progress', 'blocker', 'next', 'check', 'cwd', 'claim', 'kind', 'status', 'by', 'from', 'summary', 'supersedes', 'canonical', 'dir', 'location']);
+/** `--check` and `--claim` repeat; each `--cwd` belongs to the `--check` right before it. */
+export function parseFlagsAndPositionals(args: string[]): { flags: Record<string, FlagValue>; positionals: string[]; checks: Array<{ command: string; cwd?: string }>; claims: string[] } {
+  const flags: Record<string, FlagValue> = {}, positionals: string[] = [], checks: Array<{ command: string; cwd?: string }> = [], claims: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === '--') { positionals.push(...args.slice(i + 1)); break; }
@@ -14,18 +15,29 @@ export function parseFlagsAndPositionals(args: string[]): { flags: Record<string
       flags[key] = explicit === undefined || explicit === 'true';
     } else if (values.has(key)) {
       const value = explicit ?? args[++i];
-      if (!value || value.startsWith('-')) throw new Error(`--${key} requires a value.`);
+      if (!value || (value !== '-' && value.startsWith('-'))) throw new Error(`--${key} requires a value.`);
       flags[key] = value;
+      if (key === 'check') checks.push({ command: value });
+      if (key === 'claim') claims.push(value);
+      if (key === 'cwd') {
+        const last = checks.at(-1);
+        if (!last || last.cwd !== undefined) throw new Error('--cwd must follow a --check "<command>" (one --cwd per check).');
+        last.cwd = value;
+      }
     } else throw new Error(`Unknown option: ${arg}`);
   }
-  return { flags, positionals };
+  return { flags, positionals, checks, claims };
 }
 export function validateCommandFlags(command: string, flags: Record<string, FlagValue>): void {
   const allowed: Record<string, string[]> = {
     init: ['new', 'existing', 'agents', 'dry-run', 'yes', 'y', 'refresh'], status: [], handoff: [], prompt: [],
+    context: ['task', 'role', 'scope', 'budget', 'json', 'include-superseded', 'require-enforcement', 'require-synced-config', 'require-complete'], engines: ['json'],
+    checkpoint: ['task', 'engine', 'role', 'progress', 'blocker', 'next', 'check', 'cwd', 'claim', 'json', 'dry-run', 'recover'],
+    resume: ['task', 'engine', 'json'],
+    brain: ['kind', 'scope', 'status', 'by', 'from', 'summary', 'supersedes', 'append', 'json', 'dry-run', 'location'],
     run: ['engine', 'role', 'repo', 'worktree', 'phase', 'reason', 'dry-run'], doctor: ['fix', 'json', 'normalize-repo-ids', 'adopt-custom-adapters', 'prune-retired', 'dry-run'], compact: ['dry-run', 'rewrite', 'checkpoint', 'objective', 'expect-state', 'diff'],
-    'link-obsidian': ['vault', 'dest', 'link', 'create', 'dry-run'], obsidian: ['vault', 'dest', 'create', 'dry-run'], adapters: [],
-    skills: ['detected', 'mode', 'dry-run', 'replace', 'installed'], agents: ['name', 'dry-run', 'replace', 'installed'],
+    'link-obsidian': ['vault', 'dest', 'link', 'create', 'dry-run'], obsidian: ['vault', 'dest', 'create', 'dry-run', 'canonical', 'dir'], adapters: [],
+    skills: ['detected', 'mode', 'dry-run', 'replace', 'installed'], agents: ['name', 'dry-run', 'replace', 'installed', 'json', 'from-catalog', 'custom', 'role', 'scope'],
     templates: ['type', 'name', 'mode', 'dry-run', 'yes', 'replace', 'expected-sha256'], migrate: ['preserve', 'dry-run'],
   };
   for (const key of Object.keys(flags)) if (allowed[command] && !allowed[command].includes(key)) throw new Error(`--${key} is not supported by ${command}.`);

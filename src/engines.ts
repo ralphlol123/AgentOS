@@ -1,0 +1,205 @@
+/** Engine adapter contract and capability matrix (`agentos engines`, `agentos context <engine>`,
+ *  `agentos agents sync <engine>`). See docs/engines.md.
+ *
+ * Every row is a claim about what AgentOS can make the engine do, with its evidence. `verified` means observed in a
+ * recorded engine trial (docs/evidence/2026-10-25-cross-engine/REPORT.md and closure/REPORT-closure.md, n=1 per probe
+ * unless stated) and the evidence names the report section. Generated config alone (a `.claude/settings.local.json` fragment, an AGENTS.md role block) is
+ * configuration, not evidence of enforcement.
+ */
+import type { ContextBundle } from './context-builder.js';
+import type { AgentManifest } from './agents.js';
+
+export const CAPABILITY_ROWS = ['context_rendering', 'native_agent_config', 'tool_restrictions', 'permission_enforcement', 'launch', 'native_session_resume'] as const;
+export const CAPABILITY_STATUSES = ['verified', 'advisory', 'unsupported', 'unverified'] as const;
+export type CapabilityRow = typeof CAPABILITY_ROWS[number];
+export type CapabilityStatus = typeof CAPABILITY_STATUSES[number];
+/** `edit_scope` (permission_enforcement only): how far the verified enforcement covers the AgentOS edit scope. */
+export type CapabilityMatrix = Record<CapabilityRow, { status: CapabilityStatus; evidence: string; edit_scope?: string }>;
+
+export interface NativeConfigInput {
+  role: string; manifest: AgentManifest; body: string;
+  /** Effective edit scope as workspace paths ('.' = whole workspace); `dir` = glob the whole directory. */
+  edit: Array<{ path: string; dir: boolean }>;
+  /** Workspace-relative directory whose AGENTS.md carries the role block (codex). */
+  repoDir: string;
+  /** Everything outside the edit scope (claude-code deny rules); `tools` defaults to Edit, Write, NotebookEdit. */
+  outside?: Array<{ path: string; dir: boolean; tools?: string[] }>;
+}
+export interface NativeFile { path: string; content: string; merge: 'whole-file' | 'json-add-keys' | 'managed-block'; warnings?: string[] }
+export interface EngineAdapter {
+  id: string;
+  render(context: ContextBundle): string;
+  nativeConfig?(input: NativeConfigInput): NativeFile[];
+  capabilities: CapabilityMatrix;
+  /** Printed by `agents sync <engine>`: what the user must know for the generated config to matter. */
+  syncNote?: string;
+}
+
+const NO_LAUNCH = 'AgentOS does not start engines (there is no `agentos run`); the user launches the engine.';
+const NO_RESUME = 'AgentOS resume is engine-neutral checkpoint text (`agentos resume`); it does not drive the engine\'s own session resume.';
+const row = (status: CapabilityStatus, evidence: string) => ({ status, evidence });
+
+/** Hard requirements an engine may not enforce, each mapped to the capability row that would enforce it. */
+const HARD_REQUIREMENTS: Array<[string, CapabilityRow]> = [['edit scope', 'permission_enforcement']];
+
+export function advisories(adapter: Pick<EngineAdapter, 'id' | 'capabilities'>) {
+  return HARD_REQUIREMENTS.flatMap(([what, key]) => {
+    const row = adapter.capabilities[key];
+    if (row.status !== 'verified') return [`ADVISORY: ${what} is instruction-only for ${adapter.id}`];
+    return row.edit_scope ? [`ADVISORY: ${what} is ${row.edit_scope}`] : [];
+  });
+}
+
+function renderWith(this: EngineAdapter, context: ContextBundle) {
+  return context.ok ? [context.text, '', ...advisories(this)].join('\n') : context.text;
+}
+
+export const ROLE_BLOCK_START = '<!-- agentos:role:start -->';
+export const ROLE_BLOCK_END = '<!-- agentos:role:end -->';
+
+const CLAUDE_TOOL_NAMES: Record<string, string> = { read: 'Read', edit: 'Edit', write: 'Write', bash: 'Bash', grep: 'Grep', glob: 'Glob' };
+/** Subagent `tools:` from the manifest: AgentOS names mapped case-insensitively, unknown names passed through verbatim.
+ *  Read-only roles without tools_requested get Read, Grep, Glob; other roles without it get no `tools:` (Claude default). */
+export function claudeTools(manifest: AgentManifest) {
+  const requested = manifest.tools_requested.length ? manifest.tools_requested : manifest.permission_intent === 'read-only' ? ['read', 'grep', 'glob'] : [];
+  const unknown = requested.filter((name) => !CLAUDE_TOOL_NAMES[name.toLowerCase()]);
+  return { tools: [...new Set(requested.map((name) => CLAUDE_TOOL_NAMES[name.toLowerCase()] ?? name))], unknown };
+}
+
+function claudeAgentFile(input: NativeConfigInput): NativeFile {
+  const { role, manifest, body } = input;
+  const { tools, unknown } = claudeTools(manifest);
+  const path = `.claude/agents/${role}.md`;
+  const front = [`name: ${role}`, `description: ${JSON.stringify(manifest.purpose)}`, ...(tools.length ? [`tools: ${tools.join(', ')}`] : [])];
+  return {
+    path, merge: 'whole-file', warnings: unknown.map((name) => `tools_requested "${name}" is not a known AgentOS tool name; passed through verbatim to ${path} tools:`),
+    content: `---\n${front.join('\n')}\n---\n<!-- Generated by \`agentos agents sync claude-code\` from .agentos/agents/${role}.md (permission_intent: ${manifest.permission_intent}). Edit the AgentOS card, then sync again. -->\n${body.replace(/^\n+/, '')}`,
+  };
+}
+
+const WRITE_TOOLS = ['Edit', 'Write', 'NotebookEdit'];
+const claudePath = ({ path, dir }: { path: string; dir: boolean }) => path === '.' ? '/**' : `/${path}${dir ? '/**' : ''}`;
+/** Permission fragment. Allow rules alone do not restrict Claude Code and the file is ignored until the workspace is
+ *  trusted (trial T3a); deny rules in a trusted workspace do (T3b), and deny wins over allow. `/path` is relative to
+ *  the settings source. `outside` = every entry outside the edit scope (sync enumerates siblings), each with its
+ *  tools (default Edit, Write, NotebookEdit). */
+export function claudeSettingsFragment(edit: NativeConfigInput['edit'], outside: NativeConfigInput['outside'] = []) {
+  if (!edit.length) return { permissions: { deny: WRITE_TOOLS.map((tool) => `${tool}(/**)`) } };
+  const deny = outside.flatMap((entry) => (entry.tools ?? WRITE_TOOLS).map((tool) => `${tool}(${claudePath(entry)})`));
+  return { permissions: { allow: edit.map((entry) => `Edit(${claudePath(entry)})`), ...(deny.length ? { deny } : {}) } };
+}
+/** Writes the synced deny rules do not cover even in a trusted workspace (closure re-trials T6c/T6e). */
+export const CLAUDE_RESIDUAL = 'new root-level files/dirs until re-sync, .agentos/ state, shell writes Claude Code does not recognise as file writes';
+export const CLAUDE_TRUST_NOTE = 'Claude Code ignores `.claude/settings.local.json` until the workspace is trusted; run `claude` interactively once or set `projects[<root>].hasTrustDialogAccepted` in ~/.claude.json.';
+const CLAUDE_SYNC_LIMITS = [
+  'The deny rules enumerate the tree as it is now: re-run `agentos agents sync claude-code` after adding top-level directories (remove permissions.allow/deny from .claude/settings.local.json first; sync adds keys only). `agentos context claude-code --require-synced-config` reports STALE until then.',
+  'advisory: shell writes (Bash) are blocked only where Claude Code recognises a file write to a denied path; .agentos/ state files (handoff, tasks, checkpoints) stay writable.',
+].join('\n');
+
+function codexRoleBlock(input: NativeConfigInput): NativeFile {
+  const { role, manifest, edit } = input;
+  const lines = [
+    ROLE_BLOCK_START,
+    `## AgentOS role: ${role}`, '',
+    `Generated by \`agentos agents sync codex\` from .agentos/agents/${role}.md; edit the card, then sync again.`, '',
+    `Purpose: ${manifest.purpose}`,
+    `Permission intent: ${manifest.permission_intent}. Edit scope: ${edit.map((entry) => entry.path).join(', ') || '(none; read-only)'}.`,
+    'These are instructions only. Codex sandboxing is chosen at launch (`codex exec --sandbox read-only|workspace-write`) or in your Codex config, not by this file.',
+    ...(manifest.responsibilities.length ? ['', ...manifest.responsibilities.map((item) => `- ${item}`)] : []),
+    ROLE_BLOCK_END,
+  ];
+  return { path: `${input.repoDir === '.' ? '' : `${input.repoDir}/`}AGENTS.md`, merge: 'managed-block', content: `${lines.join('\n')}\n` };
+}
+
+const REPORT = 'docs/evidence/2026-10-25-cross-engine/REPORT.md';
+const CLOSURE = 'docs/evidence/2026-10-25-cross-engine/closure/REPORT-closure.md';
+const advisoryContext = (bootloader: string, trialled = false) => row('advisory', `Rendered as text (${bootloader} + \`agentos context\`); the engine may ignore instructions.${trialled ? ` In the 2026-10-25 trial it followed the scope instructions, unenforced (${REPORT}#T1, T2, n=1).` : ''}`);
+const notGenerated = (engine: string) => row('unsupported', `AgentOS generates no native ${engine} agent config.`);
+const instructionOnly = row('unsupported', 'No enforcement wiring for this engine; edit scope and tool rules are instruction text only.');
+
+const ADAPTERS: EngineAdapter[] = [
+  {
+    id: 'claude-code', render: renderWith, capabilities: {
+      context_rendering: advisoryContext('CLAUDE.md', true),
+      native_agent_config: row('verified', `Verified for discovery, invocation and instruction-following: after \`agentos agents sync claude-code\`, Claude Code 2.1.310 listed the synced agent from .claude/agents/<id>.md in a trusted workspace (${REPORT}#T5, n=1); a Task-invoked subagent used a marker present only in its card, named its role and refused out-of-scope edits by instruction (${CLOSURE}#T8, n=1). tools: consumption VERIFIED afterwards (closure T9: the subagent reported exactly the rendered list and had no Bash).`),
+      tool_restrictions: row('verified', `Verified (launch-time --allowedTools; see T1/T2): \`claude -p --allowedTools Read,Edit,Write,Bash(node:*),Bash(cd:*)\` blocked Bash git in Claude Code 2.1.310 (${REPORT}#T1, n=1). AgentOS passes no launch flags. Manifest tools_requested -> .claude/agents/<id>.md tools: (read-only roles default to Read, Grep, Glob): VERIFIED for the Task-invoked subagent, which reported exactly Read, Grep, Glob, Edit and had no Bash tool (${CLOSURE}#T9, n=1); it does not restrict the top-level session.`),
+      permission_enforcement: {
+        ...row('verified', `Verified in a trusted workspace (Claude Code 2.1.310, n=1 per probe): listed-path deny rules refused an edit under api/ and allowed web/ (${REPORT}#T3, T3b) and, as sync wrote them, refused api/package.json (${REPORT}#T5); the sibling denies from \`agentos agents sync claude-code\` refused Edit in web/tests, web/package.json, api/contracts, docs/adr, .env.example, .agentos/project.yaml and .claude/settings.local.json and a Bash redirect into api/package.json, while Edit, Write and a Bash redirect in web/src stayed allowed (${CLOSURE}#T6c); a read-only role (deny Edit/Write/NotebookEdit(/**)) refused Edit, Write and a Bash redirect and allowed Read (${CLOSURE}#T6d). Allow-only rules or an untrusted workspace do not restrict (T3a). Residual, advisory: root files/dirs created after sync (uncovered until re-sync; --require-synced-config reports STALE), .agentos/ state files (writable by design), shell writes Claude Code does not recognise as a write to a denied path.`),
+        edit_scope: `enforced for claude-code only by the deny rules from \`agentos agents sync claude-code\` in a trusted workspace (listed paths, siblings, Bash redirects to denied paths and read-only deny-all verified), otherwise instruction-only; residual writable paths: ${CLAUDE_RESIDUAL}`,
+      },
+      launch: row('unsupported', NO_LAUNCH),
+      native_session_resume: row('unsupported', NO_RESUME),
+    },
+    nativeConfig: (input) => [claudeAgentFile(input), { path: '.claude/settings.local.json', merge: 'json-add-keys', content: `${JSON.stringify(claudeSettingsFragment(input.edit, input.outside), null, 2)}\n` }],
+    syncNote: `${CLAUDE_TRUST_NOTE}\n${CLAUDE_SYNC_LIMITS}`,
+  },
+  {
+    id: 'codex', render: renderWith, capabilities: {
+      context_rendering: advisoryContext('AGENTS.md', true),
+      native_agent_config: row('verified', `Verified for instruction-following (advisory; the user prompt wins): a marker instruction present only in the role block that \`agentos agents sync codex\` wrote into web/AGENTS.md was followed 2/2 by Codex 0.156.1 launched in web/, 0/1 at the root (control) and 0/1 when the user prompt said "Nothing else" (${CLOSURE}#T7). The block is instructions, not enforcement.`),
+      tool_restrictions: row('unsupported', 'Codex has no per-tool allowlist that AgentOS writes; sandbox modes are launch-time flags (`--sandbox`), not file config AgentOS generates.'),
+      permission_enforcement: {
+        ...row('verified', `Verified (launch-time sandbox: --sandbox read-only refuses writes; per-path scope unsupported): \`codex exec --sandbox read-only\` refused an append to api/contracts/openapi.yaml with "Read-only file system" in Codex 0.156.1 (${REPORT}#T4, n=1). The user picks the sandbox at launch; AgentOS passes no flags and workspace-write cannot express AgentOS edit paths.`),
+        edit_scope: 'instruction-only per path for codex (only the launch-time sandbox is enforced; --sandbox read-only refuses every write)',
+      },
+      launch: row('unsupported', NO_LAUNCH),
+      native_session_resume: row('unsupported', NO_RESUME),
+    },
+    nativeConfig: (input) => [codexRoleBlock(input)],
+    syncNote: 'advisory: Codex enforces only its launch-time sandbox (`codex exec --sandbox read-only|workspace-write`); the role block and edit scope are instructions.',
+  },
+  {
+    id: 'opencode', render: renderWith, capabilities: {
+      context_rendering: advisoryContext('AGENTS.md'), native_agent_config: notGenerated('OpenCode'), tool_restrictions: instructionOnly,
+      permission_enforcement: instructionOnly, launch: row('unsupported', NO_LAUNCH), native_session_resume: row('unsupported', NO_RESUME),
+    },
+  },
+  {
+    id: 'hermes', render: renderWith, capabilities: {
+      context_rendering: advisoryContext('.hermes.md'), native_agent_config: notGenerated('Hermes'), tool_restrictions: instructionOnly,
+      permission_enforcement: instructionOnly, launch: row('unsupported', NO_LAUNCH), native_session_resume: row('unsupported', NO_RESUME),
+    },
+  },
+  {
+    id: 'generic', render: renderWith, capabilities: {
+      context_rendering: advisoryContext('AGENTS.md'), native_agent_config: notGenerated('engine'), tool_restrictions: instructionOnly,
+      permission_enforcement: instructionOnly, launch: row('unsupported', NO_LAUNCH), native_session_resume: row('unsupported', NO_RESUME),
+    },
+  },
+];
+export const ENGINE_ADAPTERS: Record<string, EngineAdapter> = Object.fromEntries(ADAPTERS.map((adapter) => [adapter.id, adapter]));
+/** Unknown engine names get the generic adapter (same as `agentos prompt`), labelled with the requested name. */
+export const engineAdapter = (engine: string): EngineAdapter => ENGINE_ADAPTERS[engine] ?? { ...ENGINE_ADAPTERS.generic, id: engine };
+
+export function enginesReport(options: { json?: boolean } = {}) {
+  const matrix = Object.fromEntries(ADAPTERS.map((adapter) => [adapter.id, adapter.capabilities]));
+  if (options.json) return { ok: true, matrix, text: JSON.stringify({ ok: true, rows: CAPABILITY_ROWS, matrix }, null, 2) };
+  const lines = ['AgentOS engine capability matrix', `Statuses: ${CAPABILITY_STATUSES.join(' | ')}. verified = observed in a recorded engine trial (${REPORT}, ${CLOSURE}; n=1 per probe unless stated; docs/engines.md).`, ''];
+  for (const adapter of ADAPTERS) {
+    lines.push(`${adapter.id}:`);
+    for (const key of CAPABILITY_ROWS) {
+      const cell = adapter.capabilities[key];
+      lines.push(`  ${key.padEnd(22)} ${cell.status.padEnd(11)} ${cell.evidence}`, ...(cell.edit_scope ? [`  ${''.padEnd(34)} edit scope: ${cell.edit_scope}`] : []));
+    }
+    lines.push('');
+  }
+  return { ok: true, matrix, text: lines.join('\n').trimEnd() };
+}
+
+/** Merge `fragment` into `existing` by adding missing keys only. Any key present with a different value is a
+ *  conflict (arrays included: they are compared whole, never concatenated). */
+export function mergeAddKeysOnly(existing: any, fragment: any, path = ''): { merged: any; conflicts: string[] } {
+  const conflicts: string[] = [];
+  const merged = { ...existing };
+  for (const [key, value] of Object.entries(fragment)) {
+    const at = path ? `${path}.${key}` : key;
+    if (!(key in merged)) { merged[key] = value; continue; }
+    const current = merged[key];
+    const plain = (v: unknown) => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
+    if (plain(current) && plain(value)) {
+      const inner = mergeAddKeysOnly(current, value, at);
+      merged[key] = inner.merged; conflicts.push(...inner.conflicts);
+    } else if (JSON.stringify(current) !== JSON.stringify(value)) conflicts.push(`${at}: existing ${JSON.stringify(current)} != proposed ${JSON.stringify(value)}`);
+  }
+  return { merged, conflicts };
+}

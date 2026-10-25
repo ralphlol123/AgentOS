@@ -1,0 +1,47 @@
+{
+  "$comment": "Informational. The runtime check is validateAgentManifest() in src/agents.ts (plain checks, no schema dependency); test/v1-slice5-agents.test.js keeps this key set in sync with it. Lives in the YAML frontmatter of .agentos/agents/<id>.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "name",
+    "purpose",
+    "responsibilities",
+    "knowledge_selectors",
+    "skills",
+    "tools_requested",
+    "permission_intent",
+    "expected_output",
+    "provenance",
+    "custom"
+  ],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$", "description": "Equals the card file name." },
+    "name": { "type": "string", "minLength": 1 },
+    "purpose": { "type": "string", "minLength": 1 },
+    "responsibilities": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "knowledge_selectors": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Brain kinds, ids or terms this role usually needs." },
+    "skills": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "tools_requested": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "permission_intent": { "enum": ["read-only", "edit-in-scope", "release"], "description": "Can only narrow the task scope: read-only empties the edit scope." },
+    "expected_output": { "type": "string", "minLength": 1 },
+    "provenance": {
+      "oneOf": [
+        { "const": "unknown" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["installed_from", "version", "source_hash", "installed_at"],
+          "properties": {
+            "installed_from": { "type": "string", "pattern": "^(catalog:[a-z0-9][a-z0-9-]*|template:\\S.*|import:https?://\\S+)$" },
+            "version": { "type": "string", "minLength": 1 },
+            "source_hash": { "type": "string", "pattern": "^[a-f0-9]{64}$", "description": "sha256 of the card body (bytes after the frontmatter) at install time." },
+            "installed_at": { "type": "string", "format": "date-time" }
+          }
+        }
+      ]
+    },
+    "custom": { "type": "boolean", "description": "true: the owner owns this card; agents add and doctor --fix never overwrite it without --replace." },
+    "edit_request": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Optional, advisory. Entries outside the task's edit scope are ignored with a warning; never widens." }
+  }
+}
