@@ -131,7 +131,7 @@ test('matrix: claude-code and codex rows match the 2026-10-25 trial; every verif
   assert.doesNotMatch(claude.permission_enforcement.evidence, /re-trial pending|\(\/\*\)/);
   assert.equal(claude.tool_restrictions.status, 'verified');
   assert.match(claude.tool_restrictions.evidence, /launch-time --allowedTools; see T1\/T2/);
-  assert.match(claude.tool_restrictions.evidence, /manifest tools: rendering added 2026-10-25; consumption by the subagent untested \(host re-trial pending\)/);
+  assert.match(claude.tool_restrictions.evidence, /tools_requested -> \.claude\/agents\/<id>\.md tools:.*VERIFIED for the Task-invoked subagent.*REPORT-closure\.md#T9/);
   assert.equal(codex.permission_enforcement.status, 'verified');
   assert.match(codex.permission_enforcement.evidence, /launch-time sandbox: --sandbox read-only refuses writes; per-path scope unsupported/);
   assert.match(codex.permission_enforcement.evidence, /REPORT\.md#T4/);
@@ -139,7 +139,7 @@ test('matrix: claude-code and codex rows match the 2026-10-25 trial; every verif
   assert.equal(claude.native_agent_config.status, 'verified'); // T5 discovery + T8 invocation/instruction-following
   assert.match(claude.native_agent_config.evidence, /REPORT\.md#T5/);
   assert.match(claude.native_agent_config.evidence, new RegExp(`${CLOSURE.source}T8`));
-  assert.match(claude.native_agent_config.evidence, /tools: consumption untested/);
+  assert.match(claude.native_agent_config.evidence, /tools: consumption VERIFIED afterwards \(closure T9/);
   assert.equal(codex.native_agent_config.status, 'verified'); // T7: instruction-following, advisory
   assert.match(codex.native_agent_config.evidence, new RegExp(`instruction-following \\(advisory; the user prompt wins\\).*2\\/2.*${CLOSURE.source}T7`));
   for (const [engine, rows] of Object.entries(out.matrix)) {
