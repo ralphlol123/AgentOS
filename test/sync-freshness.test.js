@@ -211,12 +211,12 @@ test('legacy 1.0.0 sync (generated files, no record) -> STALE with the record me
   for (const engine of ['claude-code', 'codex']) {
     const r = strict(root, engine);
     fails(r);
-    assert.equal(syncedLine(r), `Synced config: STALE — synced by 1.0.0 without a record; re-run agentos agents sync ${engine}`);
+    assert.equal(syncedLine(r), `Synced config: STALE — synced by 1.0.0 without a record; re-run agentos agents sync ${engine} --replace`);
   }
   const before = await snapshot(root);
   const human = doctor(root).stdout.split('\n');
-  assert.ok(human.includes('- Synced config: STALE — synced by 1.0.0 without a record; re-run agentos agents sync claude-code'), human.join('\n'));
-  assert.ok(human.includes('- Synced config: STALE — synced by 1.0.0 without a record; re-run agentos agents sync codex'), human.join('\n'));
+  assert.ok(human.includes('- Synced config: STALE — synced by 1.0.0 without a record; re-run agentos agents sync claude-code --replace'), human.join('\n'));
+  assert.ok(human.includes('- Synced config: STALE — synced by 1.0.0 without a record; re-run agentos agents sync codex --replace'), human.join('\n'));
   assert.deepEqual(await snapshot(root), before, 'doctor wrote nothing');
   assertDoctorUnchanged(root, baseline);
   // Re-running the sync with nothing drifted writes only the record; then OK.

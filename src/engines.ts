@@ -92,7 +92,7 @@ export function claudeSettingsFragment(edit: NativeConfigInput['edit'], outside:
 export const CLAUDE_RESIDUAL = 'new root-level files/dirs until re-sync, .agentos/ state, shell writes Claude Code does not recognise as file writes';
 export const CLAUDE_TRUST_NOTE = 'Claude Code ignores `.claude/settings.local.json` until the workspace is trusted; run `claude` interactively once or set `projects[<root>].hasTrustDialogAccepted` in ~/.claude.json.';
 const CLAUDE_SYNC_LIMITS = [
-  'The deny rules enumerate the tree as it is now: re-run `agentos agents sync claude-code` after adding top-level directories (remove permissions.allow/deny from .claude/settings.local.json first; sync adds keys only). `agentos doctor` warns and `agentos context claude-code --require-synced-config` reports STALE until then.',
+  'The deny rules enumerate the tree as it is now: re-run `agentos agents sync claude-code` after adding top-level directories (it replaces only the entries its sync record owns; your own entries stay in place). `agentos doctor` warns and `agentos context claude-code --require-synced-config` reports STALE until then.',
   'advisory: shell writes (Bash) are blocked only where Claude Code recognises a file write to a denied path; .agentos/ state files (handoff, tasks, checkpoints) stay writable.',
 ].join('\n');
 
@@ -184,22 +184,4 @@ export function enginesReport(options: { json?: boolean } = {}) {
     lines.push('');
   }
   return { ok: true, matrix, text: lines.join('\n').trimEnd() };
-}
-
-/** Merge `fragment` into `existing` by adding missing keys only. Any key present with a different value is a
- *  conflict (arrays included: they are compared whole, never concatenated). */
-export function mergeAddKeysOnly(existing: any, fragment: any, path = ''): { merged: any; conflicts: string[] } {
-  const conflicts: string[] = [];
-  const merged = { ...existing };
-  for (const [key, value] of Object.entries(fragment)) {
-    const at = path ? `${path}.${key}` : key;
-    if (!(key in merged)) { merged[key] = value; continue; }
-    const current = merged[key];
-    const plain = (v: unknown) => Boolean(v) && typeof v === 'object' && !Array.isArray(v);
-    if (plain(current) && plain(value)) {
-      const inner = mergeAddKeysOnly(current, value, at);
-      merged[key] = inner.merged; conflicts.push(...inner.conflicts);
-    } else if (JSON.stringify(current) !== JSON.stringify(value)) conflicts.push(`${at}: existing ${JSON.stringify(current)} != proposed ${JSON.stringify(value)}`);
-  }
-  return { merged, conflicts };
 }

@@ -106,7 +106,7 @@ test('sibling enumeration: an existing different deny list refuses with zero wri
   const before = await snapshot(root);
   const r = cli(['agents', 'sync', 'claude-code'], root);
   fails(r);
-  assert.match(r.stdout, /permissions\.deny: existing/);
+  assert.match(r.stdout, /no sync record owns permissions\.deny/);
   assert.match(r.stdout, /Nothing was written/);
   assert.deepEqual(await snapshot(root), before);
 });

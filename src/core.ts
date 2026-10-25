@@ -13,8 +13,8 @@ import { dumpYaml, patchProjectYaml } from './project-yaml-edit.js';
 import { deprecation, mergeDeprecations, noticeLine, renderDeprecations, type Deprecation } from './legacy-deprecation.js';
 import { renderUnifiedDiff } from './compact-report.js';
 import { agentCardDoctor, diffSummary, manifestAgent, manifestFor, PACKAGE_VERSION, parseAgentCard, planCardInstall, provenanceFor, removeAgent, renderCard, ROLE_ID, setAgentEnabled, showAgent } from './agents.js';
-import { advisories, CLAUDE_RESIDUAL, ENGINE_ADAPTERS, engineAdapter, mergeAddKeysOnly, ROLE_BLOCK_END, ROLE_BLOCK_START } from './engines.js';
-import { parseSyncRecord, recordDigest, SYNC_RECORD_DIR, syncFreshness, syncRecord, syncRecordPath, type Installed, type Now, type SyncRecord, type SyncRecordFile } from './synced-config.js';
+import { advisories, CLAUDE_RESIDUAL, ENGINE_ADAPTERS, engineAdapter, ROLE_BLOCK_END, ROLE_BLOCK_START, type NativeFile } from './engines.js';
+import { editedEntries, jsonArrays, jsonAt, parseSyncRecord, recordDigest, replaceRecordedEntries, serializeJsonLike, SYNC_RECORD_DIR, syncFreshness, syncRecord, syncRecordPath, type Installed, type Now, type SyncRecord, type SyncRecordFile } from './synced-config.js';
 import { resolveCompactMode } from './cli-options.js';
 import { collectRunHandoffGitState } from './git-evidence.js';
 import { canonicalAgentId, resolveAgentAlias, resolveSkillAlias, RETIRED_AGENT_IDS, RETIRED_SKILL_IDS, SKILL_ALIASES, agentDeprecationNotice, skillDeprecationNotice } from './aliases.js';
@@ -2010,14 +2010,20 @@ async function nativeConfigPlan(root: string, engine: string, adapter: ReturnTyp
 async function readInstalledSynced(root: string, file: SyncRecordFile): Promise<Installed> {
   let text: string;
   try { text = await readFile(join(root, file.path), 'utf8'); } catch (error) { return error.code === 'ENOENT' ? { missing: true } : { error: `unreadable (${error.code})` }; }
-  if (file.merge === 'json-add-keys') { try { return { json: JSON.parse(text) }; } catch (error) { return { error: `invalid JSON (${error.message})` }; } }
-  if (file.merge !== 'managed-block') return { text };
+  return installedFrom(file.merge, text);
+}
+function installedFrom(merge: SyncRecordFile['merge'], text: string): Installed {
+  if (merge === 'json-add-keys') { try { return { json: JSON.parse(text) }; } catch (error) { return { error: `invalid JSON (${error.message})` }; } }
+  if (merge !== 'managed-block') return { text };
   const block = locateManagedBlock(text, ROLE_BLOCK_START, ROLE_BLOCK_END);
   if (block.kind === 'conflict') return { error: block.reason };
   if (block.kind === 'none') return { text: '' };
   const lineEnd = text.indexOf('\n', block.endIdx);
   return { text: text.slice(block.startIdx, lineEnd < 0 ? text.length : lineEnd + 1) };
 }
+
+/** POSIX single-quoted shell argument (the printed re-sync command must paste as-is). */
+const shellArg = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
 
 /** A sync by 1.0.0 left generated files but no record. */
 async function legacySynced(root: string, engine: string) {
@@ -2047,14 +2053,14 @@ async function syncedConfigStatus(root: string, engine: string) {
     if (error.code !== 'ENOENT') return result('invalid', `Synced config: INVALID — ${recordRel}: unreadable (${error.code}); fix it, then re-run ${base}`, { reason: `${recordRel}: unreadable (${error.code})` });
   }
   if (text === null) {
-    if (await legacySynced(root, engine)) return result('stale', `Synced config: STALE — synced by 1.0.0 without a record; re-run ${base}`, { reason: 'synced by 1.0.0 without a record' });
+    if (await legacySynced(root, engine)) return result('stale', `Synced config: STALE — synced by 1.0.0 without a record; re-run ${base} --replace`, { reason: 'synced by 1.0.0 without a record' });
     return result('missing', `Synced config: MISSING — run ${base}`);
   }
   let record: SyncRecord;
   try { record = parseSyncRecord(text, engine); } catch (error) {
     return result('invalid', `Synced config: INVALID — ${recordRel}: ${error.message}; fix it, then re-run ${base}`, { reason: `${recordRel}: ${error.message}` });
   }
-  const command = `${base} --role ${record.role}${record.scope.flag ? ` --scope ${record.scope.flag}` : ''}`;
+  const command = `${base} --role ${record.role}${record.scope.flag ? ` --scope ${shellArg(record.scope.flag)}` : ''}`;
   let now: Now;
   try {
     await assertProjectYamlWellFormed(join(root, '.agentos/project.yaml'));
@@ -2067,8 +2073,9 @@ async function syncedConfigStatus(root: string, engine: string) {
   const extra = { role: record.role, files: record.files.map((file) => file.path), reason: fresh.reasons.join('; ') || null, user_entries: fresh.userEntries };
   if (fresh.status === 'invalid') return result('invalid', `Synced config: INVALID — ${fresh.reasons[0].replace(/[.:]$/, '')}; fix it, then re-run ${command}`, extra);
   if (fresh.status === 'stale') {
-    const hints = fresh.staleFiles.map((file) => file.entries ? `remove ${Object.keys(file.entries).join(', ')} from ${file.path} first, sync adds keys only` : file.merge === 'whole-file' ? `delete ${file.path} first, sync never overwrites it` : null).filter(Boolean);
-    return result('stale', `Synced config: STALE — re-run ${command} (${[...fresh.reasons, ...hints].join('; ')})`, extra);
+    // Hand-edited generated content is the one case a plain re-sync refuses; everything else re-syncs safely.
+    const edited = fresh.reasons.some((reason) => reason.endsWith(': generated entry edited'));
+    return result('stale', `Synced config: STALE — re-run ${command}${edited ? ' --replace' : ''} (${fresh.reasons.join('; ')})`, extra);
   }
   const sha256 = recordDigest(record);
   return result('ok', `Synced config: OK (${engine}, role ${record.role}, sha256 ${sha256}${fresh.userEntries ? `; user entries: ${fresh.userEntries}` : ''})`, { ...extra, sha256 });
@@ -2084,67 +2091,125 @@ function enforcementCheck(engine: string) {
   return { status: 'unsupported', reasons, line: `Enforcement: UNSUPPORTED — AgentOS cannot establish enforcement for ${engine}: ${reasons.join('; ')}. --require-synced-config is the available check (configuration presence, not enforcement).` };
 }
 
-/** `agentos agents sync <engine>`: the only path that writes engine-native agent config. Preflights every target;
- *  any conflict refuses the whole sync with zero writes. Never called by context/checkpoint. */
+type SyncFilePlan = { path: string; abs: string; current: string | null; next: string | null; action: 'create' | 'update' | 'remove' | 'unchanged'; diff: string[]; backup: boolean; refusal?: string; needsReplace?: string };
+
+/** Re-sync of one synced file. Ownership comes only from the sync record: recorded entries/bytes still installed as
+ *  generated are AgentOS's and are replaced; everything else is the owner's and is kept, or the file is refused
+ *  (`needsReplace`) when the sync would overwrite it (hand-edited generated content, or no record). `refusal` cannot
+ *  be overridden (unreadable JSON, ambiguous markers). `file` null = recorded for the previous role, no longer generated. */
+function planSyncedFile(path: string, abs: string, file: NativeFile | null, recorded: SyncRecordFile | null, current: string | null, replace: boolean): SyncFilePlan {
+  const merge = (file ?? recorded!).merge;
+  const plan = (next: string | null, diff: string[], needsReplace?: string): SyncFilePlan => {
+    const action = next === current ? 'unchanged' : current === null ? 'create' : next === null ? 'remove' : 'update';
+    if (action === 'unchanged') return { path, abs, current, next, action, diff: [], backup: false };
+    return { path, abs, current, next, action, diff, backup: Boolean(needsReplace) && replace, ...(needsReplace && !replace ? { needsReplace } : {}) };
+  };
+  const refuse = (refusal: string): SyncFilePlan => ({ path, abs, current, next: current, action: 'unchanged', diff: [], backup: false, refusal });
+  if (current === null) {
+    return plan(file ? file.content : null, merge === 'json-add-keys' && file ? Object.entries(jsonArrays(JSON.parse(file.content))).flatMap(([key, list]) => list.map((entry) => `+ ${key}: ${entry}`)) : ['whole file created']);
+  }
+  const got = installedFrom(merge, current);
+  if ('error' in got) return refuse(got.error);
+  const edited = recorded ? editedEntries(recorded, got) : [];
+  const editedWhy = edited.length ? `generated entry edited (${edited.join(', ')})` : undefined;
+  if (merge === 'json-add-keys') {
+    const json = (got as { json: any }).json;
+    if (!json || typeof json !== 'object' || Array.isArray(json)) return refuse('not a JSON object');
+    const fragment = file ? jsonArrays(JSON.parse(file.content)) : {};
+    let mine = recorded?.entries ?? {}, why = editedWhy;
+    if (!recorded) { // No record: never guess ownership. Differing lists need --replace, which takes them over wholesale.
+      const differ = Object.keys(fragment).filter((key) => jsonAt(json, key) !== undefined && JSON.stringify(jsonAt(json, key)) !== JSON.stringify(fragment[key]));
+      if (differ.length) {
+        why = `no sync record owns ${differ.join(', ')}`;
+        mine = Object.fromEntries(Object.keys(fragment).filter((key) => Array.isArray(jsonAt(json, key))).map((key) => [key, (jsonAt(json, key) as unknown[]).map(String)]));
+      }
+    }
+    const result = replaceRecordedEntries(json, mine, fragment);
+    if (result.conflict.length) return refuse(result.conflict.join('; '));
+    const same = JSON.stringify(result.json) === JSON.stringify(json);
+    return plan(same ? current : serializeJsonLike(current, result.json), [...result.removed.map((entry) => `- ${entry}`), ...result.added.map((entry) => `+ ${entry}`)], why);
+  }
+  if (merge === 'whole-file') {
+    if (file && current === file.content) return plan(current, []);
+    return plan(file ? file.content : null, [file ? 'whole file replaced' : 'whole file removed (previous role)'], editedWhy ?? (recorded ? undefined : 'not written by a recorded sync'));
+  }
+  const block = locateManagedBlock(current, ROLE_BLOCK_START, ROLE_BLOCK_END); // conflicts were refused above
+  if (block.kind !== 'valid') return file ? plan(current + (current.endsWith('\n') ? '\n' : '\n\n') + file.content, ['role block added'], editedWhy) : plan(current, []);
+  const lineEnd = current.indexOf('\n', block.endIdx);
+  const before = current.slice(0, block.startIdx), after = lineEnd < 0 ? '' : current.slice(lineEnd + 1);
+  if (file) return plan(before + file.content + after, ['role block replaced'], editedWhy);
+  const stripped = after === '' && before.endsWith('\n\n') ? before.slice(0, -1) : before + after;
+  return plan(stripped === '' ? null : stripped, ['role block removed (previous role)'], editedWhy);
+}
+
+/** `agentos agents sync <engine>`: the only path that writes engine-native agent config. Plans every target against
+ *  the sync record first; any refusal leaves the workspace unchanged. Files, backups and the record are written in one
+ *  mutation transaction. Never called by context/checkpoint. */
 async function syncAgentsUnlocked(root: string, options: any) {
   const engine = normalizeEngine(options.engine);
   const adapter = engineAdapter(engine);
   if (!adapter.nativeConfig) return { ok: false, text: `AgentOS agents sync: UNSUPPORTED\n${engine} has no native agent config (native_agent_config: ${adapter.capabilities.native_agent_config.status}). Supported: claude-code, codex.` };
+  await assertProjectYamlWellFormed(join(root, '.agentos/project.yaml'));
   const plan = await nativeConfigPlan(root, engine, adapter, options);
   if ('refused' in plan) return { ok: false, text: `AgentOS agents sync: REFUSED\n${plan.refused}\nNothing was written.` };
   const { role, bundle, files } = plan;
-  const plans = [];
-  const conflicts = [];
-  for (const file of files) {
-    await assertBoundaryTarget(root, file.path);
-    const abs = join(root, file.path);
-    const current = await exists(abs) ? await readFile(abs, 'utf8') : null;
-    let next = file.content;
-    if (current !== null && file.merge === 'whole-file' && current !== file.content) conflicts.push(`${file.path}: exists with different content; delete or move it, then sync again`);
-    if (current !== null && file.merge === 'json-add-keys') {
-      let existing;
-      try { existing = JSON.parse(current); } catch (error) { conflicts.push(`${file.path}: not valid JSON (${error.message})`); continue; }
-      if (!existing || typeof existing !== 'object' || Array.isArray(existing)) { conflicts.push(`${file.path}: not a JSON object`); continue; }
-      const merged = mergeAddKeysOnly(existing, JSON.parse(file.content));
-      conflicts.push(...merged.conflicts.map((conflict) => `${file.path}: ${conflict}`));
-      next = JSON.stringify(merged.merged, null, 2) + '\n';
-      if (JSON.stringify(merged.merged) === JSON.stringify(existing)) next = current;
-    }
-    if (current !== null && file.merge === 'managed-block') {
-      const block = locateManagedBlock(current, ROLE_BLOCK_START, ROLE_BLOCK_END);
-      if (block.kind === 'conflict') { conflicts.push(`${file.path}: ${block.reason}`); continue; }
-      if (block.kind === 'valid') {
-        const lineEnd = current.indexOf('\n', block.endIdx);
-        next = current.slice(0, block.startIdx) + file.content + (lineEnd < 0 ? '' : current.slice(lineEnd + 1));
-      } else next = current + (current.endsWith('\n') ? '\n' : '\n\n') + file.content;
-    }
-    plans.push({ path: file.path, abs, next, action: current === null ? 'create' : next === current ? 'unchanged' : 'update' });
-  }
-  const head = [`AgentOS agents sync ${engine}${options.dryRun ? ' dry run' : ''}`, `Role: ${role}; edit scope: ${bundle.scope.edit.join(', ') || '(none; read-only)'}`, ...files.flatMap((file) => file.warnings ?? []).map((warning) => `Warning: ${warning}`)];
-  const enforcement = adapter.capabilities.permission_enforcement;
-  const caveat = [`Generated configuration is not proof of enforcement on its own: permission_enforcement is ${enforcement.status} for ${engine}${enforcement.edit_scope ? `; edit scope is ${enforcement.edit_scope}` : ''} (agentos engines).`, ...(adapter.syncNote ? [adapter.syncNote] : [])].join('\n');
-  if (conflicts.length) return { ok: false, conflicts, text: [...head, 'REFUSED (existing values conflict; add-keys-only):', ...conflicts.map((c) => `- ${c}`), 'Nothing was written.'].join('\n') };
-  // The sync record (what was generated, for which role/scope) is written in the same transaction as the files.
+  const replace = Boolean(options.replace), dryRun = Boolean(options.dryRun);
+  const readOrNull = (abs: string) => readFile(abs, 'utf8').catch((error) => { if (error.code === 'ENOENT') return null; throw error; });
   const recordRel = syncRecordPath(engine);
   await assertBoundaryTarget(root, recordRel);
+  const recordCurrent = await readOrNull(join(root, recordRel));
+  const refusals: string[] = [], overridable: string[] = [];
+  let record: SyncRecord | null = null;
+  if (recordCurrent !== null) {
+    try { record = parseSyncRecord(recordCurrent, engine); } catch (error) { if (!replace) overridable.push(`${recordRel}: ${error.message}; no ownership can be read from it`); }
+  }
+  // One record per engine: paths recorded for the previous role that are no longer generated are removed (when unedited).
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const backupRel = (path: string) => `.agentos/runs/replaced-synced/${stamp}/${path}`;
+  const plans: SyncFilePlan[] = [];
+  for (const path of [...new Set([...files.map((f) => f.path), ...(record?.files ?? []).map((f) => f.path)])]) {
+    await assertBoundaryTarget(root, path);
+    const abs = join(root, path);
+    const file = files.find((f) => f.path === path) ?? null;
+    const current = await readOrNull(abs);
+    if (!file && current === null) continue;
+    const filePlan = planSyncedFile(path, abs, file, record?.files.find((f) => f.path === path) ?? null, current, replace);
+    if (filePlan.refusal) refusals.push(`${path}: ${filePlan.refusal}`);
+    if (filePlan.needsReplace) overridable.push(`${path}: ${filePlan.needsReplace}`);
+    if (filePlan.backup) await assertBoundaryTarget(root, backupRel(path));
+    plans.push(filePlan);
+  }
+  const head = [`AgentOS agents sync ${engine}${dryRun ? ' dry run' : ''}`, `Role: ${role}; edit scope: ${bundle.scope.edit.join(', ') || '(none; read-only)'}`, ...files.flatMap((file) => file.warnings ?? []).map((warning) => `Warning: ${warning}`)];
+  if (refusals.length || overridable.length) {
+    return { ok: false, conflicts: [...refusals, ...overridable], text: [...head, 'REFUSED:', ...[...refusals, ...overridable].map((c) => `- ${c}`),
+      ...(overridable.length ? ['These would overwrite content the sync record does not own. Preview with `--dry-run --replace`; `--replace` overwrites only that content (without a record it takes over the generated keys, e.g. permissions.allow/deny, wholesale) and backs up each overwritten file once under .agentos/runs/replaced-synced/.'] : []),
+      'Nothing was written.'].join('\n') };
+  }
   const scopeFlag = options.scope === undefined || options.scope === null ? null : String(options.scope);
   const recordText = `${JSON.stringify(syncRecord(engine, role, { flag: scopeFlag, edit: bundle.scope.edit, read: bundle.scope.read }, files, PACKAGE_VERSION), null, 2)}\n`;
-  const recordCurrent = await readFile(join(root, recordRel), 'utf8').catch(() => null);
   const recordAction = recordCurrent === null ? 'create' : recordCurrent === recordText ? 'unchanged' : 'update';
-  if (!options.dryRun) {
+  if (!dryRun) {
     await withMutationTransaction(async () => {
-      for (const plan of plans.filter((p) => p.action !== 'unchanged')) {
-        await mkdirTracked(dirname(plan.abs));
-        await writeFileAtomic(plan.abs, plan.next);
+      for (const p of plans.filter((entry) => entry.action !== 'unchanged')) {
+        if (p.backup) {
+          await mkdirTracked(dirname(join(root, backupRel(p.path))));
+          if (!(await writeFileExclusiveAtomic(join(root, backupRel(p.path)), Buffer.from(p.current!, 'utf8'))).created) throw new Error(`${backupRel(p.path)} already exists; retry.`);
+        }
+        if (p.next === null) await removeTracked(p.abs);
+        else { await mkdirTracked(dirname(p.abs)); await writeFileAtomic(p.abs, p.next); }
       }
-      if (recordAction !== 'unchanged') {
-        await mkdirTracked(join(root, SYNC_RECORD_DIR));
-        await writeFileAtomic(join(root, recordRel), recordText);
-      }
+      // The record (what was generated, for which role/scope) lands last, in the same transaction as the files.
+      if (recordAction !== 'unchanged') { await mkdirTracked(join(root, SYNC_RECORD_DIR)); await writeFileAtomic(join(root, recordRel), recordText); }
     });
   }
-  const verb = (action: string) => action === 'unchanged' ? 'Unchanged' : options.dryRun ? `Would ${action}` : action === 'create' ? 'Created' : 'Updated';
-  return { ok: true, dryRun: Boolean(options.dryRun), files: plans.map(({ path, action }) => ({ path, action })), text: [...head, ...plans.flatMap((plan) => [`${verb(plan.action)}: ${plan.path}`, ...(options.dryRun && plan.action !== 'unchanged' ? files.find((f) => f.path === plan.path)!.content.trimEnd().split('\n').map((line) => `  | ${line}`) : [])]), `${verb(recordAction)}: ${recordRel} (sync record)`, caveat].join('\n') };
+  const verb = (action: string) => action === 'unchanged' ? 'Unchanged' : dryRun ? `Would ${action}` : ({ create: 'Created', update: 'Updated', remove: 'Removed' } as Record<string, string>)[action];
+  const enforcement = adapter.capabilities.permission_enforcement;
+  const caveat = [`Generated configuration is not proof of enforcement on its own: permission_enforcement is ${enforcement.status} for ${engine}${enforcement.edit_scope ? `; edit scope is ${enforcement.edit_scope}` : ''} (agentos engines).`, ...(adapter.syncNote ? [adapter.syncNote] : [])].join('\n');
+  return { ok: true, dryRun, files: plans.map(({ path, action }) => ({ path, action })), text: [...head,
+    ...plans.flatMap((p) => [`${verb(p.action)}: ${p.path}${p.backup ? ` (--replace; old file ${dryRun ? 'would be ' : ''}backed up to ${dryRun ? '.agentos/runs/replaced-synced/' : backupRel(p.path)})` : ''}`, ...(dryRun ? p.diff.map((line) => `  ${line}`) : [])]),
+    `${verb(recordAction)}: ${recordRel} (sync record)`,
+    `The sync record tracks one role per engine (now: ${role})${record && record.role !== role ? `; it replaced role ${record.role}, whose generated files are replaced or removed above` : '; syncing another role replaces these files'}.`,
+    caveat].join('\n') };
 }
 
 function listAgentTemplates(root) {

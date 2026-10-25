@@ -374,7 +374,7 @@ test('agents sync claude-code: dry run writes nothing; sync writes the subagent 
   before = await snapshot(root);
   const conflict = cli(['agents', 'sync', 'claude-code'], root);
   fails(conflict);
-  assert.match(conflict.stdout, /permissions\.allow: existing \["Bash\(npm test\)"\] != proposed \["Edit\(\/web\/\*\*\)"\]/);
+  assert.match(conflict.stdout, /permissions\.allow: Edit\(\/web\/\*\*\)/, 'names the hand-removed generated entry');
   assert.match(conflict.stdout, /Nothing was written/);
   assert.deepEqual(await snapshot(root), before, 'conflict: zero writes');
 

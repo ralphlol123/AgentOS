@@ -63,7 +63,7 @@ The same effective scope feeds `agentos context`, `agentos checkpoint` and `agen
 | `agents enable\|disable <id> [--dry-run]` | `project.yaml` `agents.enabled` only | Through the format-preserving editor (comments and layout kept). The card stays on disk. Disabling the last enabled agent is refused. Capabilities still pointing at a disabled id are reported. |
 | `agents remove <id> [--dry-run]` | moves the card | Refuses (exit 1, zero writes) while referenced by `agents.enabled`, `agents.capabilities`, a current checkpoint's role, or a Brain record whose `scope` is the id or whose `tags` contain `<id>`/`agent:<id>`; lists every reference. Otherwise moves the card to `.agentos/runs/removed-agents/<ts>-<id>.md` in one mutation transaction. Nothing is deleted. |
 | `agents manifest <id> --from-catalog\|--custom [--dry-run]` | card frontmatter | For a legacy card only; the body stays byte-identical. `--from-catalog` requires the card to byte-match the catalog card (else refused, zero writes). `--custom` writes `provenance: unknown`, `custom: true`. |
-| `agents sync claude-code\|codex [--role] [--scope] [--dry-run]` | engine-native files | See [`docs/engines.md`](engines.md). Requires a manifest. |
+| `agents sync claude-code\|codex [--role] [--scope] [--dry-run] [--replace]` | engine-native files + `.agentos/synced/<engine>.json` | See [`docs/engines.md`](engines.md#re-sync-and---replace). Requires a manifest. Re-sync replaces only what the sync record owns; one record (one role) per engine. |
 
 `context --role <id>` and `checkpoint --role <id>` exit 1 for a disabled role with an existing card, naming `agentos agents enable <id>`.
 
