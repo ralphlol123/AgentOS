@@ -71,22 +71,87 @@ AgentOS keeps five claims apart. A matching synced config is **configuration pre
 
 | Claim | Meaning | AgentOS can check it? | Observed in |
 |---|---|---|---|
-| **configuration** | what `agents sync` writes (`.claude/agents/<id>.md`, `.claude/settings.local.json`, the Codex role block) | yes, for the Claude deny set: `context claude-code --require-synced-config` | tests (`test/v1-enforcement-contract.test.js`) |
+| **configuration** | what `agents sync` writes (`.claude/agents/<id>.md`, `.claude/settings.local.json`, the Codex role block) | yes, every generated file against its sync record: `doctor` and `context <engine> --require-synced-config` ([freshness](#synced-config-freshness)) | tests (`test/sync-freshness.test.js`, `test/v1-enforcement-contract.test.js`) |
 | **discovery** | the engine lists the synced agent/file | no (needs the engine) | Claude T5 |
 | **invocation** | the synced subagent runs when called | no | Claude T8, T9 |
 | **instruction-following** | an instruction only in the synced config is obeyed | no | Codex T7, Claude T8 |
 | **enforcement** | the engine refuses the action (deny rule) or the tool is absent (`tools:`) | no: `--require-enforcement` exits 1 for every engine in v1 | Claude deny rules T3b, T5, T6c–T6e (trusted workspace); Claude subagent `tools:` T9; Claude launch-time `--allowedTools` T1; Codex `--sandbox read-only` T4 |
 
-`agentos context <engine> --require-synced-config` (configuration only):
+### Synced config freshness
+
+`agents sync <engine>` (not `--dry-run`) also writes a sync record, `.agentos/synced/<engine>.json`, in the same mutation transaction as the engine files: `engine`, `role`, `agentos_version`, `scope` (`flag` = the `--scope` argument or `null` for `task_scope`, plus the effective `edit`/`read`) and, per generated file, `path`, `merge`, `sha256` and, for `.claude/settings.local.json`, the generated `entries` (`permissions.allow`, `permissions.deny`). It has no timestamp, so a re-sync with nothing changed writes nothing. One check reads it, used by both `agentos doctor` and `agentos context <engine> --require-synced-config`; it regenerates with the **recorded** role and scope (not the role or scope of the current `context` call) and compares per file:
+
+1. installed vs record: a generated deny/allow entry missing or changed, `.claude/agents/<role>.md` edited, or the Codex role block edited → `generated entry edited` (a deleted file → `generated file missing`). Entries the owner added to a JSON file that are not in the record are **not** drift; they are counted as `user entries: N`.
+2. record vs what sync would generate now → `scope changed` (effective edit/read scope differs, e.g. a `task_scope` edit), `tree changed` (settings differ with the same scope, e.g. a new top-level directory), `manifest changed` (the role card or its manifest, e.g. `tools_requested`).
+
+| Status | When | `context --require-synced-config` | `doctor` |
+|---|---|---|---|
+| OK | everything matches | exit 0, context rendered | silent |
+| STALE | drift (reasons per file), or a 1.0.0 sync without a record | exit 1 | one warning |
+| INVALID | broken record, unreadable/invalid JSON settings, ambiguous role-block markers, malformed `project.yaml`, card without manifest — with the reason | exit 1 | one warning |
+| MISSING | never synced (no record, no generated files) | exit 1 | silent |
+| UNSUPPORTED | opencode, hermes, generic | exit 1 | — |
+
+The lines (identical in both commands; doctor prefixes `- ` under `Warnings:`):
 
 ```text
-Synced config: OK (claude-code, sha256 <8 hex>)          exit 0; context rendered, the line ends the footer
-Synced config: STALE — re-run agentos agents sync claude-code (installed deny set sha256 …, generated now …; remove permissions.allow/deny from .claude/settings.local.json first, sync adds keys only)
-Synced config: MISSING — run agentos agents sync claude-code
-Synced config: UNSUPPORTED — codex has no synced config    (also opencode, hermes, generic)
+Synced config: OK (claude-code, role developer, sha256 0bb513df)
+Synced config: OK (claude-code, role developer, sha256 0bb513df; user entries: 1)
+Synced config: STALE — re-run agentos agents sync claude-code --role developer (.claude/settings.local.json: tree changed)
+Synced config: STALE — re-run agentos agents sync claude-code --role developer --scope 'web/src,api/contracts' (.claude/settings.local.json: tree changed)
+Synced config: STALE — re-run agentos agents sync claude-code --role developer (.claude/agents/developer.md: manifest changed)
+Synced config: STALE — re-run agentos agents sync codex --role developer --replace (web/AGENTS.md: generated entry edited)
+Synced config: STALE — synced by 1.0.0 without a record; re-run agentos agents sync claude-code --replace
+Synced config: INVALID — .claude/settings.local.json: invalid JSON (Unexpected end of JSON input); fix it, then re-run agentos agents sync claude-code --role developer
+Synced config: MISSING — run agentos agents sync codex
+Synced config: UNSUPPORTED — opencode has no synced config    (also hermes, generic)
 ```
 
-OK means the `permissions.deny` set in `.claude/settings.local.json` equals (sha256 of the sorted list) what `agents sync claude-code` would generate now for the same role and scope. STALE means the tree or scope changed since the sync (e.g. a new top-level directory). MISSING covers no file, no deny list, and no role/manifest. Codex has a synced role block, but no deny set to compare, so it is UNSUPPORTED.
+The re-sync command carries `--scope '<flag>'` (single-quoted, pastes as-is) when the sync was given one, and adds `--replace` only when a plain re-sync would refuse: a generated entry was edited by hand, or a 1.0.0 sync left no record. Every other STALE reason (`tree changed`, `scope changed`, `manifest changed`, `generated file missing`) is fixed by the plain command. `doctor` adds warnings only (never `problems`), so its exit status does not change, and it never rewrites anything; a workspace that never ran `agents sync` gets byte-identical human output to 1.0.0. `doctor --json` carries an additive `synced_config` list, one entry per engine with native config:
+
+```json
+"synced_config": [
+  { "engine": "claude-code", "status": "stale", "role": "developer", "files": [".claude/agents/developer.md", ".claude/settings.local.json"], "reason": ".claude/settings.local.json: tree changed", "user_entries": 0 },
+  { "engine": "codex", "status": "missing", "role": null, "files": [], "reason": null, "user_entries": 0 }
+]
+```
+
+(`sha256` is added on `ok`.) This is configuration presence only: OK says nothing about workspace trust or the residual writable paths.
+
+### Re-sync and `--replace`
+
+`agents sync <engine> [--role <id>] [--scope <a,b>] [--dry-run] [--replace]` takes ownership only from the sync record; it never guesses.
+
+| Target | Plain re-sync | Refused with zero writes unless `--replace` | With `--replace` |
+|---|---|---|---|
+| `.claude/settings.local.json` `permissions.allow` / `permissions.deny` | Replaces exactly the recorded entries with the newly generated ones, inserted where the first recorded entry stood. Owner entries (not in the record) keep their place and order; every other key is untouched; the file keeps its indent and its trailing newline (or lack of one). | A recorded entry was removed or changed by hand: `generated entry edited (permissions.deny: Edit(/api/**), …)`. No record and an existing different list: `no sync record owns permissions.deny`. | Edited: the recorded entries still present are replaced; everything else, the hand-changed entries included, is kept as owner entries. No record: `allow`/`deny` are taken over wholesale. One backup. |
+| `.claude/agents/<role>.md` | Replaced while its bytes still match the recorded sha256. | Hand-edited (`generated entry edited (whole file)`), or no record and different content. | Replaced; one backup. |
+| Codex role block | Replaced in place; bytes outside the block kept. | Block edited by hand (`role block`). | Replaced; one backup. |
+| File recorded for the previous role, no longer generated | Removed (a role block is stripped). | Hand-edited. | Removed; one backup. |
+
+- Backups: `.agentos/runs/replaced-synced/<timestamp>/<path>`, written by the atomic no-clobber writer in the same mutation transaction as the engine files and the record; any failure rolls back every file, the backup and the record.
+- A deleted generated file is recreated without `--replace`. Unreadable or invalid JSON and ambiguous role-block markers refuse even with `--replace`. A broken record refuses until `--replace`, which then treats the workspace as unrecorded.
+- **One record per engine.** Syncing another role replaces the previous role's record, its generated entries and files; the output says so: `The sync record tracks one role per engine (now: tester); it replaced role developer, whose generated files are replaced or removed above.`
+- Same preflight as the other mutating commands: root, workspace boundaries (symlinked `.claude/`, `.agentos/synced/`, `.agentos/runs/` refused before any write), `project.yaml`, then the whole plan, then the writes. `--dry-run` takes no writer lock.
+- `--dry-run` prints, per file, its `+`/`-` entries, `whole file created|replaced|removed`, `role block added|replaced|removed`, or `Unchanged:`, and writes nothing (no lock, record, backup or temp file). `--dry-run --replace` previews the override.
+
+```text
+$ agentos agents sync claude-code --dry-run            # after mkdir newdir
+Unchanged: .claude/agents/developer.md
+Would update: .claude/settings.local.json
+  + permissions.deny: Edit(/newdir/**)
+  + permissions.deny: Write(/newdir/**)
+  + permissions.deny: NotebookEdit(/newdir/**)
+Would update: .agentos/synced/claude-code.json (sync record)
+
+$ agentos agents sync claude-code                      # a generated deny entry edited by hand
+REFUSED:
+- .claude/settings.local.json: generated entry edited (permissions.deny: Edit(/api/**))
+These would overwrite content the sync record does not own. Preview with `--dry-run --replace`; …
+Nothing was written.
+```
+
+Limits: the JSON file is re-serialized (indent and trailing newline kept), so non-standard spacing inside it is normalised. A generated entry the owner already had is not inserted twice, but the record then claims it: a later re-sync that no longer generates it removes it.
 
 `agentos context <engine> --require-enforcement` **always exits 1** in v1, for every engine; there is no partial-credit path:
 
@@ -95,7 +160,7 @@ Enforcement: UNSUPPORTED — AgentOS cannot establish enforcement for claude-cod
 Enforcement: UNSUPPORTED — AgentOS cannot establish enforcement for codex: the launch-time sandbox is chosen outside AgentOS; no per-path scope. --require-synced-config is the available check (configuration presence, not enforcement).
 ```
 
-opencode, hermes and generic give `permission_enforcement is unsupported for <engine>: edit scope and tool rules are instruction text only`. On any failure the output starts with `AgentOS context: FAIL`, prints the gate line(s) and renders no context. Both flags together print both lines and exit 1. With `--json`, a failure prints `{ ok: false, rendered: false, enforcement?, synced_config? }`; a rendered bundle carries `synced_config` when the flag was given. `enforcement` is `{ status: "unsupported", reasons: [...] }` (the reasons above as a list), `synced_config` is `{ status: "ok"|"stale"|"missing"|"unsupported", sha256? }` (`sha256` on `ok`). Without either flag, `context` renders as before with the ADVISORY line.
+opencode, hermes and generic give `permission_enforcement is unsupported for <engine>: edit scope and tool rules are instruction text only`. On any failure the output starts with `AgentOS context: FAIL`, prints the gate line(s) and renders no context. Both flags together print both lines and exit 1. With `--json`, a failure prints `{ ok: false, rendered: false, enforcement?, synced_config? }`; a rendered bundle carries `synced_config` when the flag was given. `enforcement` is `{ status: "unsupported", reasons: [...] }` (the reasons above as a list), `synced_config` is `{ status: "ok"|"stale"|"invalid"|"missing"|"unsupported", sha256?, role?, reason? }` (`sha256` on `ok`). Without either flag, `context` renders as before with the ADVISORY line.
 
 `--require-enforcement` exited 0 on a matching synced deny set until closure 3 (`d7501a9`); that flag result is now `--require-synced-config`. A future hard-enforcement check is in [improve-later.md](improve-later.md).
 
@@ -126,9 +191,9 @@ opencode, hermes and generic give `permission_enforcement is unsupported for <en
            /docs/**  /docs/adr/**  /web/.gitignore  /web/AGENTS.md  /web/CLAUDE.md  /web/package.json  /web/tests/**
     ```
 
-    What the deny rules do **not** cover: new root-level files and entries created after the sync (re-run `agentos agents sync claude-code` after adding top-level directories; since sync adds keys only, remove `permissions.allow`/`deny` from `.claude/settings.local.json` first), new files created directly inside an ancestor of the edit path (e.g. `web/new.txt` for edit `web/src`), shell writes Claude Code does not recognise as file writes (advisory), and anything at all in an untrusted workspace.
+    What the deny rules do **not** cover: new root-level files and entries created after the sync (re-run `agentos agents sync claude-code` after adding top-level directories; it replaces only the entries its sync record owns), new files created directly inside an ancestor of the edit path (e.g. `web/new.txt` for edit `web/src`), shell writes Claude Code does not recognise as file writes (advisory), and anything at all in an untrusted workspace.
 
-    Merged by adding missing keys only; a key that exists with a different value (arrays compared whole, so an existing different `deny` list) refuses the whole sync with zero writes; an identical value is accepted unchanged. `/path` is relative to the settings source. The sync prints the trust note ("Claude Code ignores `.claude/settings.local.json` until the workspace is trusted; run `claude` interactively once or set `projects[<root>].hasTrustDialogAccepted` in ~/.claude.json."), the re-sync instruction ("re-run `agentos agents sync claude-code` after adding top-level directories …") and `advisory: shell writes (Bash) are blocked only where Claude Code recognises a file write to a denied path; …`.
+    The first sync adds the keys to an existing file (other keys untouched; an identical existing list is accepted unchanged; a different one without a sync record refuses with zero writes until `--replace`); a re-sync replaces only the recorded entries ([Re-sync and `--replace`](#re-sync-and---replace)). `/path` is relative to the settings source. The sync prints the trust note ("Claude Code ignores `.claude/settings.local.json` until the workspace is trusted; run `claude` interactively once or set `projects[<root>].hasTrustDialogAccepted` in ~/.claude.json."), the re-sync instruction ("re-run `agentos agents sync claude-code` after adding top-level directories …") and `advisory: shell writes (Bash) are blocked only where Claude Code recognises a file write to a denied path; …`.
   - **codex**: a managed block `<!-- agentos:role:start -->` … `<!-- agentos:role:end -->` in the `AGENTS.md` of the single repo that holds the edit scope (else the root `AGENTS.md`), replaced in place on re-sync; bytes outside it are kept and `doctor --fix` leaves it alone. The sync prints `advisory: Codex enforces only its launch-time sandbox (…)`: AgentOS writes no sandbox configuration and passes no flags.
 - `launch` and `native_session_resume` are `unsupported` everywhere: AgentOS never starts an engine, and `agentos resume` is engine-neutral checkpoint text.
 
@@ -145,7 +210,7 @@ opencode, hermes and generic give `permission_enforcement is unsupported for <en
 | `.agentos/project.yaml`, `.agentos/agents/**` (scope and role definitions) | yes | verified for `project.yaml` (T6c) |
 | Read-only role: `Edit/Write/NotebookEdit(/**)` | everything (Edit, Write, Bash redirect); Read allowed | verified (T6d) |
 | The rest of `.agentos/` (handoff, tasks, checkpoints, runs) | **no**, by design: the state channel, written through the AgentOS workflow | residual (T6c: `.agentos/probe10.md` allowed) |
-| Entries created after the sync | **no** — re-run `agentos agents sync claude-code` after adding top-level directories (`context --require-synced-config` says `STALE` until then) | — |
+| Entries created after the sync | **no** — re-run `agentos agents sync claude-code` after adding top-level directories (`doctor` warns and `context --require-synced-config` says `STALE` until then) | — |
 | New files directly inside an ancestor of the edit path (`web/new.txt` for edit `web/src`) | **no** | — |
 | Shell (Bash) writes | only where Claude Code recognises a file write to a denied path | advisory |
 | An untrusted workspace | **no** — Claude Code ignores `.claude/settings.local.json` (T3a) | — |

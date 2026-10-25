@@ -58,7 +58,7 @@ test('(a) regression: matching synced config + --require-enforcement exits 1 UNS
   }
 });
 
-test('(b) --require-synced-config: MISSING before sync, OK when current (context rendered), STALE after mkdir, UNSUPPORTED for codex', async (t) => {
+test('(b) --require-synced-config: MISSING before sync, OK when current (context rendered), STALE after mkdir, codex MISSING until synced (1.1: codex role block is checked)', async (t) => {
   const root = await workspace(t);
   let r = context(root, 'claude-code', '--require-synced-config');
   fails(r);
@@ -69,7 +69,7 @@ test('(b) --require-synced-config: MISSING before sync, OK when current (context
   r = context(root, 'claude-code', '--require-synced-config');
   ok(r);
   assert.match(r.stdout, /## Objective/);
-  assert.match(r.stdout, /^Synced config: OK \(claude-code, sha256 [0-9a-f]{8}\)$/m);
+  assert.match(r.stdout, /^Synced config: OK \(claude-code, role developer, sha256 [0-9a-f]{8}\)$/m);
   assert.doesNotMatch(r.stdout, /^Enforcement:/m);
 
   await mkdir(join(root, 'newdir'));
@@ -80,7 +80,7 @@ test('(b) --require-synced-config: MISSING before sync, OK when current (context
 
   r = context(root, 'codex', '--require-synced-config');
   fails(r);
-  assert.ok(lines(r).includes('Synced config: UNSUPPORTED — codex has no synced config'), r.stdout);
+  assert.ok(lines(r).includes('Synced config: MISSING — run agentos agents sync codex'), r.stdout);
 });
 
 test('(c) both flags: both lines, exit 1 even when the synced config is OK', async (t) => {
@@ -88,7 +88,7 @@ test('(c) both flags: both lines, exit 1 even when the synced config is OK', asy
   ok(cli(['agents', 'sync', 'claude-code'], root));
   const r = context(root, 'claude-code', '--require-synced-config', '--require-enforcement');
   fails(r);
-  assert.match(r.stdout, /^Synced config: OK \(claude-code, sha256 [0-9a-f]{8}\)$/m);
+  assert.match(r.stdout, /^Synced config: OK \(claude-code, role developer, sha256 [0-9a-f]{8}\)$/m);
   assert.ok(lines(r).includes(enforcementLine('claude-code', CLAUDE_REASONS)), r.stdout);
   assert.doesNotMatch(r.stdout, /## Objective/);
 });

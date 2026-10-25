@@ -13,7 +13,7 @@ Builds the context one engine needs for one task and one role. Read-only: it rea
 | `--role` | Must be listed in `agents.enabled`; otherwise exit 1. Default: `agents.capabilities.implementation`, else the first enabled agent. A missing `.agentos/agents/<role>.md` is a `missing` warning, not fatal. |
 | `--scope` | Comma list of repo IDs or workspace-relative paths, validated like `task_scope`. It replaces the read scope and keeps only the `task_scope.edit` entries it still covers, so it never widens edit. No `--scope` → `task_scope`; neither → read is the whole workspace (`.`) and edit is empty, with a warning. |
 | `--budget` | Positive whole number of tokens; default 24000 for every engine. |
-| `--require-synced-config` | Configuration presence: claude-code only, the synced deny set must equal what `agents sync claude-code` generates now (`Synced config: OK/STALE/MISSING/UNSUPPORTED`; exit 1 and nothing rendered unless OK). See [engines.md](engines.md#enforcement-vs-synced-configuration). |
+| `--require-synced-config` | Configuration presence: claude-code and codex, every file `agents sync` generated must still match its sync record and what sync would generate now for the recorded role/scope (`Synced config: OK/STALE/INVALID/MISSING/UNSUPPORTED`; exit 1 and nothing rendered unless OK). The `--role`/`--scope` of the `context` call do not change the check. See [engines.md](engines.md#synced-config-freshness). |
 | `--require-enforcement` | Always exit 1 in v1, every engine (`Enforcement: UNSUPPORTED — …`, nothing rendered): AgentOS cannot establish enforcement. |
 | `--require-complete` | Exit 1 when the bundle has Missing items (the bundle is still printed). |
 

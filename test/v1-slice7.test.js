@@ -78,7 +78,7 @@ test('D1: sync claude-code denies every repo and read path outside the edit scop
   const dry = cli(['agents', 'sync', 'claude-code', '--dry-run'], root);
   ok(dry);
   assert.match(dry.stdout, TRUST);
-  assert.match(dry.stdout, /"Edit\(\/api\/\*\*\)"/);
+  assert.match(dry.stdout, /^  \+ permissions\.deny: Edit\(\/api\/\*\*\)$/m);
   assert.deepEqual(await snapshot(root), before, 'dry run writes nothing');
 
   const r = cli(['agents', 'sync', 'claude-code'], root);
@@ -100,7 +100,8 @@ test('D1: an existing different deny list refuses the sync with zero writes; an 
   const before = await snapshot(root);
   const conflict = cli(['agents', 'sync', 'claude-code'], root);
   fails(conflict);
-  assert.match(conflict.stdout, /permissions\.deny: existing \["Bash\(rm:\*\)"\] != proposed \["Edit\(\/\.agentos\/agents\/\*\*\)"/);
+  assert.match(conflict.stdout, /^- \.claude\/settings\.local\.json: no sync record owns permissions\.deny$/m);
+  assert.match(conflict.stdout, /--replace/);
   assert.match(conflict.stdout, /Nothing was written/);
   assert.deepEqual(await snapshot(root), before, 'conflict: zero writes');
 
