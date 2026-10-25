@@ -111,7 +111,7 @@ test('sibling enumeration: an existing different deny list refuses with zero wri
   assert.deepEqual(await snapshot(root), before);
 });
 
-test('context claude-code --require-synced-config: MISSING without synced rules, OK when current, STALE after a new top-level dir; codex UNSUPPORTED (closure 3: renamed from --require-enforcement)', async (t) => {
+test('context claude-code --require-synced-config: MISSING without synced rules, OK when current, STALE after a new top-level dir; codex MISSING until synced, others UNSUPPORTED (closure 3: renamed from --require-enforcement)', async (t) => {
   const root = await workspace(t);
   const strict = (engine = 'claude-code') => cli(['context', engine, '--task', 'greeting', '--require-synced-config'], root);
   let r = strict();
@@ -123,7 +123,7 @@ test('context claude-code --require-synced-config: MISSING without synced rules,
   r = strict();
   ok(r);
   assert.match(r.stdout, /## Objective/);
-  assert.match(r.stdout, /^Synced config: OK \(claude-code, sha256 [0-9a-f]{8}\)$/m);
+  assert.match(r.stdout, /^Synced config: OK \(claude-code, role developer, sha256 [0-9a-f]{8}\)$/m);
 
   await mkdir(join(root, 'scripts'));
   r = strict();
@@ -131,7 +131,8 @@ test('context claude-code --require-synced-config: MISSING without synced rules,
   assert.match(r.stdout, /^Synced config: STALE — re-run agentos agents sync claude-code/m);
   assert.doesNotMatch(r.stdout, /## Objective/);
 
-  for (const engine of ['codex', 'opencode', 'hermes', 'generic']) {
+  assert.match(strict('codex').stdout, /^Synced config: MISSING — run agentos agents sync codex$/m); // 1.1: the codex role block is checked
+  for (const engine of ['opencode', 'hermes', 'generic']) {
     r = strict(engine);
     fails(r);
     assert.match(r.stdout, /^Synced config: UNSUPPORTED/m);

@@ -4,6 +4,14 @@ All notable changes to AgentOS for Projects are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **Sync record and synced-config freshness in `doctor` (1.1 slice 1).** `agents sync <engine>` (not `--dry-run`) also writes `.agentos/synced/<engine>.json` in the same mutation transaction: engine, role, scope (`--scope` flag and effective edit/read), AgentOS version, and per generated file its sha256 (plus the generated `permissions.allow`/`deny` entries). One shared check compares the installed files with the record and the record with what sync would generate now for the **recorded** role and scope: `OK`, `STALE` (per file: `tree changed`, `scope changed`, `manifest changed`, `generated entry edited`, `generated file missing`; or `synced by 1.0.0 without a record`), `INVALID` (broken record, invalid JSON settings, malformed `project.yaml`, card without manifest — with the reason), `MISSING` (never synced), `UNSUPPORTED`. `agentos doctor` prints one warning per stale or invalid engine naming the exact re-sync command (exit status unchanged, nothing rewritten; a never-synced workspace gets byte-identical output) and `doctor --json` adds `synced_config: [{engine, status, role, files, reason, user_entries}]`.
+
+### Changed
+
+- **`context --require-synced-config` uses the shared check.** It now covers `permissions.allow`, `.claude/agents/<role>.md` and the Codex role block (`agents sync codex`; codex was `UNSUPPORTED`), checks against the synced role/scope instead of the current call's (a `context` for another role no longer reports `STALE`), ignores owner-added entries (`user entries: N`), and reports `INVALID` with the reason instead of `MISSING` for errors. The OK line names the role: `Synced config: OK (<engine>, role <id>, sha256 <8>)`; `--json` `synced_config` may carry `role` and `reason`. Syncs made by 1.0.0 have no record and report `STALE` until re-synced (`docs/migration.md`).
+
 ## [1.0.0] - 2026-10-25
 
 **AgentOS v1** (PRs #52 and #53, built from the stacked slices #46–#51).

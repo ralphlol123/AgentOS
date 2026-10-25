@@ -92,7 +92,7 @@ export function claudeSettingsFragment(edit: NativeConfigInput['edit'], outside:
 export const CLAUDE_RESIDUAL = 'new root-level files/dirs until re-sync, .agentos/ state, shell writes Claude Code does not recognise as file writes';
 export const CLAUDE_TRUST_NOTE = 'Claude Code ignores `.claude/settings.local.json` until the workspace is trusted; run `claude` interactively once or set `projects[<root>].hasTrustDialogAccepted` in ~/.claude.json.';
 const CLAUDE_SYNC_LIMITS = [
-  'The deny rules enumerate the tree as it is now: re-run `agentos agents sync claude-code` after adding top-level directories (remove permissions.allow/deny from .claude/settings.local.json first; sync adds keys only). `agentos context claude-code --require-synced-config` reports STALE until then.',
+  'The deny rules enumerate the tree as it is now: re-run `agentos agents sync claude-code` after adding top-level directories (remove permissions.allow/deny from .claude/settings.local.json first; sync adds keys only). `agentos doctor` warns and `agentos context claude-code --require-synced-config` reports STALE until then.',
   'advisory: shell writes (Bash) are blocked only where Claude Code recognises a file write to a denied path; .agentos/ state files (handoff, tasks, checkpoints) stay writable.',
 ].join('\n');
 
