@@ -1,5 +1,5 @@
 export type FlagValue = string | boolean;
-const booleans = new Set(['new', 'existing', 'dry-run', 'yes', 'y', 'detected', 'replace', 'preserve', 'fix', 'json', 'create', 'refresh', 'installed', 'normalize-repo-ids', 'adopt-custom-adapters', 'prune-retired', 'rewrite', 'checkpoint', 'diff', 'include-superseded', 'recover', 'append', 'from-catalog', 'custom', 'require-enforcement', 'require-complete']);
+const booleans = new Set(['new', 'existing', 'dry-run', 'yes', 'y', 'detected', 'replace', 'preserve', 'fix', 'json', 'create', 'refresh', 'installed', 'normalize-repo-ids', 'adopt-custom-adapters', 'prune-retired', 'rewrite', 'checkpoint', 'diff', 'include-superseded', 'recover', 'append', 'from-catalog', 'custom', 'require-enforcement', 'require-synced-config', 'require-complete']);
 const values = new Set(['agents', 'engine', 'role', 'repo', 'worktree', 'phase', 'reason', 'vault', 'dest', 'link', 'mode', 'name', 'type', 'expected-sha256', 'objective', 'expect-state', 'task', 'scope', 'budget', 'progress', 'blocker', 'next', 'check', 'cwd', 'claim', 'kind', 'status', 'by', 'from', 'summary', 'supersedes', 'canonical', 'dir', 'location']);
 /** `--check` and `--claim` repeat; each `--cwd` belongs to the `--check` right before it. */
 export function parseFlagsAndPositionals(args: string[]): { flags: Record<string, FlagValue>; positionals: string[]; checks: Array<{ command: string; cwd?: string }>; claims: string[] } {
@@ -31,7 +31,7 @@ export function parseFlagsAndPositionals(args: string[]): { flags: Record<string
 export function validateCommandFlags(command: string, flags: Record<string, FlagValue>): void {
   const allowed: Record<string, string[]> = {
     init: ['new', 'existing', 'agents', 'dry-run', 'yes', 'y', 'refresh'], status: [], handoff: [], prompt: [],
-    context: ['task', 'role', 'scope', 'budget', 'json', 'include-superseded', 'require-enforcement', 'require-complete'], engines: ['json'],
+    context: ['task', 'role', 'scope', 'budget', 'json', 'include-superseded', 'require-enforcement', 'require-synced-config', 'require-complete'], engines: ['json'],
     checkpoint: ['task', 'engine', 'role', 'progress', 'blocker', 'next', 'check', 'cwd', 'claim', 'json', 'dry-run', 'recover'],
     resume: ['task', 'engine', 'json'],
     brain: ['kind', 'scope', 'status', 'by', 'from', 'summary', 'supersedes', 'append', 'json', 'dry-run', 'location'],

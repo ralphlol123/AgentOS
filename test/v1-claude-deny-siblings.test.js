@@ -1,6 +1,6 @@
 // v1 closure: `agents sync claude-code` denies everything outside the edit scope (sibling enumeration), not only
 // the listed repo/read paths (gap found in Phynceon's host probe, Claude Code 2.1.310, 2026-10-25), and
-// `context claude-code --require-enforcement` checks that the synced deny set is current.
+// `context claude-code --require-synced-config` (closure 3; was --require-enforcement) checks that the synced deny set is current.
 import assert from 'node:assert/strict';
 import { lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -111,31 +111,30 @@ test('sibling enumeration: an existing different deny list refuses with zero wri
   assert.deepEqual(await snapshot(root), before);
 });
 
-test('context claude-code --require-enforcement: UNSUPPORTED without synced rules, ok when current, STALE after a new top-level dir; codex stays UNSUPPORTED', async (t) => {
+test('context claude-code --require-synced-config: MISSING without synced rules, OK when current, STALE after a new top-level dir; codex UNSUPPORTED (closure 3: renamed from --require-enforcement)', async (t) => {
   const root = await workspace(t);
-  const strict = (engine = 'claude-code') => cli(['context', engine, '--task', 'greeting', '--require-enforcement'], root);
+  const strict = (engine = 'claude-code') => cli(['context', engine, '--task', 'greeting', '--require-synced-config'], root);
   let r = strict();
   fails(r);
-  assert.match(r.stdout, /^AgentOS context: UNSUPPORTED/);
+  assert.match(r.stdout, /^Synced config: MISSING/m);
   assert.doesNotMatch(r.stdout, /## Objective/);
 
   ok(cli(['agents', 'sync', 'claude-code'], root));
   r = strict();
   ok(r);
   assert.match(r.stdout, /## Objective/);
-  assert.match(r.stdout, /enforcement configuration present: \.claude\/settings\.local\.json deny set matches `agents sync claude-code` \(sha256 [0-9a-f]{12}/);
+  assert.match(r.stdout, /^Synced config: OK \(claude-code, sha256 [0-9a-f]{8}\)$/m);
 
   await mkdir(join(root, 'scripts'));
   r = strict();
   fails(r);
-  assert.match(r.stdout, /^AgentOS context: STALE/);
-  assert.match(r.stdout, /re-run `agentos agents sync claude-code`/);
+  assert.match(r.stdout, /^Synced config: STALE — re-run agentos agents sync claude-code/m);
   assert.doesNotMatch(r.stdout, /## Objective/);
 
   for (const engine of ['codex', 'opencode', 'hermes', 'generic']) {
     r = strict(engine);
     fails(r);
-    assert.match(r.stdout, /^AgentOS context: UNSUPPORTED/);
+    assert.match(r.stdout, /^Synced config: UNSUPPORTED/m);
   }
 });
 

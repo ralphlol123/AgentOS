@@ -318,10 +318,10 @@ test('agentos engines --json: five engines, exactly the six rows each, statuses 
   }
 });
 
-test('context prints one ADVISORY line per unenforced hard requirement; --require-enforcement exits 1 UNSUPPORTED for every engine today', async (t) => {
+test('context prints one ADVISORY line per unenforced hard requirement; --require-enforcement exits 1 UNSUPPORTED for every engine (v1: no partial credit)', async (t) => {
   const { root } = await workspace(t);
   const advisory = {
-    'claude-code': 'edit scope is enforced for claude-code only by the deny rules from `agentos agents sync claude-code` in a trusted workspace (listed paths, siblings, Bash redirects to denied paths and read-only deny-all verified; files/dirs created after sync, .agentos/ state and other shell writes advisory); otherwise instruction-only',
+    'claude-code': 'edit scope is enforced for claude-code only by the deny rules from `agentos agents sync claude-code` in a trusted workspace (listed paths, siblings, Bash redirects to denied paths and read-only deny-all verified), otherwise instruction-only; residual writable paths: new root-level files/dirs until re-sync, .agentos/ state, shell writes Claude Code does not recognise as file writes',
     codex: 'edit scope is instruction-only per path for codex (only the launch-time sandbox is enforced; --sandbox read-only refuses every write)',
   };
   for (const engine of ['claude-code', 'codex', 'opencode', 'hermes', 'generic']) {
@@ -331,8 +331,8 @@ test('context prints one ADVISORY line per unenforced hard requirement; --requir
     assert.ok(r.stdout.split('\n').includes(`ADVISORY: ${advisory[engine] ?? `edit scope is instruction-only for ${engine}`}`), r.stdout);
     const strict = cli(['context', engine, '--task', 'settings page', '--require-enforcement'], root);
     fails(strict);
-    assert.match(strict.stdout, /^AgentOS context: UNSUPPORTED/);
-    assert.match(strict.stdout, /permission_enforcement is (unverified|unsupported|verified for \S+ only conditionally)/);
+    assert.match(strict.stdout, /^AgentOS context: FAIL/);
+    assert.match(strict.stdout, new RegExp(`^Enforcement: UNSUPPORTED — AgentOS cannot establish enforcement for ${engine}: `, 'm'));
     assert.doesNotMatch(strict.stdout, /## Objective/);
   }
   const { out } = json(['context', 'opencode', '--task', 'settings page'], root);
