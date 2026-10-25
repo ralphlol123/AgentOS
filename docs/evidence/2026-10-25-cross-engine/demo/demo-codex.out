@@ -1,0 +1,13 @@
+Implemented farewell and updated tests. `node test.js` and `npm run test` passed. No commit created. The checkpoint records only its own test execution:
+
+```text
+AgentOS checkpoint
+Task: greeting (from --task)
+Wrote: .agentos/checkpoints/greeting/2026-10-25T10-11-35-078Z-aef8e5eb.json
+Updated: .agentos/checkpoints/greeting/current.json, .agentos/handoff.md (## Checkpoint (managed))
+Repos: api (enclosing work tree) master@0bec8be (0 changed); web (enclosing work tree) master@0bec8be (2 changed)
+Receipts: observed-pass 1, observed-fail 0, claimed 0, not-run 1, unavailable 0
+- observed-pass: `node test.js` (cwd web, exit 0, evidence .agentos/checkpoints/greeting/evidence/26e47a491e728295.log)
+- not-run: `npm run test` (cwd web, declared web.test_command)
+One active writer per workspace; concurrent engines are not supported.
+```

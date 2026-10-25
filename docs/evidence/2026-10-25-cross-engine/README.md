@@ -17,3 +17,6 @@ Copied unchanged and complete (22 files, nothing omitted) from the host trial fo
 - `cx-role1.log/.out`, `cx-role2.log/.out` (launched in `web/`), `cx-ctrl2.log/.out` (root control), `cx-role.log/.out`, `cx-ctrl.out` (earlier runs, incl. the "Nothing else" prompt) — Codex logs for T7; `web-AGENTS.md.generated` — the synced role block with the marker.
 - `settings.local.json.generated` (the 856b61f listed-path fragment), `settings.readonly.generated` (T6d) — generated settings.
 - `SHA256SUMS` — `sha256sum -c SHA256SUMS` in `closure/`: 21 OK, 1 FAILED — the line for `SHA256SUMS` itself (it hashes the empty file, written before the list was filled); every other file matches.
+
+## demo/ — connected-workflow demonstration on the final build (2026-10-25)
+`REPORT-demo.md` walks init → role/scope → context → Claude Code → checkpoint → fresh Codex → Brain propose/apply → Obsidian folder, with prompts (`demo-claude.txt`, `demo-codex.txt`), transcripts (`demo-claude.json`, `demo-codex.log/.out`), checkpoint and Brain records, the generated settings and the vault index note. `SHA256SUMS` covers the folder. Host home paths in the Codex log are replaced by `<host-path>`.
