@@ -1,6 +1,6 @@
 # Migrating an existing workspace to v1
 
-v1 (the `feat/v1-*` stack, unreleased) adds files and keys; it removes and renames nothing. A workspace created by 0.9.0 keeps working without any change, and every v1 feature is adopted by running its command. Nothing below is applied by `doctor --fix`.
+v1 (released as 1.0.0) adds files and keys; it removes and renames nothing. A workspace created by 0.9.0 keeps working without any change, and every v1 feature is adopted by running its command. Nothing below is applied by `doctor --fix`.
 
 ## What `doctor` says on a 0.9.0 workspace
 
@@ -58,4 +58,4 @@ Behaviour that changed for existing data:
 | `src/core.ts` (~5k lines) | simplify-later | Extract along slice boundaries as later work touches it. |
 | `src/context-builder.ts`, `checkpoint.ts`, `brain.ts`, `agents.ts`, `engines.ts`, `task-scope.ts`, `git-evidence.ts` | keep | v1 modules. |
 
-**Gate for the remove-gated rows (unchanged; evidence: [slice 1 finding 8](../.agentos/plans/2026-10-25-v1-priorities.md), history in `.agentos/runs/2026-10-25-v1-slice1-history.md`):** delete in 0.10.0 only after 0.9.0 has been out a few weeks, the npm download split has been re-checked, the read-only `migration` inventory is kept, and the owner decides. Not met: 0.10.0 is not scheduled and there is no owner decision. Until then `npx agentos-for-projects@0.9 doctor --fix` is the documented migration route for very old workspaces.
+**Gate for the remove-gated rows (unchanged; evidence: [slice 1 finding 8](../.agentos/plans/2026-10-25-v1-priorities.md), history in `.agentos/runs/2026-10-25-v1-slice1-history.md`):** delete in 2.0.0 (moved from 0.10.0 by the 1.0.0 release) only after 0.9.0 has been out a few weeks, the npm download split has been re-checked, the read-only `migration` inventory is kept, and the owner decides. Not met: 2.0.0 is not scheduled and there is no owner decision. Until then `npx agentos-for-projects@1 doctor --fix` (or `@0.9`) is the documented migration route for very old workspaces.

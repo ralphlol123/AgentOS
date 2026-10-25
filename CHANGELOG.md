@@ -4,7 +4,13 @@ All notable changes to AgentOS for Projects are documented here.
 
 ## [Unreleased]
 
-**AgentOS v1** (stacked branches `feat/v1-cleanup` … `feat/v1-final`, PRs #46–#51 plus the final branch; not released, no version bump — the release is the owner's decision). Five priorities — task-specific context, checkpoints and resume, a managed Project Brain, agent manifests with an engine capability matrix, optional Obsidian — plus correctness fixes, validated by a real cross-engine trial (Claude Code 2.1.310 ⇄ Codex 0.156.1, n=1; `docs/evidence/2026-10-25-cross-engine/`). Adoption is opt-in per command; a 0.9.0 workspace keeps working unchanged (`docs/migration.md`). Acceptance per priority and scenario: `docs/acceptance-matrix.md` (27 PASS, 0 FAIL, 0 BLOCKED after the closure re-trials T6–T8; n=1 per probe, T7 n=2 + controls). Backlog: `docs/improve-later.md`.
+## [1.0.0] - 2026-10-25
+
+**AgentOS v1** (PRs #52 and #53, built from the stacked slices #46–#51).
+
+**Deprecation retargeted:** the legacy upgrade paths deprecated in 0.9.0 are still present and still deprecated; their removal moves from 0.10.0 to 2.0.0 (removing flags inside 1.x would break semver). The whole 1.x line keeps them, so the migration route is now `npx agentos-for-projects@1 doctor --fix` (`@0.9` still works). Deprecation notices and `migration.deprecations[].removed_in` / `last_supporting` change to `2.0.0` / `1`.
+
+ Five priorities — task-specific context, checkpoints and resume, a managed Project Brain, agent manifests with an engine capability matrix, optional Obsidian — plus correctness fixes, validated by a real cross-engine trial (Claude Code 2.1.310 ⇄ Codex 0.156.1, n=1; `docs/evidence/2026-10-25-cross-engine/`). Adoption is opt-in per command; a 0.9.0 workspace keeps working unchanged (`docs/migration.md`). Acceptance per priority and scenario: `docs/acceptance-matrix.md` (27 PASS, 0 FAIL, 0 BLOCKED after the closure re-trials T6–T8; n=1 per probe, T7 n=2 + controls). Backlog: `docs/improve-later.md`.
 
 ### Fixed
 
