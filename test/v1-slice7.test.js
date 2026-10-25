@@ -68,7 +68,7 @@ async function workspace(t, { gitRoot = false, scope = 'task_scope:\n  read: [ap
 const TRUST = /Claude Code ignores `\.claude\/settings\.local\.json` until the workspace is trusted; run `claude` interactively once or set `projects\[<root>\]\.hasTrustDialogAccepted`/;
 const rules = (path, tools = ['Edit', 'Write', 'NotebookEdit']) => tools.map((tool) => `${tool}(/${path})`);
 /** Root entries every sibling-enumerated deny list carries for this fixture (closure fix; see v1-claude-deny-siblings.test.js). */
-const ROOT_DENY = [...rules('*', ['Edit', 'Write']), ...rules('.agentos/agents/**'), ...rules('.agentos/project.yaml'), ...rules('.claude/**'), ...rules('.claude/settings.json', ['Edit', 'Write']), ...rules('.claude/settings.local.json', ['Edit', 'Write']), ...rules('.hermes.md'), ...rules('AGENTS.md'), ...rules('CLAUDE.md')];
+const ROOT_DENY = [...rules('.agentos/agents/**'), ...rules('.agentos/project.yaml'), ...rules('.claude/**'), ...rules('.claude/settings.json', ['Edit', 'Write']), ...rules('.claude/settings.local.json', ['Edit', 'Write']), ...rules('.hermes.md'), ...rules('AGENTS.md'), ...rules('CLAUDE.md')];
 const DENY_API = [...ROOT_DENY, ...rules('api/**'), ...rules('api/contracts/openapi.yaml')];
 
 test('D1: sync claude-code denies every repo and read path outside the edit scope, keeps the allow entry, prints the trust note; a read-only role denies everything', async (t) => {
@@ -100,7 +100,7 @@ test('D1: an existing different deny list refuses the sync with zero writes; an 
   const before = await snapshot(root);
   const conflict = cli(['agents', 'sync', 'claude-code'], root);
   fails(conflict);
-  assert.match(conflict.stdout, /permissions\.deny: existing \["Bash\(rm:\*\)"\] != proposed \["Edit\(\/\*\)"/);
+  assert.match(conflict.stdout, /permissions\.deny: existing \["Bash\(rm:\*\)"\] != proposed \["Edit\(\/\.agentos\/agents\/\*\*\)"/);
   assert.match(conflict.stdout, /Nothing was written/);
   assert.deepEqual(await snapshot(root), before, 'conflict: zero writes');
 
@@ -121,23 +121,30 @@ test('D1/codex: sync codex prints that Codex enforces only its launch-time sandb
 test('matrix: claude-code and codex rows match the 2026-10-25 trial; every verified cell carries report evidence', async () => {
   const { out } = json(['engines'], process.cwd());
   const claude = out.matrix['claude-code'], codex = out.matrix.codex;
+  const CLOSURE = /docs\/evidence\/2026-10-25-cross-engine\/closure\/REPORT-closure\.md#/;
   assert.equal(claude.permission_enforcement.status, 'verified');
   assert.match(claude.permission_enforcement.evidence, /docs\/evidence\/2026-10-25-cross-engine\/REPORT\.md#T3/);
-  assert.match(claude.permission_enforcement.evidence, /listed-path deny rules in a trusted workspace/);
-  assert.match(claude.permission_enforcement.evidence, /sibling enumeration added 2026-10-25; host re-trial pending \(Phynceon\)/);
-  assert.match(claude.permission_enforcement.evidence, /Shell writes: advisory/);
+  assert.match(claude.permission_enforcement.evidence, /Verified in a trusted workspace/);
+  assert.match(claude.permission_enforcement.evidence, new RegExp(`${CLOSURE.source}T6c`)); // siblings + Bash redirect to a denied path
+  assert.match(claude.permission_enforcement.evidence, new RegExp(`${CLOSURE.source}T6d`)); // read-only deny-all
+  assert.match(claude.permission_enforcement.evidence, /Residual, advisory: root files\/dirs created after sync/);
+  assert.doesNotMatch(claude.permission_enforcement.evidence, /re-trial pending|\(\/\*\)/);
   assert.equal(claude.tool_restrictions.status, 'verified');
   assert.match(claude.tool_restrictions.evidence, /launch-time --allowedTools; see T1\/T2/);
+  assert.match(claude.tool_restrictions.evidence, /manifest tools: rendering added 2026-10-25; consumption by the subagent untested \(host re-trial pending\)/);
   assert.equal(codex.permission_enforcement.status, 'verified');
   assert.match(codex.permission_enforcement.evidence, /launch-time sandbox: --sandbox read-only refuses writes; per-path scope unsupported/);
   assert.match(codex.permission_enforcement.evidence, /REPORT\.md#T4/);
   assert.equal(codex.tool_restrictions.status, 'unsupported');
-  assert.equal(out.matrix['claude-code'].native_agent_config.status, 'verified'); // T5: discovery of the synced .claude/agents file
-  assert.match(out.matrix['claude-code'].native_agent_config.evidence, /discovery only.*REPORT\.md#T5/);
-  assert.equal(out.matrix.codex.native_agent_config.status, 'unverified');
+  assert.equal(claude.native_agent_config.status, 'verified'); // T5 discovery + T8 invocation/instruction-following
+  assert.match(claude.native_agent_config.evidence, /REPORT\.md#T5/);
+  assert.match(claude.native_agent_config.evidence, new RegExp(`${CLOSURE.source}T8`));
+  assert.match(claude.native_agent_config.evidence, /tools: consumption untested/);
+  assert.equal(codex.native_agent_config.status, 'verified'); // T7: instruction-following, advisory
+  assert.match(codex.native_agent_config.evidence, new RegExp(`instruction-following \\(advisory; the user prompt wins\\).*2\\/2.*${CLOSURE.source}T7`));
   for (const [engine, rows] of Object.entries(out.matrix)) {
     for (const [key, value] of Object.entries(rows)) {
-      if (value.status === 'verified') assert.match(value.evidence, /docs\/evidence\/2026-10-25-cross-engine\/REPORT\.md#T\d/, `${engine}.${key}`);
+      if (value.status === 'verified') assert.match(value.evidence, /docs\/evidence\/2026-10-25-cross-engine\/(REPORT|closure\/REPORT-closure)\.md#T\d/, `${engine}.${key}`);
     }
   }
   assert.ok(existsSync(resolve('docs/evidence/2026-10-25-cross-engine/REPORT.md')), 'evidence copied into the repo');

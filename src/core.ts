@@ -1951,11 +1951,11 @@ type DenyTarget = { path: string; dir: boolean; tools?: string[] };
 
 /** Claude Code deny targets for an edit scope: everything outside it. Deny wins over allow, so "deny /** + allow a
  *  subset" cannot work; instead, for each edit path, every entry at each ancestor level that is not on the way to an
- *  edit path (and not inside one) is denied, plus the listed repo/read paths outside the scope. Root-level new files:
- *  Edit/Write(/*). Always: the settings files (a session must not lift its own rules) and the scope/role definitions
+ *  edit path (and not inside one) is denied, plus the listed repo/read paths outside the scope. No `/*` rule: Claude
+ *  Code matches it recursively and it denied the edit scope too (host re-trial T6b). Always: the settings files (a session must not lift its own rules) and the scope/role definitions
  *  (.agentos/project.yaml, .agentos/agents/**); the rest of .agentos/ stays writable (handoff/tasks/checkpoints).
- *  ponytail: snapshot of the tree at sync time; entries created later (and new files directly inside an ancestor such
- *  as web/) are not covered until a re-sync. */
+ *  ponytail: snapshot of the tree at sync time; entries created later (new root files/dirs, new files directly inside
+ *  an ancestor such as web/) are not covered until a re-sync (T6c residual; --require-enforcement reports STALE). */
 async function claudeDenyTargets(root: string, edit: Array<{ path: string; dir: boolean }>, listed: DenyTarget[]): Promise<DenyTarget[]> {
   const within = (path: string, base: string) => base === '.' || path === base || path.startsWith(`${base}/`);
   const kept = (path: string) => edit.some((e) => within(path, e.path) || within(e.path, path));
@@ -1976,7 +1976,6 @@ async function claudeDenyTargets(root: string, edit: Array<{ path: string; dir: 
     }
   }
   if (!kept('.claude')) add({ path: '.claude', dir: true }); // sync itself creates .claude/: deny it whether or not it exists yet
-  if (!edit.some((e) => e.path === '.')) add({ path: '*', dir: false, tools: ['Edit', 'Write'] });
   for (const path of ['.claude/settings.json', '.claude/settings.local.json']) add({ path, dir: false, tools: ['Edit', 'Write'] });
   add({ path: '.agentos/project.yaml', dir: false });
   add({ path: '.agentos/agents', dir: true });
@@ -2059,7 +2058,7 @@ async function syncAgentsUnlocked(root: string, options: any) {
     }
     plans.push({ path: file.path, abs, next, action: current === null ? 'create' : next === current ? 'unchanged' : 'update' });
   }
-  const head = [`AgentOS agents sync ${engine}${options.dryRun ? ' dry run' : ''}`, `Role: ${role}; edit scope: ${bundle.scope.edit.join(', ') || '(none; read-only)'}`];
+  const head = [`AgentOS agents sync ${engine}${options.dryRun ? ' dry run' : ''}`, `Role: ${role}; edit scope: ${bundle.scope.edit.join(', ') || '(none; read-only)'}`, ...files.flatMap((file) => file.warnings ?? []).map((warning) => `Warning: ${warning}`)];
   const enforcement = adapter.capabilities.permission_enforcement;
   const caveat = [`Generated configuration is not proof of enforcement on its own: permission_enforcement is ${enforcement.status} for ${engine}${enforcement.edit_scope ? `; edit scope is ${enforcement.edit_scope}` : ''} (agentos engines).`, ...(adapter.syncNote ? [adapter.syncNote] : [])].join('\n');
   if (conflicts.length) return { ok: false, conflicts, text: [...head, 'REFUSED (existing values conflict; add-keys-only):', ...conflicts.map((c) => `- ${c}`), 'Nothing was written.'].join('\n') };

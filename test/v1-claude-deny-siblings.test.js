@@ -30,7 +30,7 @@ async function snapshot(dir) {
 }
 
 /** The probe fixture: web/src, web/tests, web/package.json, api/contracts, docs/adr, root .env.example, .agentos/, .claude/. */
-async function workspace(t) {
+async function workspace(t, edit = 'web/src') {
   const base = await mkdtemp(join(tmpdir(), 'agentos-v1deny-'));
   t.after(() => rm(base, { recursive: true, force: true }));
   const root = join(base, 'ws');
@@ -46,14 +46,13 @@ async function workspace(t) {
   await writeFile(join(root, '.env.example'), 'X=\n');
   await initAgentOS({ cwd: root, mode: 'existing', yes: true, agents: 'minimal' });
   await writeFile(join(root, '.agentos/handoff.md'), '# Handoff\n\n## Current objective\n\nShip the greeting feature.\n');
-  await writeFile(join(root, '.agentos/project.yaml'), `${await read(root, '.agentos/project.yaml')}task_scope:\n  read: [web, api/contracts/openapi.yaml, docs/adr]\n  edit: [web/src]\n`);
+  await writeFile(join(root, '.agentos/project.yaml'), `${await read(root, '.agentos/project.yaml')}task_scope:\n  read: [web, api/contracts/openapi.yaml, docs/adr]\n  edit: [${edit}]\n`);
   ok(cli(['agents', 'add', 'developer'], root));
   return root;
 }
 
 const rules = (path, tools = ['Edit', 'Write', 'NotebookEdit']) => tools.map((tool) => `${tool}(/${path})`);
 const EXPECTED_DENY = [
-  ...rules('*', ['Edit', 'Write']),
   ...rules('.agentos/agents/**'),
   ...rules('.agentos/project.yaml'),
   ...rules('.claude/**'),
@@ -138,4 +137,58 @@ test('context claude-code --require-enforcement: UNSUPPORTED without synced rule
     fails(r);
     assert.match(r.stdout, /^AgentOS context: UNSUPPORTED/);
   }
+});
+
+
+// --- closure 2 (host re-trial T6b/T6c/T8, 2026-10-25) ------------------------------------------------
+
+/** Does a generated rule `Tool(/pattern)` cover the workspace path `rel`? Only exact paths and `<dir>/**` occur. */
+const covers = (rule, rel) => {
+  const pattern = /^\w+\(\/(.*)\)$/.exec(rule)[1];
+  return pattern === '**' || pattern === rel || (pattern.endsWith('/**') && rel.startsWith(pattern.slice(0, -2)));
+};
+
+test('closure 2: no (/*) rule is ever generated (Claude Code matches it recursively, T6b) and web/src is never denied', async (t) => {
+  for (const edit of ['web/src', 'web', 'web/src/a.js', '.']) {
+    const root = await workspace(t, edit);
+    ok(cli(['agents', 'sync', 'claude-code'], root));
+    const { deny } = JSON.parse(await read(root, '.claude/settings.local.json')).permissions;
+    for (const rule of deny) {
+      assert.doesNotMatch(rule, /\(\/\*\)/, `${edit}: ${rule}`);
+      assert.match(rule, /^(Edit|Write|NotebookEdit)\(\/[^*]*(\/\*\*)?\)$/, `${edit}: only exact paths and <dir>/** (${rule})`);
+      for (const rel of ['web/src/a.js', 'web/src/new/deep.js']) if (rel.startsWith(edit === '.' ? '' : edit)) assert.ok(!covers(rule, rel), `${edit}: ${rule} denies ${rel}`);
+    }
+  }
+});
+
+const setTools = async (root, role, tools) => {
+  const path = `.agentos/agents/${role}.md`;
+  const card = await read(root, path);
+  assert.match(card, /^tools_requested: \[\]$/m);
+  await writeFile(join(root, path), card.replace(/^tools_requested: \[\]$/m, `tools_requested: [${tools.join(', ')}]`));
+};
+const front = async (root, role) => /^---\n([\s\S]*?)\n---\n/.exec(await read(root, `.claude/agents/${role}.md`))[1];
+
+test('closure 2: tools_requested renders the Claude subagent tools: frontmatter (AgentOS names mapped, unknown passed through with a warning)', async (t) => {
+  const root = await workspace(t);
+  await setTools(root, 'developer', ['read', 'Edit', 'write', 'bash', 'grep', 'glob', 'GREP', 'mcp__fs__list']);
+  const r = cli(['agents', 'sync', 'claude-code'], root);
+  ok(r);
+  assert.equal(await front(root, 'developer'), 'name: developer\ndescription: "Implement scoped changes and their tests inside the assigned repo, using the relevant frontend or backend skills."\ntools: Read, Edit, Write, Bash, Grep, Glob, mcp__fs__list');
+  assert.match(r.stdout, /^Warning: tools_requested "mcp__fs__list" is not a known AgentOS tool name; passed through verbatim to \.claude\/agents\/developer\.md tools:$/m);
+  assert.doesNotMatch(r.stdout, /Warning: tools_requested "(read|Edit|GREP)"/);
+});
+
+test('closure 2: no tools: line without tools_requested; read-only roles default to Read, Grep, Glob unless the manifest says otherwise', async (t) => {
+  const root = await workspace(t);
+  ok(cli(['agents', 'sync', 'claude-code'], root));
+  assert.doesNotMatch(await front(root, 'developer'), /^tools:/m, 'edit role without tools_requested: Claude default (all tools)');
+  ok(cli(['agents', 'add', 'reviewer', '--replace'], root));
+  await rm(join(root, '.claude'), { recursive: true });
+  ok(cli(['agents', 'sync', 'claude-code', '--role', 'reviewer'], root));
+  assert.match(await front(root, 'reviewer'), /\ntools: Read, Grep, Glob$/);
+  await setTools(root, 'reviewer', ['read', 'bash']);
+  await rm(join(root, '.claude'), { recursive: true });
+  ok(cli(['agents', 'sync', 'claude-code', '--role', 'reviewer'], root));
+  assert.match(await front(root, 'reviewer'), /\ntools: Read, Bash$/);
 });
