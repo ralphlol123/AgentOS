@@ -1,12 +1,12 @@
-/** Deprecation of the legacy upgrade paths (0.9.0; removal planned for 0.10.0).
+/** Deprecation of the legacy upgrade paths (0.9.0; removal planned for 2.0.0).
  *
  * Nothing here changes behavior. A notice appears only when a legacy path actually triggers, or when a
  * deprecated flag or command is used, so a clean workspace's output is unchanged. The text always names
  * the release that can still do the migration, so removal never strands a workspace: run that version
  * once, then upgrade.
  */
-export const REMOVED_IN = '0.10.0';
-export const LAST_SUPPORTING = '0.9';
+export const REMOVED_IN = '2.0.0';
+export const LAST_SUPPORTING = '1';
 export const RUN_LAST_SUPPORTING = `npx agentos-for-projects@${LAST_SUPPORTING}`;
 
 export type DeprecationArea = 'adapters' | 'retired-cards' | 'repo-ids' | 'migrate-claude';

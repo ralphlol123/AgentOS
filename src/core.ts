@@ -3374,7 +3374,7 @@ const MIGRATION_NEXT: Record<string, string> = {
   conflict: 'resolve manually, then re-run `agentos doctor --fix`',
 };
 
-// 0.9.0 deprecation of the legacy upgrade paths (removal planned for 0.10.0). Reporting only: no
+// 0.9.0 deprecation of the legacy upgrade paths (removal planned for 2.0.0). Reporting only: no
 // behavior changes, and a clean workspace gets no notice at all. See src/legacy-deprecation.ts.
 const WHY_DETECTED = {
   adapters: 'This workspace has an adapter file in a pre-managed-block format.',
