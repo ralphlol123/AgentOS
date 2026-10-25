@@ -127,7 +127,9 @@ test('matrix: claude-code and codex rows match the 2026-10-25 trial; every verif
   assert.match(codex.permission_enforcement.evidence, /launch-time sandbox: --sandbox read-only refuses writes; per-path scope unsupported/);
   assert.match(codex.permission_enforcement.evidence, /REPORT\.md#T4/);
   assert.equal(codex.tool_restrictions.status, 'unsupported');
-  for (const engine of ['claude-code', 'codex']) assert.equal(out.matrix[engine].native_agent_config.status, 'unverified');
+  assert.equal(out.matrix['claude-code'].native_agent_config.status, 'verified'); // T5: discovery of the synced .claude/agents file
+  assert.match(out.matrix['claude-code'].native_agent_config.evidence, /discovery only.*REPORT\.md#T5/);
+  assert.equal(out.matrix.codex.native_agent_config.status, 'unverified');
   for (const [engine, rows] of Object.entries(out.matrix)) {
     for (const [key, value] of Object.entries(rows)) {
       if (value.status === 'verified') assert.match(value.evidence, /docs\/evidence\/2026-10-25-cross-engine\/REPORT\.md#T\d/, `${engine}.${key}`);
@@ -197,4 +199,16 @@ test('D2: sensitive paths stay omitted in a nested dir; a dir outside any work t
 test('D3: checkpoint ignores a bare `.` positional', async (t) => {
   const { root } = await workspace(t, { gitRoot: true });
   ok(cli(['checkpoint', '--task', TASK, '--progress', 'p', '.'], root));
+});
+
+test('nested start: context, checkpoint and resume run from inside a child directory and find the parent workspace', async (t) => {
+  const { root } = await workspace(t, { gitRoot: true });
+  const web = join(root, 'web');
+  const context = cli(['context', 'codex', '--task', TASK], web);
+  ok(context);
+  assert.match(context.stdout, /^## Objective/m);
+  const { out } = json(['checkpoint', '--task', TASK, '--progress', 'from web/'], web);
+  assert.equal(out.record.project.root, root);
+  assert.ok(out.record.repos.every((repo) => repo.available));
+  assert.equal(json(['resume', '--task', TASK], web).out.reconciliation.status, 'clean');
 });

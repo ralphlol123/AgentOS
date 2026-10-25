@@ -293,7 +293,7 @@ test('remove refuses while referenced (enabled, capabilities, current checkpoint
 
 // --- E3 engines --------------------------------------------------------------------------------------
 
-test('agentos engines --json: five engines, exactly the six rows each, statuses from the closed set, nothing verified', async (t) => {
+test('agentos engines --json: five engines, exactly the six rows each, statuses from the closed set, verified only with a trial section', async (t) => {
   const { root } = await workspace(t);
   const { r, out } = json(['engines'], root);
   ok(r);

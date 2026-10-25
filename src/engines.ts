@@ -102,7 +102,7 @@ const ADAPTERS: EngineAdapter[] = [
   {
     id: 'claude-code', render: renderWith, capabilities: {
       context_rendering: advisoryContext('CLAUDE.md', true),
-      native_agent_config: row('unverified', `\`agentos agents sync claude-code\` writes .claude/agents/<id>.md; the 2026-10-25 trial did not observe Claude Code loading it (${REPORT}).`),
+      native_agent_config: row('verified', `Verified for discovery only: after \`agentos agents sync claude-code\`, Claude Code 2.1.310 listed the synced agent from .claude/agents/<id>.md in a trusted workspace (${REPORT}#T5, n=1). Invoking the subagent and its tools: list were not tested.`),
       tool_restrictions: row('verified', `Verified (launch-time --allowedTools; see T1/T2): \`claude -p --allowedTools Read,Edit,Write,Bash(node:*),Bash(cd:*)\` blocked Bash git in Claude Code 2.1.310 (${REPORT}#T1, n=1). AgentOS passes no launch flags; the manifest tools_requested -> subagent tools: list is not covered (native_agent_config unverified).`),
       permission_enforcement: {
         ...row('verified', `Verified for deny rules in a trusted workspace: with hasTrustDialogAccepted and permissions.deny [Edit(/api/**), Write(/api/**)], Claude Code 2.1.310 refused an edit under api/ and allowed web/ (${REPORT}#T3, T3b, n=1). Allow-only rules or an untrusted workspace do not restrict (T3a). \`agents sync claude-code\` writes deny rules for every repo/read path outside the edit scope.`),

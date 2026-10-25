@@ -15,10 +15,44 @@ Deliver a working v1 of the five AgentOS priorities — context builder, checkpo
 | 3 | Checkpoints and resume (section C) | Done; reviewed, pushed to `origin/feat/v1-checkpoint` (`2e3374b`), PR #48 (stacked on #47), not merged |
 | 4 | Managed Project Brain (section D) | Done; reviewed, pushed to `origin/feat/v1-brain` (`bfd97d8`), PR #49 (stacked on #48), not merged |
 | 5 | Agent manifests, lifecycle + engine capability matrix (section E) | Done; reviewed, pushed to `origin/feat/v1-agents` (`19a7806`), PR #50 (stacked on #49), not merged |
-| 6 | Optional Obsidian on Brain storage + manifests from init (section F) | Done on `feat/v1-obsidian` (stacked on `feat/v1-agents`), awaiting review; not pushed |
-| 7 | v1 end-to-end validation (title assumed; confirm against the slice 7 card) | Not started |
+| 6 | Optional Obsidian on Brain storage + manifests from init (section F) | Done; reviewed, pushed to `origin/feat/v1-obsidian` (`d3010d9`), PR #51 (stacked on #50), not merged |
+| 7 | Trial defects (D1 Claude deny rules, D2 nested work trees, D3 bare `.`), verified matrix, docs, migration + acceptance matrix, backlog | Done on `feat/v1-final` (stacked on `feat/v1-obsidian`), two local commits, not pushed; awaiting review |
 
-**Next exact action: review slice 6, then slice 7 (v1 end-to-end validation).** Slice 6 left `obsidianBinding()` / `obsidianIndexWarnings()` (`src/core.ts`) and `VaultBinding` / `classify()` / `vaultUnavailable()` / `brainMissing()` (`src/brain.ts`); `loadBrain(root, repos, vault)` walks the linked folder only when `canonical: vault`. Slice 5 left `parseAgentCard()` / `validateAgentManifest()` / `effectiveEditScope()` (`src/agents.ts`) and `ENGINE_ADAPTERS` / `engineAdapter()` / `advisories()` (`src/engines.ts`); a recorded engine trial changes a row there. Earlier: slice 2 left `buildContextBundle()` / `assertContextBundle()` (`src/context-builder.ts`); slice 3 left `assertCheckpoint()`, `loadCurrent()` and `workspaceState()` (`src/checkpoint.ts`); slice 4 left `loadBrain()`, `parseRecord()`, `patchFrontmatter()`, `brainContextRecords()` (`src/brain.ts`) and the shared matcher `taskTerms()` / `termHits()` / `subjectOf()` (`src/context-builder.ts`). Slice 6 (Obsidian) can build on `loadBrain`/`patchFrontmatter`: storage is plain Markdown + frontmatter with workspace-relative paths, no engine-specific code.
+**Next exact action: review slice 7 on `feat/v1-final`; then the owner merges the stack and decides the release.** See the completion statement below.
+
+## Completion statement
+
+v1 is complete pending owner review. All five priorities and the cleanup slice are implemented, tested (709/709 on `feat/v1-final`) and documented; the real-engine trial of 2026-10-25 (`docs/evidence/2026-10-25-cross-engine/REPORT.md`, n=1) passed both continuity directions and its three defects are fixed with tests that fail on `d3010d9`. Acceptance (`docs/acceptance-matrix.md`): 26 rows, **25 PASS, 0 FAIL, 1 partially BLOCKED (S19 Codex half)** after the post-fix re-trial T5. The BLOCKED gates need a host engine run, not code: S19 engine-native agent config consumption (`native_agent_config` stays `unverified`) and S20 a re-trial of the deny rules exactly as the fixed `agents sync claude-code` writes them. Still GATED: deletion of the deprecated migration writers (owner decision, unchanged). Owner actions: review/push `feat/v1-final`, merge PRs #46–#51 and the final PR in order, choose the version and release, decide this repo's three legacy agent cards. No open defects; refinements are in `docs/improve-later.md`. Slice 6 left `obsidianBinding()` / `obsidianIndexWarnings()` (`src/core.ts`) and `VaultBinding` / `classify()` / `vaultUnavailable()` / `brainMissing()` (`src/brain.ts`); `loadBrain(root, repos, vault)` walks the linked folder only when `canonical: vault`. Slice 5 left `parseAgentCard()` / `validateAgentManifest()` / `effectiveEditScope()` (`src/agents.ts`) and `ENGINE_ADAPTERS` / `engineAdapter()` / `advisories()` (`src/engines.ts`); a recorded engine trial changes a row there. Earlier: slice 2 left `buildContextBundle()` / `assertContextBundle()` (`src/context-builder.ts`); slice 3 left `assertCheckpoint()`, `loadCurrent()` and `workspaceState()` (`src/checkpoint.ts`); slice 4 left `loadBrain()`, `parseRecord()`, `patchFrontmatter()`, `brainContextRecords()` (`src/brain.ts`) and the shared matcher `taskTerms()` / `termHits()` / `subjectOf()` (`src/context-builder.ts`). Slice 6 (Obsidian) can build on `loadBrain`/`patchFrontmatter`: storage is plain Markdown + frontmatter with workspace-relative paths, no engine-specific code.
+
+## Slice 7 — trial defects, verified matrix, docs
+
+Read first: Phynceon's trial report (copied to `docs/evidence/2026-10-25-cross-engine/`, `claude-run1.err` omitted because it names the host home directory). `src/engines.ts`: `claudeSettingsFragment(edit, outside)` (allow + deny), `CLAUDE_TRUST_NOTE`, adapter `syncNote`, `permission_enforcement.edit_scope`, `advisories()` per condition; trial rows. `src/core.ts`: `syncAgentsUnlocked` computes `outside` (repo + read paths not covered by and not containing an edit path) and prints the note; `contextAgentOS --require-enforcement` refuses conditional enforcement. `src/checkpoint.ts` `repoState()`: enclosing work tree via `rev-parse --show-prefix`, pathspec-limited git calls, directory-relative paths, `state: enclosing-worktree`. `src/git-evidence.ts`: optional pathspec. `src/cli.ts`: bare `.` ignored by `checkpoint`. Docs: README "v1 workflow"/"Documentation"/"Engines", `docs/engines.md` (rewritten), `docs/checkpoints.md`, new `docs/migration.md`, `docs/acceptance-matrix.md`, `docs/improve-later.md`, CHANGELOG.
+
+Decisions taken in this slice (assumptions, revisit in review):
+
+- Deny targets = repo paths + read-scope paths outside the edit scope, `/<dir>/**` or `/<file>`; a path that contains an edit path is not denied (deny beats allow), so siblings of a nested edit path stay editable (backlog). Read paths inside a denied repo are listed too (literal reading of the card).
+- The trust note is printed by `agents sync claude-code` (dry run and real); the Codex advisory by `agents sync codex`.
+- `permission_enforcement` gains an optional `edit_scope` string; `--require-enforcement` still fails for every engine because the condition (synced deny rules + trust, launch flags) cannot be checked from `context`. The ADVISORY line for claude-code/codex states the condition instead of "instruction-only".
+- D2 paths in `changed_paths` are relative to the child directory (same as a child repo), so slice-3 assertions hold on both layouts. HEAD is the enclosing repo's: a commit anywhere moves `head` for every directory of that work tree (documented; refinement in backlog).
+- D3: every bare `.` positional is dropped (not only a trailing one).
+- Evidence: transcripts without host paths are included (JSON/log/out), not only the prompts, so the T1–T4 claims can be checked from the repo.
+- The goal document's verification table was not available in the sandbox; the acceptance rows follow the slice-7 card's enumeration, plus S17–S20 for the engine-enforcement claims.
+- The usage-vs-handler and doc-link tests live in `test/v1-slice7-docs.test.js` so the G1 commit stays green on its own.
+
+## Slice 7 — acceptance evidence
+
+| Command | Where | Exit | Result |
+|---|---|---|---|
+| `npm test` | `feat/v1-final` start (= `d3010d9`) | 0 | 699 / 699 (slice 6 final) |
+| `node --test test/v1-slice7.test.js test/v1-slice7-docs.test.js` (final test files) against `d3010d9` dist | detached worktree `/tmp/aos-d3010d9` | 1 | 10 tests, 1 pass (usage-vs-handler guard), 9 fail: D1 ×3 (no trust note / no deny / no Codex advisory), matrix (`permission_enforcement` `unverified`), D2 ×2 (`available: false`, `not the top of a git work tree`), D3 (usage line), nested start (repos unavailable), doc links (`docs/migration.md` etc. missing) |
+| `npm test` on G1 commit `f091502` (docs test file set aside) | `feat/v1-final` | 0 | 706 / 706 |
+| dogfood: 0.9.0 (`3c03372`) `init --existing` on a root git repo with `web/`, `api/`; v1 `doctor`, `doctor --json`, `doctor --fix --dry-run`, `checkpoint --dry-run .`, `context codex` from `web/` | `/tmp/s7-old-*` | 0 | doctor OK, only new output = 4 legacy-card diagnostics with commands; adapters `noop`; checkpoint `api (enclosing work tree) main@… ; web (enclosing work tree) main@…`; context from `web/` ends with the codex ADVISORY; `git status` empty |
+| `npm run check` | final | 0 | |
+| `npm test` | final | 0 | FINAL_TEST |
+| `npm run smoke` | final | 0 | |
+| `npm run test:metadata` | final | 0 | |
+| `npm pack --dry-run` | final | 0 | FINAL_PACK |
+| `node dist/cli.js doctor --json` | final | 0 | `"ok": true`, `problems: []`; diagnostics list three legacy cards (developer, tester, release-manager) |
 
 ## Slice 6 — optional Obsidian on Brain storage, manifests from init
 
@@ -221,6 +255,9 @@ The developer sandbox has no `bun` on PATH (bun is installed on the host); every
 
 ## Improve Later backlog
 
+Consolidated with slice 7 into `docs/improve-later.md` (defects vs refinements); this list is the slice 1–6 record.
+
+
 - The doctor warning `engines.allowed does not list opencode` is informational noise for owners who limited engines on purpose; consider dropping it or phrasing it as a note.
 - `task_scope` is read from project.yaml (one task at a time). Slice 2 added a per-invocation narrowing (`agentos context --scope`); enforcement is still prompt-level only, nothing blocks an engine from editing outside it.
 - `task_scope` entries are not checked for existence by `doctor` (a path or repo ID that does not exist is accepted); `agentos context` lists a missing scope path under `missing`. Add a doctor warning if it bites.
@@ -253,7 +290,7 @@ The developer sandbox has no `bun` on PATH (bun is installed on the host); every
 - Agents: existing legacy cards are never upgraded automatically (slice 6 only changed newly generated cards); a release note should tell owners to run `agents manifest`.
 - Agents: `knowledge_selectors` and `skills` are recorded but not used by the context builder.
 - Agents: `agents sync claude-code` refuses an existing `.claude/agents/<id>.md` with different bytes (no managed marker, no `--replace`); re-syncing after a card edit needs the file moved first.
-- Engines: every row is `verified`-free until Phynceon's trial (`docs/engines.md`); `launch` is unsupported everywhere (no `agentos run`).
+- Engines: (resolved in slice 7) trial rows recorded; `launch` is unsupported everywhere (no `agentos run`).
 - Brain: record files are discovered only directly by frontmatter; a Markdown file with `id: brain:` copied from elsewhere becomes a record (reported `invalid` if its `sources` does not list it).
 - Obsidian: the index note is written once and never refreshed; add `obsidian index --refresh` (rewrite only an unmodified generated note) if stale indexes bite.
 - Obsidian: index links from a vault note to workspace records are relative paths outside the vault; Obsidian may not open them.

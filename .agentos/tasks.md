@@ -1,25 +1,22 @@
 # Tasks
 
-Active scope: AgentOS v1 (seven slices). Plan, decisions, evidence and backlog: `.agentos/plans/2026-10-25-v1-priorities.md`. Earlier task history (simplification audit, 0.4-0.9 releases): `.agentos/runs/2026-10-25-v1-slice1-history.md`.
+Active scope: AgentOS v1 (seven slices) — complete pending owner review. Plan, decisions, evidence and completion statement: `.agentos/plans/2026-10-25-v1-priorities.md`. Slice 1–6 task list: `.agentos/runs/2026-10-25-v1-slice6-tasks.md`; earlier history: `.agentos/runs/2026-10-25-v1-slice1-history.md`.
 
 ## Done
 
-- [x] Slice 1 on `feat/v1-cleanup` (pushed, PR #46): objective resolver parity in `prompt`; broken objective state fails `prompt`/`status`/`doctor` alike; `task_scope` read/edit contract; `doctor --fix` keeps `engines.allowed`; dead code removed with unused-code compiler flags on; docs facts tested against source. 631/631 tests.
-- [x] Slice 2 on `feat/v1-context` (pushed, PR #47): read-only `agentos context` task-specific context builder (`src/context-builder.ts`). 647/647 tests.
-- [x] Slice 3 on `feat/v1-checkpoint` (pushed, PR #48): `agentos checkpoint` / `resume` with immutable records, receipts and reconciliation (`src/checkpoint.ts`). 664/664 tests.
-- [x] Slice 4 on `feat/v1-brain` (pushed, PR #49): managed Project Brain, `agentos brain …` (`src/brain.ts`). 680/680 tests.
-- [x] Slice 5 on `feat/v1-agents` (pushed, PR #50): agent manifests, lifecycle, engine capability matrix (`src/agents.ts`, `src/engines.ts`). 693/693 tests.
-- [x] Slice 6 on `feat/v1-obsidian`: optional Obsidian as a second Brain location (`agentos obsidian init|link`, canonical location, vault-relative identity, boundary, unavailable handling) + manifests on generated cards. 699/699 tests. Awaiting review; not pushed.
+- [x] Slices 1–6 (PRs #46–#51, stacked, not merged): cleanup, `agentos context`, `checkpoint`/`resume`, `agentos brain`, agent manifests + `agentos engines`, optional Obsidian. 699/699 tests at slice 6.
+- [x] Slice 7 on `feat/v1-final`: trial defects D1–D3 fixed, trial-backed capability matrix, README v1 workflow, `docs/migration.md`, `docs/acceptance-matrix.md`, `docs/improve-later.md`, CHANGELOG v1 entry. 709/709 tests.
 
 ## Now
 
-- [ ] Review slice 6; Phynceon's cross-engine trial (`docs/engines.md`) fills the verified column.
+- [ ] Owner/Phynceon: review `feat/v1-final`, push, open its PR stacked on #51.
 
 ## Next
 
-- [ ] Slice 7: v1 end-to-end validation.
+- [ ] Owner: merge #46–#51 + the final PR in order; choose the version and release.
+- [ ] Host engine trial for the BLOCKED rows S19/S20 (`docs/acceptance-matrix.md`).
 - [ ] Upgrade-machinery deletion (0.10.0): GATED, owner decision.
 
 ## Later
 
-- [ ] Improve Later backlog in the v1 plan file.
+- [ ] Optional refinements in `docs/improve-later.md`.

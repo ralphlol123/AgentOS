@@ -248,6 +248,51 @@ agentos prompt hermes
 
 More detail: [docs/quickstart.md](docs/quickstart.md).
 
+## v1 workflow
+
+The path below is the one Phynceon's 2026-10-25 cross-engine trial walked (Claude Code 2.1.310 → Codex 0.156.1 and back, on a disposable root repo with `web/`, `api/`, `docs/adr/`; [report](docs/evidence/2026-10-25-cross-engine/REPORT.md), n=1). Steps 1–7 use the trial's commands; steps 8–9 were not part of the trial and are covered by tests only.
+
+1. **Init** the workspace once: `agentos init --existing`.
+2. **Role**: give the role a manifest card (catalog cards from `init` already have one): `agentos agents add developer` (or `agentos agents manifest developer --from-catalog` for an older card). See [docs/agents.md](docs/agents.md).
+3. **Task scope** in `.agentos/project.yaml` — what the task may read and edit (the trial used):
+
+   ```yaml
+   task_scope:
+     read: [web, api/contracts/openapi.yaml, docs/adr]
+     edit: [web]
+   ```
+
+4. **Context** for the first engine: `agentos context claude-code --task greeting` (objective, constraints, scope, role card, relevant decisions/Brain records, budget). Optionally write Claude Code's deny rules with `agentos agents sync claude-code` and trust the workspace (see [Engines](#engines)).
+5. **Work in Claude Code** with that context as the prompt prefix. The trial launched `claude -p "<context + task>" --allowedTools Read,Edit,Write,Bash(node:*),Bash(cd:*) --output-format json --no-session-persistence`.
+6. **Checkpoint** before stopping, with real checks:
+
+   ```bash
+   agentos checkpoint --task greeting --engine claude-code --role developer \
+     --progress "<what you did>" --next "<what remains>" --check "node test.js" --cwd web
+   ```
+
+   `--claim "<text>"` records something the engine reports but AgentOS did not observe.
+7. **Fresh Codex**: `agentos resume --task greeting` (accomplished / remaining / receipts / reconciliation, read-only), then `agentos context codex --task greeting`. The trial ran `codex exec -a never` with both as the prompt; Codex continued from the `observed-pass`/`claimed`/`not-run` receipts and wrote its own checkpoint (`--engine codex`).
+8. **Brain**: record what the task taught as a proposal and apply it after review: `agentos brain propose <id-or-path> --from - --summary "<why>"`, `agentos brain preview <proposal>`, `agentos brain apply <proposal>`. See [docs/brain.md](docs/brain.md).
+9. **Obsidian (optional)**: `agentos obsidian init` (plain `knowledge/` folder) or `agentos obsidian link --vault <abs-path> --dest <sub/folder> [--canonical workspace|vault] --create`. See [docs/obsidian.md](docs/obsidian.md).
+
+What is enforced and what is only instruction, per engine: [docs/engines.md](docs/engines.md). Proven / not proven per scenario: [docs/acceptance-matrix.md](docs/acceptance-matrix.md).
+
+## Documentation
+
+- [docs/quickstart.md](docs/quickstart.md) — install and first run
+- [docs/context-builder.md](docs/context-builder.md) — `agentos context`: selection, scope, budget
+- [docs/checkpoints.md](docs/checkpoints.md) — `agentos checkpoint` / `resume`: records, receipts, reconciliation
+- [docs/brain.md](docs/brain.md) — `agentos brain`: records, proposals, stale/duplicate checks
+- [docs/agents.md](docs/agents.md) — agent manifests and lifecycle
+- [docs/engines.md](docs/engines.md) — engine adapters and the trial-backed capability matrix
+- [docs/obsidian.md](docs/obsidian.md) — optional Obsidian location for the Brain
+- [docs/migration.md](docs/migration.md) — adopting v1 in an existing workspace; keep / simplify / remove inventory
+- [docs/acceptance-matrix.md](docs/acceptance-matrix.md) — v1 acceptance per priority and scenario (PASS / FAIL / BLOCKED)
+- [docs/improve-later.md](docs/improve-later.md) — consolidated backlog
+- [docs/compaction.md](docs/compaction.md), [docs/templates.md](docs/templates.md), [docs/safe-imports.md](docs/safe-imports.md), [docs/release-readiness.md](docs/release-readiness.md), [docs/reliability-acceptance.md](docs/reliability-acceptance.md)
+- [docs/evidence/2026-10-25-cross-engine/](docs/evidence/2026-10-25-cross-engine/README.md) — engine trial report, prompts, transcripts, checkpoint records
+
 ## Commands
 
 ```bash
@@ -329,7 +374,7 @@ agentos checkpoint --recover --task token-rotation   # the engine died without a
 ```
 
 - Each checkpoint is an immutable JSON record (`agentos.checkpoint/1`) under `.agentos/checkpoints/<task>/`, plus a `current.json` pointer and one bounded `## Checkpoint (managed)` section in `.agentos/handoff.md` that is replaced in place, never appended. `tasks.md` is not touched.
-- Per repo it stores branch, HEAD and a working-tree fingerprint (staged, unstaged and untracked), using the same bounded, sensitive-path-aware git evidence as `run handoff`.
+- Per repo it stores branch, HEAD and a working-tree fingerprint (staged, unstaged and untracked), using the same bounded, sensitive-path-aware git evidence as `run handoff`. A repo that is a directory inside one enclosing work tree (`web/`, `api/` in a root repo) uses that work tree limited to the directory (`state: enclosing-worktree`); only a path outside any work tree is `unavailable`.
 - Verification receipts say exactly what is known: `observed-pass` / `observed-fail` (AgentOS ran the `--check`; output saved as evidence), `claimed` (`--claim`, engine-reported), `not-run` (declared build/test commands of in-scope repos nobody ran), `unavailable` (could not start). Each receipt records the state it tested.
 - `resume` reports `clean`, `drifted` (HEAD moved, fingerprint differs, new changed paths) or `unavailable`, lists what is accomplished (progress plus current passes) and what remains (next action, blockers, failed/claimed/not-run receipts, passes marked `stale (recheck)`), and prints the `agentos context <engine> --task <id>` line to run next. A missing pointer or damaged record is reported as `incomplete` with the files and error, never skipped.
 - `agentos context` includes the current checkpoint; `doctor` fails on a pointer to a missing or invalid record.
@@ -462,11 +507,11 @@ Keys, lifecycle and preservation rules: [`docs/agents.md`](docs/agents.md).
 
 ## Engines
 
-`agentos engines [--json]` prints what AgentOS can make each engine (`claude-code`, `codex`, `opencode`, `hermes`, `generic`) do, per row `context_rendering`, `native_agent_config`, `tool_restrictions`, `permission_enforcement`, `launch`, `native_session_resume`, with status `verified | advisory | unsupported | unverified` and the evidence. **No row is `verified` today**: no engine trial has been recorded. `agentos context <engine>` ends with one `ADVISORY: edit scope is instruction-only for <engine>` line; `--require-enforcement` makes it exit 1 with `UNSUPPORTED` instead.
+`agentos engines [--json]` prints what AgentOS can make each engine (`claude-code`, `codex`, `opencode`, `hermes`, `generic`) do, per row `context_rendering`, `native_agent_config`, `tool_restrictions`, `permission_enforcement`, `launch`, `native_session_resume`, with status `verified | advisory | unsupported | unverified` and the evidence. `verified` cells come from the 2026-10-25 trial (n=1 each): Claude Code `permission_enforcement` (deny rules in a trusted workspace, T3) and `tool_restrictions` (launch-time `--allowedTools`, T1/T2); Codex `permission_enforcement` (launch-time `--sandbox read-only` only; per-path scope unsupported, T4). Native agent config is `unverified` for both. `agentos context <engine>` ends with one ADVISORY line saying how far the edit scope is enforced; `--require-enforcement` exits 1 with `UNSUPPORTED` for every engine, because no engine enforces the edit scope unconditionally.
 
-`agentos agents sync claude-code [--dry-run]` writes `.claude/agents/<role>.md` and merges a proposed `.claude/settings.local.json` permission fragment (`Edit(/<path>/**)` allow rules for the edit scope, or deny `Edit`/`Write` for a read-only role) by adding keys only; a conflicting existing value refuses the whole sync with zero writes. `agentos agents sync codex` writes a managed role block (`<!-- agentos:role:start/end -->`) into the in-scope repo's `AGENTS.md`. Only `agents sync` writes these files; `context` and `checkpoint` never do. Generated configuration is not proof of enforcement.
+`agentos agents sync claude-code [--dry-run]` writes `.claude/agents/<role>.md` and merges a `.claude/settings.local.json` permission fragment by adding keys only: `Edit(/<path>/**)` allow rules for the edit scope plus `Edit`/`Write`/`NotebookEdit` **deny** rules for every repo and read path outside it (a read-only role denies `/**`). A conflicting existing value refuses the whole sync with zero writes. Claude Code ignores `.claude/settings.local.json` until the workspace is trusted; run `claude` interactively once or set `projects[<root>].hasTrustDialogAccepted`. `agentos agents sync codex` writes a managed role block (`<!-- agentos:role:start/end -->`) into the in-scope repo's `AGENTS.md` and prints that Codex enforces only its launch-time sandbox. Only `agents sync` writes these files; `context` and `checkpoint` never do.
 
-Matrix, evidence and the trial that will fill the verified column: [`docs/engines.md`](docs/engines.md).
+Matrix, evidence and what the trial did not prove: [`docs/engines.md`](docs/engines.md).
 
 ## Local skills
 
