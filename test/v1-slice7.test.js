@@ -2,7 +2,7 @@
 // and the trial-verified capability matrix. CLI usage and doc links: test/v1-slice7-docs.test.js.
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
-import { lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, writeFile, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -208,7 +208,7 @@ test('nested start: context, checkpoint and resume run from inside a child direc
   ok(context);
   assert.match(context.stdout, /^## Objective/m);
   const { out } = json(['checkpoint', '--task', TASK, '--progress', 'from web/'], web);
-  assert.equal(out.record.project.root, root);
+  assert.equal(out.record.project.root, await realpath(root)); // canonical root (macOS /private/var)
   assert.ok(out.record.repos.every((repo) => repo.available));
   assert.equal(json(['resume', '--task', TASK], web).out.reconciliation.status, 'clean');
 });

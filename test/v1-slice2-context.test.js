@@ -1,6 +1,6 @@
 // v1 slice 2: task-specific context builder (`agentos context`).
 import assert from 'node:assert/strict';
-import { lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, unlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, unlink, writeFile, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -283,9 +283,10 @@ test('prompt output on the slice-1 fixtures is byte-identical to slice 1 (78638c
     const root = await mkdtemp(join(tmpdir(), 'agentos-gold-'));
     t.after(() => rm(root, { recursive: true, force: true }));
     await setup(root);
+    const real = await realpath(root); // macOS: /var/... is reported as /private/var/...
     for (const engine of ['claude', 'codex', 'opencode', 'hermes', 'generic']) {
       const r = cli(['prompt', engine], root);
-      const stdout = r.stdout.split(root).join('<ROOT>').replace(/^Project: [^;]+;/m, 'Project: <NAME>;');
+      const stdout = r.stdout.split(real).join('<ROOT>').split(root).join('<ROOT>').replace(/^Project: [^;]+;/m, 'Project: <NAME>;');
       assert.deepEqual({ status: r.status, stdout }, golden[`${name}/${engine}`], `${name}/${engine}`);
     }
   }

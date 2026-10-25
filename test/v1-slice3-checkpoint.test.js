@@ -1,6 +1,6 @@
 // v1 slice 3: reliable checkpoints and resume (`agentos checkpoint`, `agentos resume`).
 import assert from 'node:assert/strict';
-import { lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, unlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, unlink, writeFile, realpath } from 'node:fs/promises';
 import { tmpdir, hostname } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -124,7 +124,7 @@ test('record carries ids, objective, scope, per-repo branch/HEAD/fingerprint, kn
   assert.equal(record.task.id, 'ship-the-token-rotation-feature');
   assert.equal(record.task.source, 'objective');
   assert.match(record.objective.text, /Ship the token rotation feature/);
-  assert.equal(record.project.root, root);
+  assert.equal(record.project.root, await realpath(root)); // canonical root (macOS /private/var)
   assert.equal(record.role, 'developer');
   assert.deepEqual(record.scope.read, ['.']);
   const web = record.repos.find((repo) => repo.name === 'web');
