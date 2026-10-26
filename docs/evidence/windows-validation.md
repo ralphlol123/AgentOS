@@ -117,3 +117,20 @@ fixtures are package data copied and compared byte-for-byte. User-supplied CRLF 
   (`MoveFileEx` → EPERM). If it does not, these two tests will report the note not stale.
 - Assertions after the first failing one in each test had never run on Windows; new Windows-only issues may
   appear further down (e.g. the absent/empty part of the A07 vault test).
+
+## Second Windows run: CI run 40307106781 on `09c4c47`
+
+Job "Node 24 / windows-latest regression" (log, read-only: `agentos trial/ci-windows-r2.log`):
+
+- Main suite (`npm test`): **805 tests, 801 pass, 0 fail, 4 skipped**. The 4 skips are the win32-only skips above,
+  each printed with its reason: `writeFileAtomic fails closed under a real filesystem permission fault …`,
+  `F9/A07: an unreadable directory holding records …`, `A07: an unreadable directory with no known records …`,
+  `D4: under WSL, obsidian init, link and status also print the Windows path of the vault`. (The fifth row, the
+  unreadable sub-case of the A07 vault test, is skipped inside a test that otherwise runs, so it is not counted.)
+  The two "not verified locally" items above therefore pass on Windows: the read-only-note fault reports the note
+  stale, and the rest of the A07 vault test passes.
+- Smoke passed. The only failing step was `npm run test:metadata` (3 tests, 2 pass, 1 fail):
+  `test/package-metadata.js` spawned `npm` directly, `spawnSync npm ENOENT` (on Windows npm is `npm.cmd`, which
+  Node only starts through a shell). A test-harness assumption, not a product bug. Fix c947a92: the helper sets
+  `shell: true` on win32 only. Checked on Linux (`npm run test:metadata` 3/3, exit 0); the Windows result needs the
+  next CI run. ubuntu ×4, macOS and the package job passed on `09c4c47`.
