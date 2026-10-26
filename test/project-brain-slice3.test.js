@@ -191,6 +191,7 @@ test('F10/A11: obsidian link writes the host vault path to git-ignored .agentos/
   for (const file of ['.agentos/project.yaml', '.agentos/knowledge.md']) assert.ok(!(await read(root, file)).includes(v), `${file} holds no host path`);
   assert.equal(parseYaml(await read(root, '.agentos/project.yaml')).knowledge.obsidian.destination, DEST);
   assert.equal(parseYaml(await read(root, '.agentos/local.yaml')).obsidian.vault, v);
+  assert.match(await read(root, '.agentos/local.yaml'), /^# Machine-local AgentOS settings/, 'self-describing file');
   assert.equal(git(root, 'check-ignore', '-q', '.agentos/local.yaml').status, 0, 'local.yaml is git-ignored');
   assert.doesNotMatch(git(root, 'status', '--porcelain', '-uall').stdout, /local\.yaml/);
   const atRoot = cli(['obsidian', 'status'], root);

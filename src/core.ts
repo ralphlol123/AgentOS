@@ -4971,9 +4971,11 @@ function localVault(root?: string): string | undefined {
 /** Writes the host vault path to local.yaml (other keys and comments kept) and keeps that file out of git. */
 async function writeLocalVault(root: string, vault: string) {
   const path = join(root, LOCAL_PATH);
-  const text = await safeRead(path) || '# Machine-local AgentOS settings for this checkout. Git-ignored (.agentos/.gitignore); never commit.\n';
-  const next = patchProjectYaml(text, (data) => { data.obsidian = { ...(data.obsidian && typeof data.obsidian === 'object' ? data.obsidian : {}), vault }; });
-  if (next !== text || !await exists(path)) await writeFileAtomic(path, next);
+  const text = await safeRead(path);
+  const next = text
+    ? patchProjectYaml(text, (data) => { data.obsidian = { ...(data.obsidian && typeof data.obsidian === 'object' ? data.obsidian : {}), vault }; })
+    : `# Machine-local AgentOS settings for this checkout. Git-ignored (.agentos/.gitignore); never commit.\n${dumpYaml({ obsidian: { vault } })}`;
+  if (next !== text) await writeFileAtomic(path, next);
   await ensureLocalIgnored(root);
 }
 async function ensureLocalIgnored(root: string) {
