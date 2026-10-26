@@ -2,7 +2,7 @@
 
 Goal: `briefs/AgentOS-Project-Brain-Goal-2026-10-26.md` (Ralph, approved 2026-10-26). Branch `feat/project-brain` from `origin/main` = `7bcca0e` (1.1.0). One branch, small commits, one PR to main at the end; no merge, publish or version bump. Baseline evidence: `docs/evidence/project-brain-baseline.md`. Matrix: `docs/project-brain-acceptance.md`.
 
-**Status (2026-10-26, card 6):** Implementation complete. Slices 1–6 are built, trial defects D1–D5 are fixed, and the migration guide, CHANGELOG and final checks are recorded. Validation still open: A14 (Windows CI; needs a `workflow`-scoped push), A15/A17 (owner Obsidian GUI), A16 (Codex/Hermes legs) and the A18 re-run on the final SHA. The matrix lists these under "Owner actions remaining".
+**Status (2026-10-26, card 9):** Goal complete, pending owner review. Slices 1–6 are built, trial defects D1–D7 are fixed, and all 20 matrix rows pass with their limits stated (A14 on CI run 40310090906 on `6ce3d25`; A15/A17 n=1 owner GUI round trip; A16 with OpenCode in place of Codex, owner-accepted). Remaining owner decisions (release version, D6 policy, merge) are under "Owner actions remaining" in the matrix.
 
 | Order | Slice | Findings | Acceptance rows | Done when |
 |---|---|---|---|---|

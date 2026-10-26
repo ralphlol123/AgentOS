@@ -1,17 +1,15 @@
 # Tasks
 
-Active scope: Project Brain goal (`feat/project-brain`, PR #57). Earlier task lists are in `.agentos/runs/2026-10-26-1.1-slice3-handoff.md` and the other notes under `.agentos/runs/`.
+Active scope: Project Brain goal (`feat/project-brain`, PR #57) — complete, pending owner review. Finished tasks are in `.agentos/runs/2026-10-26-project-brain-card8-state.md` and the other notes under `.agentos/runs/`.
 
 ## Now
 
-- [ ] Owner: push the CI workflow commit with a `workflow`-scoped token; check that the Windows job is green (A14).
-- [ ] Owner: Obsidian GUI round trip, `C:\_\agentos-trial\OWNER-STEPS.md` (A15, A17).
-- [ ] Phynceon: Codex and Hermes legs of the continuity trial (A16). Re-run the Claude Code / A18 trial on the final SHA.
+- [ ] Phynceon: review the final head; mark PR #57 ready.
+- [ ] Owner: release version (D6 is breaking for scripts calling `brain apply` without `--by`), D6 policy (instruction + audit enough?), merge decision.
 
 ## Next
 
-- [ ] Phynceon: final gate re-run on the pushed head, review, then mark PR #57 ready. The owner merges.
-- [ ] Owner: release version and publish after merge.
+- [ ] Owner: publish after merge.
 
 ## Later
 
