@@ -20,6 +20,13 @@ Slice 5 (proposals) runs before the real-environment trials so the connected dem
 - Corrupt `.agentos/project.yaml` → `brain`/`context`/`checkpoint`/`resume` exit 1.
 - Brain writes commit the record, then regenerate `index.json` separately; an index failure keeps the write and reports `index.json is stale`. Slice 2 hangs the Obsidian index-note refresh on the same step.
 
+## Slice 2 design (as built)
+
+- Index note = human prose + one generated block between `<!-- agentos:brain-index:start … -->` and `<!-- agentos:brain-index:end -->` (`planNote`/`syncNote` in `src/brain.ts`). `commit()` regenerates `index.json` then syncs the note; each failure keeps the record write (`index_stale` / `note_stale`). Both are written only when bytes change.
+- `agentos brain index [--adopt] [--dry-run]`: the one recovery/adoption command (writer lock unless dry run). Unmarked (≤ 1.1) notes: preview diff, written only with `--adopt`; damaged markers: never written.
+- `loadBrain` returns `.unreadable` (non-ENOENT readdir/read failures); `unreadableKnowledge()` joins them, and the vault folder state (`dirState`: ok/empty/absent/error code), with the records `index.json` last knew there. `writeIndex` keeps those entries.
+- `obsidian status` resolves a relative vault with `resolve(root, …)` (F8); all other paths already went through `obsidianBinding(root, …)`.
+
 ## Known risks
 
 - `bun` is not installed on the dev host; gates run the same scripts with `npm run` (no global installs allowed).

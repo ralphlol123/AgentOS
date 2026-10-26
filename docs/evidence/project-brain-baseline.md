@@ -26,4 +26,13 @@ Same script, built `dist/` of `9e9ffa4`; F5–F10 output unchanged (later slices
 - F3: `context … --require-complete` → exit 0, no Missing; `brain check` 4 ok.
 - F4: unchanged (still exit 1 with `brain:design … vault unavailable` under Missing) — required data stays incomplete.
 
-Slice mapping: F1–F4 → Slice 1 (this card); F7–F10 → Slice 2; F5, F6, F10 (bindings) → Slice 3. See [`.agentos/plans/project-brain.md`](../../.agentos/plans/project-brain.md).
+## After Slice 2 (`8cbf19f`)
+
+Same script (F10 now ends with a recovery step), built `dist/` of `8cbf19f`. Regression tests: `test/project-brain-slice2.test.js` (10 tests) — all 10 fail on the `c10bc24` build (copied `dist/` + `templates/`, run with `node --test`) and pass on `8cbf19f`.
+
+- F7: FIXED. After `obsidian init` + `brain init`: `grep -c "](" knowledge/index.md` = `4`; the note ends with the four record links and `<!-- agentos:brain-index:end -->`. `brain index` again → `Unchanged: .agentos/brain/index.json`, `Unchanged: index note knowledge/index.md` (byte- and mtime-identical, test-checked).
+- F8: FIXED. `obsidian status` from `sub/deeper` → `AgentOS Obsidian: OK`, exit 0, `Workspace path: $BASE/F8 ws/knowledge` (resolved against the workspace root; identical to the root output).
+- F9: FIXED. With `docs/adr` at `chmod 000`: `brain list` → `- brain:0001 [unreadable] adr docs/adr/0001.md (docs/adr is unreadable (EACCES: permission denied)) — ADR 1`, exit 0; `brain check` → `1 record(s), 0 ok, 0 changed, 0 invalid, 1 unreadable`, exit 1; `context … --require-complete` → `## Missing - brain:0001 (docs/adr/0001.md): docs/adr is unreadable (EACCES: permission denied)`, `INCOMPLETE`, exit 1. Vault folder: absent → `vault unavailable: …`, `chmod 000` → `vault unreadable: … (EACCES: permission denied)`, emptied → `vault folder empty: … (1 record(s) last known there; …)` (test-checked).
+- F10 (recovery part): FIXED. Missing index note: `obsidian status` → `… has no index note (index.md); … Run \`agentos brain index\` to recreate it from the Brain records …`, exit 1 (read-only); `obsidian init` still refuses but names `agentos brain index`. With both `knowledge/index.md` and `.agentos/brain/index.json` deleted: `brain index` → `Created: .agentos/brain/index.json (4 record(s))`, `Created: index note knowledge/index.md`, exit 0; `obsidian status` → `OK`; a second `brain index` → both `Unchanged`. The test checks both files come back byte-identical and every other file (records, config, checkpoints, history) keeps its bytes and mtime. The machine-specific `vault:` path (F10 first half) is unchanged — Slice 3.
+
+Slice mapping: F1–F4 → Slice 1; F7–F10 → Slice 2; F5, F6, F10 (bindings) → Slice 3. See [`.agentos/plans/project-brain.md`](../../.agentos/plans/project-brain.md).

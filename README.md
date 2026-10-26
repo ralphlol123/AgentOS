@@ -344,6 +344,7 @@ agentos brain propose <id-or-path> --from <file|-> [--summary "<text>"] [--super
 agentos brain preview <proposal> | validate <proposal> [--json]
 agentos brain apply <proposal> [--dry-run]
 agentos brain verify <id-or-path> [--by <name>] [--dry-run]
+agentos brain index [--adopt] [--dry-run]   # recreate/refresh index.json and the Obsidian index note
 ```
 
 ## Task-specific context
