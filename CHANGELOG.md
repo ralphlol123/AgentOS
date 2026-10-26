@@ -4,6 +4,10 @@ All notable changes to AgentOS for Projects are documented here.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Project Brain independent of Obsidian (Project Brain slice 1).** An absent, disabled (`knowledge.obsidian.enabled: false`, new) or invalid `knowledge.obsidian` block no longer blocks `brain`, `context`, `checkpoint` or `resume`; an invalid block is a `doctor` problem and a `context --json` warning. With `canonical: workspace` a missing linked folder is a warning, not Missing, so `context --require-complete` passes. Records whose only copy is in an offline vault, or in a vault the integration no longer reads, stay under Missing. A corrupted `.agentos/project.yaml` now fails those commands instead of reading as an empty project. A Brain write is kept when regenerating `.agentos/brain/index.json` fails (reported as stale). See `docs/brain.md#independent-of-obsidian`, `docs/project-brain-acceptance.md`.
+
 ## [1.1.0] - 2026-10-26
 
 Everyday-use fixes on top of 1.0.0 (PR #55). Upgrade: run `agentos doctor --fix` to get the new `.agentos/guide.md`; settings synced by 1.0.0 have no sync record, so re-run `agentos agents sync <engine> --role <id> --replace` once.

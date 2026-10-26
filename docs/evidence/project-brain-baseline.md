@@ -17,4 +17,13 @@ Script: [`project-brain-repro.sh`](project-brain-repro.sh), run as `CLI=<build>/
 | F9 | REPRODUCED | registered `docs/adr/0001.md`; `chmod 000 docs/adr` → `brain list`: `No Brain records…` exit 0; `brain check`: `0 record(s)` exit 0; `context … --require-complete` exit 0 with nothing Missing (`loadBrain` uses `readdir(...).catch(() => [])`). |
 | F10 | REPRODUCED | `obsidian link --vault "$BASE/F10 vault" …` writes `vault: $BASE/F10 vault` (absolute, machine-specific) into the shared `.agentos/project.yaml`. Missing index note in an `obsidian init` folder: `obsidian status` → `has no index note (index.md); … remove knowledge.obsidian and re-run agentos obsidian init`; re-running `obsidian init` → `FAIL knowledge.obsidian is already configured` (no repeatable recovery). Deleted `.agentos/brain/index.json` is not recreated by reads (`brain list`); only the next brain write regenerates it. |
 
+## After Slice 1 (`9e9ffa4`)
+
+Same script, built `dist/` of `9e9ffa4`; F5–F10 output unchanged (later slices).
+
+- F1: unchanged, all exit 0.
+- F2: `brain list`, `context`, `checkpoint --dry-run`, `checkpoint`, `resume --task demo` → all exit 0 (`resume`: `AgentOS resume: demo … Objective: Ship the demo.`); `context --json` warning `Obsidian integration invalid, ignored: …`. Corrupted YAML control: `brain list` and `context` → exit 1, `.agentos/project.yaml is not valid YAML (…); fix it by hand. Nothing was read or written.`
+- F3: `context … --require-complete` → exit 0, no Missing; `brain check` 4 ok.
+- F4: unchanged (still exit 1 with `brain:design … vault unavailable` under Missing) — required data stays incomplete.
+
 Slice mapping: F1–F4 → Slice 1 (this card); F7–F10 → Slice 2; F5, F6, F10 (bindings) → Slice 3. See [`.agentos/plans/project-brain.md`](../../.agentos/plans/project-brain.md).

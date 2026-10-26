@@ -70,6 +70,15 @@ proposed ──apply──▶ accepted ──verify──▶ verified
 
 `agentos context` adds each valid record as a candidate (kind `brain`) through the same pipeline: matched on id slug, title and kind; `superseded` omitted by default (`--include-superseded` shows it labelled); `proposed` labelled `[proposed]` and ranked below `accepted`/`verified` with the same matches; `changed` labelled; records outside the read scope (path not readable, or a repo scope that is out of scope) are `out-of-scope`. `agentos checkpoint` lists included Brain records under `knowledge_refs`.
 
+## Independent of Obsidian
+
+The Brain is workspace Markdown plus `.agentos/project.yaml`; nothing else is required. No Obsidian install, executable, account, vault or GUI is needed for `brain`, `context`, `checkpoint` or `resume` ([`docs/obsidian.md`](obsidian.md) is optional).
+
+- **Integration absent, disabled (`knowledge.obsidian.enabled: false`) or invalid** (e.g. `canonical: bogus`, a `destination` outside the vault, a non-boolean `enabled`): the integration is ignored and local operations run. An invalid block is a `context --json` warning (`Obsidian integration invalid, ignored: …`) and a `doctor` problem; it never fails `brain`, `context`, `checkpoint` or `resume`.
+- **Integration health is not knowledge completeness.** With `canonical: workspace`, a missing linked folder is only a viewer problem: a `context --json` warning (`optional Obsidian folder unavailable: …`), and `context --require-complete` still passes. Required knowledge that cannot be read is listed under **Missing** and fails `--require-complete`: a record whose only copy is in an offline vault (`canonical: vault`), and a vault record last known in `index.json` while the integration is disabled or invalid (`brain:x (path): Obsidian integration disabled …`). Switching the viewer off never hides such a record.
+- **Corrupted core configuration fails honestly.** A `.agentos/project.yaml` that is not valid YAML makes `brain`, `context`, `checkpoint` and `resume` exit 1 (`.agentos/project.yaml is not valid YAML …`) instead of reading as an empty project.
+- **Derived index failure keeps the write.** A Brain write (`init`, `register`, `verify`, `apply`) commits the record first; regenerating `index.json` is a separate step. If it fails, the record write is kept, the output says `Warning: .agentos/brain/index.json is stale (…)` (`--json`: `index_stale: true`), and the next successful brain write regenerates it.
+
 ## Limits (not done in v1)
 
 - **Single writer.** Writes take the workspace writer lock; per-file atomic writes plus in-process rollback, not a crash-safe multi-file transaction.

@@ -55,8 +55,12 @@ Agent reads, creates and updates of vault notes go through `agentos brain regist
 ## External edits and an unavailable vault
 
 - A note edited in Obsidian is detected like any record: `brain check` reports `changed` (hash drift), `doctor` warns, `brain verify` accepts it after review.
-- When `<vault>/<dest>` is absent (vault unmounted, renamed, removed), every record last known there (from `index.json`) is `unavailable` in `brain check` and `brain list`. `agentos context` lists `vault unavailable: <path>` and each record under **Missing**; the bundle stays `ok: true` but never reads as complete, and `agentos context --require-complete` exits 1 (`INCOMPLETE`). `doctor` warns `Obsidian vault unavailable`. `brain check` exits 0 (only `invalid` exits 1). Brain writes keep the last known vault entries in `index.json` until the folder is back.
+- When `<vault>/<dest>` is absent (vault unmounted, renamed, removed), every record last known there (from `index.json`) is `unavailable` in `brain check` and `brain list`. With `canonical: vault`, `agentos context` lists `vault unavailable: <path>` and each record under **Missing**; the bundle stays `ok: true` but never reads as complete, and `agentos context --require-complete` exits 1 (`INCOMPLETE`). With `canonical: workspace` no record lives there: the absent folder is a `context --json` warning only and `--require-complete` passes. `doctor` warns `Obsidian vault unavailable`. `brain check` exits 0 (only `invalid` exits 1). Brain writes keep the last known vault entries in `index.json` until the folder is back.
 - A linked folder that exists but lacks its index note is reported by `doctor` and `obsidian status` ("not treated as linked"). Re-running `obsidian link` with the same `--vault`/`--dest` creates only the missing note; for an `obsidian init` folder, restore the note or remove `knowledge.obsidian` and re-run `obsidian init`.
+
+## Disable the integration
+
+Set `enabled: false` under `knowledge.obsidian` in `.agentos/project.yaml`. Nothing is deleted: the folder, the index note, the records and the rest of the block stay. `obsidian status` prints `DISABLED`, `context` drops the Obsidian rule line, and the linked folder is not read. Brain, context, checkpoint and resume keep working. Records that live only in the vault (`canonical: vault`) are then unavailable and listed under **Missing** (see [`docs/brain.md`](brain.md#independent-of-obsidian)); to keep them available, keep the integration enabled. Remove the key or set `enabled: true` to re-enable. An invalid `knowledge.obsidian` block (e.g. `canonical: bogus`) is treated the same way: ignored, with a `doctor` problem and a `context --json` warning.
 
 ## Not done
 
