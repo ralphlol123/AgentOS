@@ -6,8 +6,8 @@ Goal row A14 ("Native Windows behavior is validated"). Source run: CI run 403021
 `agentos trial/ci-windows-fail.log`, `ci-windows-baseline.log`, `win-branch.txt`, `win-base.txt`.
 
 No Windows machine was available locally. Each fix was reasoned from the CI output and checked on Linux; where
-a Windows condition can be reproduced on Linux it was (below). **The PASS/FAIL of A14 is set only from the
-next Windows CI run.**
+a Windows condition can be reproduced on Linux it was (below). The PASS/FAIL of A14 was set only from Windows CI:
+**PASS on CI run 40310090906 on `6ce3d25`** (see [the final run](#final-windows-run-ci-run-40310090906-on-6ce3d25)).
 
 ## Triage: 47 failures → (a) 17 product bugs, (b) 25 test-harness assumptions, (c) 5 POSIX-only (win32 skips)
 
@@ -134,3 +134,16 @@ Job "Node 24 / windows-latest regression" (log, read-only: `agentos trial/ci-win
   Node only starts through a shell). A test-harness assumption, not a product bug. Fix c947a92: the helper sets
   `shell: true` on win32 only. Checked on Linux (`npm run test:metadata` 3/3, exit 0); the Windows result needs the
   next CI run. ubuntu ×4, macOS and the package job passed on `09c4c47`.
+
+## Final Windows run: CI run 40310090906 on `6ce3d25`
+
+Reported by Phynceon (this sandbox has no GitHub access to re-read the run). All 7 jobs of the run passed: ubuntu-latest
+Node 20/22/24/26, macos-latest Node 24, **windows-latest Node 24 (5m33s)** and the npm/pnpm/Bun packaged workflows.
+The Windows job runs `npm ci`, `npm run check`, `npm test` (full suite), `npm run smoke`, `node dist/cli.js doctor --json`
+and `npm run test:metadata` (`.github/workflows/ci.yml`); a green job means every step exited 0, so the c947a92 fix
+(`shell: true` on win32) is confirmed on Windows. The win32-only skips are the 4 tests above (plus the unreadable
+sub-case inside the A07 vault test); no skip was added since run 40307106781. The per-test counts of this run were
+not re-read here (no log of it in the trial folder).
+
+**A14: PASS** — automated CLI regression on a native Windows runner. No Windows GUI or engine trial is claimed on
+native Windows; the Obsidian GUI trial was WSL + Windows Obsidian (A15/A17, [trials](project-brain-trials.md#obsidian-gui-round-trip-a15a17)).

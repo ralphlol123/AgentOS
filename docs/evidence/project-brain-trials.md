@@ -96,13 +96,28 @@ CI run 40295214967 on 1de2f4b failed only the job "Node 24 / macos-latest regres
 
 Both compared output against the `mkdtemp` path `/var/folders/…`. The CLI correctly prints the canonical root `/private/var/folders/…`: `process.cwd()` is the realpath, and earlier tests already assert that. Fix 33d35ed: the two tests now compare against `realpathSync` of the fixture root. The failure was reproduced locally by pointing `TMPDIR` at a symlink: both tests fail on 1de2f4b and pass after the fix. The full suite (802 tests) also passes with `TMPDIR` pointed at a symlink, the macOS condition, so no other test has the same pattern.
 
-## Obsidian GUI fixture (A15/A17), awaiting the owner
+## Obsidian GUI round trip (A15/A17)
 
-Phynceon prepared `/mnt/c/_/agentos-trial/obs project` (Windows `C:\_\agentos-trial\obs project`) and ran `obsidian init` on it, giving `knowledge/` with canonical: workspace. Sentinels: `knowledge/.obsidian/app.json` and `knowledge/Unrelated.md`. `knowledge/design.md` was registered as `brain:design` and changed by an agent through `brain propose --task gui-trial` plus `brain apply`. The owner's checklist is `C:\_\agentos-trial\OWNER-STEPS.md`. **No Obsidian app step has been run.** Every Obsidian claim above is a filesystem fixture, not a UI trial.
+Source: Phynceon's trial record, sections "Obsidian GUI fixture" and "Obsidian GUI round trip (A15/A17)", and the owner's confirmation, 2026-10-26.
+
+**Fixture.** Phynceon prepared `/mnt/c/_/agentos-trial/obs project` (Windows `C:\_\agentos-trial\obs project`, on drvfs) with the installed build 1c0b2b9 and ran `obsidian init`: `knowledge/` with `canonical: workspace`. Sentinels: `knowledge/.obsidian/app.json` and `knowledge/Unrelated.md` (sha256 recorded). `knowledge/design.md` was registered as `brain:design` (accepted), then changed by an agent through `brain propose --task gui-trial` plus `brain apply`: the body contains AGENT-EDIT-V2 and the history line was recorded. The owner's checklist was `C:\_\agentos-trial\OWNER-STEPS.md`, which gave the Windows path explicitly. Build 1c0b2b9 contains D3 (ad54bb2) and D4 (878f8e5), but the fixture was set up before the D4 `Windows path (WSL): …` line existed, so the owner used the checklist path, not that output.
+
+**Round trip (n=1, owner-operated Windows Obsidian, AgentOS from WSL2):**
+
+1. **Agent edit → app display.** The owner opened Windows Obsidian; `design.md` showed AGENT-EDIT-V2 before any edit (owner confirmation: "yes this is showing").
+2. **Human edit in the app.** The owner edited `design.md` in Obsidian. The file was written by a Windows process; the body became `Records are plain Markdown. HUMAN-EDIT-V3 (changed by an agent through agentos brain apply)` plus a line `Test 123`.
+3. **AgentOS detects it.** `agentos brain check` (build 1c0b2b9, from WSL) → `changed brain:design (knowledge/design.md): source changed since verification — recheck …`; the other 4 records ok; exit 0. Both sentinels unchanged (same sha256).
+4. **A fresh engine reads it.** A fresh Claude Code session (`claude -p`, read-only tools), asked what the design record says about storage, quoted the HUMAN-EDIT-V3 / `Test 123` text from `knowledge/design.md` / `brain:design`, flagged it as changed since verification (not verified), identified the earlier applied proposal text AGENT-EDIT-V2, and modified no files.
+
+**Limits.**
+- n=1, one owner, one note.
+- The vault opened was `C:\_\agentos-trial`, the trial root (parent of the project); Obsidian created `.obsidian/` there. The checklist named the `knowledge/` folder. So the round trip on one canonical file is observed, but the recommended layout (`knowledge/` opened as its own project vault) was not the one opened. In that layout the default records under `.agentos/` are outside the vault and Obsidian cannot show them; that is D3, marked in the index note and documented in [obsidian.md](../obsidian.md).
+- WSL + Windows Obsidian only. The path mapping was explicit (checklist), not the D4 output; D4 is covered by its CLI tests.
+- The Obsidian app version was not recorded.
 
 ## Not done in this trial
 
 - **Codex:** not run (quota). The owner accepted OpenCode as the continuation engine instead; no Codex coverage is claimed anywhere.
-- **Native Windows (A14):** the main suite passes on Windows (CI run 40307106781); the `test:metadata` fix awaits the next Windows run. See [windows-validation.md](windows-validation.md).
+- **Native Windows GUI or engine trial:** none. A14 is the automated CLI regression on a native Windows runner (CI run 40310090906 on 6ce3d25, green). See [windows-validation.md](windows-validation.md).
 - **Enforcement:** not tested at any layer. D6 adds an audit trail, not a gate.
 - **The D6/D7 fixes have not been exercised by an engine session**; they are covered by the CLI tests named above.
