@@ -4,7 +4,20 @@ All notable changes to AgentOS for Projects are documented here.
 
 ## [Unreleased]
 
-Project Brain goal (`feat/project-brain`). The Brain works without Obsidian, and Obsidian stays an optional second location. Run `agentos doctor --fix` once to refresh the adapters and `.agentos/guide.md`. Migration: `docs/migration-project-brain.md`. Acceptance: `docs/project-brain-acceptance.md`.
+## [2.0.0] - 2026-10-26
+
+Project Brain (PR #57). The Brain works without Obsidian, and Obsidian stays an optional second location. Upgrade: run `agentos doctor --fix` once to refresh the adapters and `.agentos/guide.md`, then check the breaking changes below. Migration: `docs/migration-project-brain.md`. Acceptance: `docs/project-brain-acceptance.md`.
+
+### Breaking changes
+
+- **`agentos brain apply` requires `--by <owner>`.** A real apply without it (or with an empty value) is refused with exit 1 and writes nothing; scripts that call `brain apply` must add `--by`. `--dry-run`, `preview` and `validate` are unchanged. The record's `history` line format changed to `<time> applied <proposal> by <applier> (proposed by <proposer>): <old> -> <new>`.
+- **`agentos resume --task <id>` with no checkpoint exits 0** (`Status: clean start …`) instead of 1. Scripts that used the exit code to detect "no checkpoint" must read the output instead.
+- **The vault host path moves to git-ignored `.agentos/local.yaml`.** `obsidian link`, `obsidian link-workspace`, `obsidian init --dir <outside>` and new setups write it there instead of `project.yaml`. A clone without `local.yaml` reads the integration as off (`obsidian status` exits 1 and says how to bind). `obsidian link` rewrites `knowledge.obsidian` to `mode: workspace-folder` and replaces a legacy `linked:` list with `linked: []` (the linked notes are not touched; copy the list first if you need it). A legacy absolute `vault` in `project.yaml` keeps working.
+- **`agentos init` (new or `--existing`) now creates or adopts Brain records**: it registers AgentOS-owned files in place and writes `(unknown — fill in)` templates for the gaps. It never edits covering docs, and a re-run is a no-op.
+- **A corrupted `.agentos/project.yaml` now fails** `brain`, `context`, `checkpoint` and `resume` instead of reading as an empty project.
+- **`checkpoint --check <cmd> --cwd <dir>`** refuses a directory outside the workspace, also with `--dry-run` (which used to echo it), and `--cwd` is now workspace-root-relative from any subdirectory.
+- **`agentos context` output changes:** without a `task_scope` it prints `Edit scope: not set (…)` instead of `(none; read-only task)`; it opens with a project overview from `.agentos/memory.md`; a record already shown by section is omitted as `covered` (`--json`: reason `covered` with `via`) instead of `no-match`.
+- **`agentos <command> --help` / `-h`** prints that command's usage and exits 0, running nothing, instead of failing with `Unknown option: --help`.
 
 ### Added
 
