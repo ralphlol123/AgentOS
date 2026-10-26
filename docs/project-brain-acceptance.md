@@ -26,3 +26,31 @@ Summary: 20 rows — 16 PASS (A13: automated CLI regression only; A18: real-engi
 | A18 | A normal completed task stages an appropriate knowledge proposal | PASS (pending re-run on the final SHA) | `project-brain-slice5.test.js` › "A18: the checkpoint output and the generated loop ask for the knowledge review; a meaningful completion stages one focused proposal tied to the checkpoint" (instruction in checkpoint output, startup loop and guide; `brain propose --task` records target, `base_hash`, task, checkpoint id, changed paths and receipt states; a checkpoint alone stages nothing); RED on 5c20b24. Trigger = instruction-following, not a runtime hook ([brain.md](brain.md#knowledge-upkeep-at-completion)). Real engine: 2/2 fresh Claude Code sessions staged one focused `brain:decisions` proposal during ordinary completion with no owner reminder ([trials](evidence/project-brain-trials.md), n=2, build 1de2f4b); trigger = instruction-following. Re-run on the final SHA pending (Phynceon) | 7750ee8 (fixtures), 1de2f4b (real engine) |
 | A19 | No-op/repeated events avoid duplicate proposals; stale proposals preserve human edits | PASS | `project-brain-slice5.test.js` › "A19: a progress-only or no-op checkpoint stages nothing; no checkpoint at all stages nothing" (claim-only checkpoint, no checkpoint: exit 1, no proposals dir), › "A19: repeating the same event … leaves one proposal; new content is a new one" (pending and after apply: `duplicate: true`, byte-identical), › "A19: a staged proposal whose base went stale after a human edit is rejected; the human text is untouched"; all RED on 5c20b24. Limit: dedupe is exact (same checkpoint, target, mode, normalized text); a reworded proposal for the same fact is a new proposal, caught only by the existing `duplicate`/`conflict` checks | 7750ee8 |
 | A20 | Reviewed application preserves history and survives optional integration failure | PASS | `project-brain-slice5.test.js` › "A20: apply (explicit) keeps history, does not verify, and refreshes index.json and the index note" (`status: accepted`, no `verified_*`, `history` entry, applied copy keeps checkpoint + evidence), › "A20: apply survives a broken optional index note …" (`chmod 555` on the note folder: record accepted, `note_stale: true`, `brain index` catches up; skipped as root), › "A20: the accepted record is readable by a different engine through context" (`context codex` and `context claude`); `project-brain-slice1.test.js` › "a Brain write is kept when the derived index cannot be refreshed …"; `project-brain-slice2.test.js` › "A05/A20: an index note write failure …". RED on 5c20b24 only for the staging step (apply/index/note mechanisms predate this slice) | 7750ee8 |
+
+## Owner actions remaining
+
+The rows above are not upgraded until these are done:
+
+1. **A14:** push the CI workflow commit (`ci: add a native Windows … job`, kept last on the branch) with a token that has `workflow` scope. Then confirm that "Node 24 / windows-latest regression" is green.
+2. **A15, A17:** run the Obsidian GUI steps in `C:\_\agentos-trial\OWNER-STEPS.md`: open the vault from Windows Obsidian, then make a human edit to the same note the agent changed.
+3. **A16:** Phynceon runs the Codex and Hermes legs of the continuity trial on the final SHA.
+4. **A18 and A16 (Claude Code leg):** Phynceon re-runs them on the final SHA. The D1, D2 and D5 changes affect commands and context text that the trial sessions used.
+5. Phynceon re-runs the gates on the pushed head, then reviews. The owner merges and decides the release version.
+
+## Final checks
+
+Run on `ef09f0d` (local, pre-reorder SHA; the commit after it changes only this file). Linux/WSL2, Node 26.7.0, npm 12.0.2, `npm_config_cache=$TMPDIR/npm-cache`. `bun` and `pnpm` are absent on this host, so each `release:check` component ran through `npm run`.
+
+| Component | Exit | Result |
+|---|---|---|
+| `npm run check` | 0 | tsc `--noEmit` clean |
+| `npm run test` | 0 | 803/803 pass |
+| `npm run smoke` | 0 | pass |
+| `npm run test:metadata` | 0 | 3/3 pass. Before `ef09f0d` it failed (exit 1) on this host: npm 12 prints `pack --json` as an object keyed by the package name, not an array. The test now reads both shapes; test-only change |
+| `npm run pack:dry-run` | 0 | 113 files, 366.6 kB. The tarball contains `docs/migration-project-brain.md`, the other packaged docs, and `dist/core.js` / `dist/context-builder.js` with the D5 text and the new guide lines (checked in an extracted `npm pack`) |
+| `npm run test:package-managers` | 1 | expected env failure: `Error: Required package manager missing: pnpm. Install npm, pnpm, and Bun before compatibility verification.` The npm/pnpm/Bun packaged workflows pass in CI run 40297753207 on 385c53a |
+| `npm publish --dry-run --access public` | 1 | expected: `npm error You cannot publish over the previously published versions: 1.1.0.` No version bump on this branch |
+| `node dist/cli.js doctor --json` | 0 | `ok: true` |
+| `git diff --check` (branch commits) | 0 | clean |
+
+CI on the pushed part of the branch: run 40297753207 on 385c53a, all green (see A13). The Windows job has not run (A14).
