@@ -17,6 +17,8 @@ export const DEFAULT_BUDGET = 24000;
  *  scaffolding). Assumptions, not measurements; see docs/context-builder.md. */
 export const ENGINE_OVERHEAD: Record<string, number> = { 'claude-code': 2000, codex: 1500, opencode: 1500, hermes: 2000 };
 const GENERIC_OVERHEAD = 1000;
+/** The project overview is `.agentos/memory.md` (the authoritative summary), cut at this many characters. */
+export const OVERVIEW_CHARS = 1500;
 const REASONS = ['budget', 'superseded', 'out-of-scope', 'no-match'] as const;
 type OmitReason = typeof REASONS[number];
 
@@ -167,7 +169,7 @@ export async function buildContextBundle(input: ContextInput): Promise<ContextBu
   // --- sources ------------------------------------------------------------------------------------
   const files: Record<string, string> = {};
   const mtimes: Record<string, number> = {};
-  for (const name of ['handoff.md', 'tasks.md', 'decisions.md', 'skills.md', 'knowledge.md']) {
+  for (const name of ['memory.md', 'handoff.md', 'tasks.md', 'decisions.md', 'skills.md', 'knowledge.md']) {
     const path = join(root, '.agentos', name);
     files[name] = await readText(path);
     mtimes[name] = files[name] ? (await stat(path)).mtimeMs : 0;
@@ -183,6 +185,10 @@ export async function buildContextBundle(input: ContextInput): Promise<ContextBu
   const add = (candidate: Omit<Candidate, 'fresh'> & { fresh?: number }) => candidates.push({ fresh: 0, ...candidate });
   const handoffSource = (heading: string) => `.agentos/handoff.md#${heading}`;
 
+  // F6: a bounded overview first (memory.md minus its frontmatter and title); detailed records stay selective below.
+  const overview = files['memory.md'].replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '').replace(/^\s*#[^\n]*\n/, '').trim();
+  if (overview) add({ id: 'overview', kind: 'overview', title: 'Project overview', source: '.agentos/memory.md', mandatory: true,
+    text: overview.length > OVERVIEW_CHARS ? `${overview.slice(0, OVERVIEW_CHARS)}…\n(cut at ${OVERVIEW_CHARS} of ${overview.length} chars; read .agentos/memory.md for the rest)` : overview });
   add({ id: 'objective', kind: 'objective', title: 'Objective', source: handoffSource(objective.selected.heading), text: objective.selected.text, mandatory: true });
   const protectedSection = section(files['handoff.md'], roles('Protected files / do not touch', 'Protected paths and constraints', 'Protected paths', 'Protected files', 'Do not touch', 'Constraints'));
   add({
@@ -295,7 +301,7 @@ export async function buildContextBundle(input: ContextInput): Promise<ContextBu
     return finish({
       ok: false, engine, task, role, scope, budget: { limit, estimate: needed, overhead, label: TOKEN_LABEL }, included: [], omitted: [], conflicts: [], missing, warnings,
       overflow: { needed, budget: limit, mandatory: mandatory.map((candidate) => ({ id: candidate.id, kind: candidate.kind, tokens: estimateTokens(renderSection(candidate)) })) },
-      text: `AgentOS context: OVERFLOW\nMandatory context (objective, constraints, scope, role) needs ${needed} tokens, ${TOKEN_LABEL}, but the budget is ${limit}. Nothing was truncated and no context was rendered; raise --budget or shorten the mandatory sources.`,
+      text: `AgentOS context: OVERFLOW\nMandatory context (overview, objective, constraints, scope, role) needs ${needed} tokens, ${TOKEN_LABEL}, but the budget is ${limit}. Nothing was truncated and no context was rendered; raise --budget or shorten the mandatory sources.`,
     });
   }
   const selected = [...mandatory];

@@ -14,7 +14,7 @@ const CLI = resolve('dist/cli.js');
 const GUIDE = '.agentos/guide.md';
 const START = '<!-- agentos:managed:start -->';
 const END = '<!-- agentos:managed:end -->';
-const BUDGET_BYTES = 4608; // ~4.5 KB: the guide is loaded on demand
+const BUDGET_BYTES = 5376; // ~5.25 KB: the guide is loaded on demand (4.5 KB until the Project Brain setup section)
 
 async function workspace(t) {
   const root = await mkdtemp(join(tmpdir(), 'agentos-guidance-'));

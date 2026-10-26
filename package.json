@@ -53,6 +53,10 @@
     "dist",
     "templates",
     "README.md",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "docs/quickstart.md",
+    "docs/brain.md",
+    "docs/obsidian.md",
+    "docs/engines.md"
   ]
 }

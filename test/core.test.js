@@ -739,7 +739,8 @@ test('obsidian link-workspace records a folder boundary without note creation he
   const knowledge = await readFile(join(root, '.agentos/knowledge.md'), 'utf8');
   const project = await readFile(join(root, '.agentos/project.yaml'), 'utf8');
   assert.match(knowledge, /Mode: `workspace-folder`/);
-  assert.match(knowledge, /Workspace folder: `.*\/Projects\/KargaX\/AgentOS`/);
+  assert.match(knowledge, /Workspace folder: `Projects\/KargaX\/AgentOS` inside that vault/);
+  assert.ok(!knowledge.includes(vault), 'no host path in the shared knowledge.md');
   assert.match(knowledge, /Agents may read\/write only inside this folder/);
   assert.match(knowledge, /Do not bulk-load the Obsidian vault/);
   assert.match(project, /mode: workspace-folder/);

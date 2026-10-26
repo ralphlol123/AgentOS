@@ -149,7 +149,7 @@ test('mandatory content over budget: ok:false with overflow, exit 1, nothing ren
   assert.equal(bundle.ok, false);
   assert.equal(bundle.overflow.budget, 1000);
   assert.ok(bundle.overflow.needed > 1000);
-  assert.deepEqual(bundle.overflow.mandatory.map((item) => item.kind).sort(), ['constraints', 'objective', 'role', 'scope']);
+  assert.deepEqual(bundle.overflow.mandatory.map((item) => item.kind).sort(), ['constraints', 'objective', 'overview', 'role', 'scope']);
   assert.ok(bundle.overflow.mandatory.find((item) => item.kind === 'objective').tokens >= Math.ceil(long.trim().length / 4));
   assert.doesNotMatch(bundle.text, /Rotate tokens safely/, 'no partial objective');
   assert.deepEqual(bundle.included, []);

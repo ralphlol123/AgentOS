@@ -78,7 +78,7 @@ test('register: an existing ADR gets only a frontmatter block, its body is byte-
   const text = await read(root, 'docs/adr/0003-use-postgres.md');
   assert.equal(bodyOf(text), ADR, 'body byte-identical');
   assert.match(text, /^---\nid: brain:0003-use-postgres\nkind: adr\nscope: \.\nstatus: accepted\nsources:\n {2}- docs\/adr\/0003-use-postgres\.md\nsource_hash: [a-f0-9]{64}\n/);
-  assert.equal(JSON.parse(await read(root, '.agentos/brain/index.json')).records[0].id, 'brain:0003-use-postgres', 'index derived');
+  assert.ok(JSON.parse(await read(root, '.agentos/brain/index.json')).records.some((record) => record.id === 'brain:0003-use-postgres'), 'index derived');
 
   const after = await snapshot(root);
   const again = cli(['brain', 'register', 'docs/adr/0003-use-postgres.md', '--kind', 'adr'], root);
@@ -120,13 +120,14 @@ test('register: refuses outside, .git, non-Markdown, symlinked and task_scope/ru
 // --- init -----------------------------------------------------------------------------------------
 
 test('init: creates templates with unknown markers, registers the existing decisions.md, refuses to overwrite', async (t) => {
-  const { root } = await workspace(t);
-  const decisionsBefore = await read(root, '.agentos/decisions.md');
+  const { root } = await workspace(t); // `agentos init` already set the Brain up (Project Brain F5)
+  const decisionsBefore = '# Decisions\n\nDurable decisions go here with date, reason, alternatives, and status.\n';
   const before = await snapshot(root);
   ok(cli(['brain', 'init', '--dry-run'], root));
   assert.deepEqual(await snapshot(root), before);
 
   ok(cli(['brain', 'init'], root));
+  assert.deepEqual(await snapshot(root), before, 'an already set-up Brain: brain init writes nothing');
   for (const name of ['architecture', 'conventions', 'glossary']) {
     const text = await read(root, `.agentos/brain/${name}.md`);
     assert.match(text, new RegExp(`^---\\nid: brain:${name}\\n`));

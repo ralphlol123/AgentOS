@@ -172,6 +172,8 @@ export async function loadBrain(root: string, repos: string[], vault?: VaultBind
   async function walk(base: string, rel: string, location: 'workspace' | 'vault', top = false) {
     let entries;
     try { entries = await readdir(join(base, rel), { withFileTypes: true }); } catch (error) { if (!top) fail(rel || '.', location, error); return; }
+    // A nested folder with its own `.agentos/` is another workspace with its own Brain: never read its records here.
+    if (location === 'workspace' && rel && entries.some((entry) => entry.name === '.agentos' && entry.isDirectory())) return;
     for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
       const path = rel ? `${rel}/${entry.name}` : entry.name;
       if (entry.isDirectory()) {
@@ -305,10 +307,14 @@ function noteBlock(records: BrainRecord[], noteAbs: string) {
   return [NOTE_START, '## Brain records', '', ...(list.length ? list : [NONE_YET]), NOTE_END].join('\n');
 }
 
-/** A new index note (`obsidian init|link`, or recovery after it was deleted). */
-export function newIndexNote(name: string, canonical: string, records: BrainRecord[], noteAbs: string) {
+/** A new index note (`obsidian init|link`, or recovery after it was deleted). In an external vault with
+ *  canonical: workspace it is a navigation note only: labelled as such, in frontmatter and text. */
+export function newIndexNote(name: string, canonical: string, records: BrainRecord[], noteAbs: string, root: string) {
+  const navigation = canonical === 'workspace' && !inside(root, noteAbs);
   return [
+    ...(navigation ? ['---', 'tags: [agentos-navigation]', '---', ''] : []),
     `# ${name} AgentOS Index`, '', NOTE_RULE, '',
+    ...(navigation ? ['**Navigation only.** The records below live in the AgentOS workspace, outside this vault; this vault does not contain or sync them, and Obsidian may not open links that leave the vault. To edit them in Obsidian, open the workspace knowledge folder (`agentos obsidian init`) as its own vault.', ''] : []),
     `Canonical location of the Project Brain: **${canonical}**. Records live there only; this note holds links, never copies (no sync).`,
     'Runtime state stays in the workspace `.agentos/`. Agents read only the notes a task needs, never the whole vault, and change records only through `agentos brain register|propose|apply`.', '',
     noteBlock(records, noteAbs), '',
@@ -338,7 +344,7 @@ async function planNote(ctx: BrainCtx, records: BrainRecords, adopt: boolean) {
   if (!note || !ctx.vault || await dirState(dirname(note.abs)) === 'absent') return null;
   const rel = inside(ctx.root, note.abs) ? posix(relative(ctx.root, note.abs)) : note.abs;
   const before = await readFile(note.abs, 'utf8').catch((error) => { if (error.code === 'ENOENT') return null; throw error; });
-  if (before === null) return { rel, abs: note.abs, before, after: newIndexNote(note.name, ctx.vault.canonical, records, note.abs), action: 'create' };
+  if (before === null) return { rel, abs: note.abs, before, after: newIndexNote(note.name, ctx.vault.canonical, records, note.abs, ctx.root), action: 'create' };
   const block = noteBlock(records, note.abs);
   const starts = before.split(START_PREFIX).length - 1, ends = before.split(NOTE_END).length - 1;
   const s = before.indexOf(START_PREFIX), e = before.indexOf(NOTE_END);
@@ -511,6 +517,15 @@ function templateText(template: typeof TEMPLATES[number], dir = BRAIN_DIR) {
   return { rel, text: patchFrontmatter(body, { id: `brain:${template.name}`, kind: template.kind, scope: '.', status: 'proposed', sources: [rel], source_hash: sha256(body) }) };
 }
 
+/** AgentOS-owned files adopted in place (frontmatter only) instead of a new template: `init` writes them. */
+const OWNED: Record<string, string> = { decisions: '.agentos/decisions.md', architecture: '.agentos/architecture.md' };
+/** Project docs that already cover a template: no template is created (no duplicate) and the doc is not edited;
+ *  init names the `brain register` command instead. */
+const COVERED: Record<string, string[]> = { architecture: ['ARCHITECTURE.md', 'docs/architecture.md'], conventions: ['CONVENTIONS.md', 'docs/conventions.md'], glossary: ['GLOSSARY.md', 'docs/glossary.md'] };
+
+/** Creates the missing templates and adopts what exists: a record with the template id or kind, an AgentOS-owned
+ *  file (registered in place) or a covering project doc (named, untouched). Repeatable: a set-up Brain is a no-op.
+ *  A non-record file at a template path is refused, and then nothing is written. `agentos init` runs this too. */
 export async function initBrain(ctx: BrainCtx, options: { dryRun?: boolean; json?: boolean; location?: string }) {
   const toVault = options.location === 'vault';
   if (options.location !== undefined && !['vault', 'workspace'].includes(options.location)) throw new Error('--location must be workspace or vault');
@@ -518,24 +533,38 @@ export async function initBrain(ctx: BrainCtx, options: { dryRun?: boolean; json
   if (toVault && await vaultUnavailable(ctx.root, ctx.vault, ctx.vaultOff)) throw new Error(`vault unavailable: ${ctx.vault.dir}. Nothing was written.`);
   const records = await loadBrain(ctx.root, ctx.repos, ctx.vault);
   const base = toVault ? ctx.vault.vault : ctx.root;
-  const hasDecisions = toVault || await lstat(join(ctx.root, '.agentos/decisions.md')).then(() => true, () => false);
-  const creates = [...TEMPLATES, ...(hasDecisions ? [] : [DECISIONS_TEMPLATE])].map((template) => templateText(template, toVault ? (ctx.vault.dest === '.' ? '' : ctx.vault.dest) : BRAIN_DIR));
-  const existing = [];
-  for (const file of creates) if (await lstat(join(base, file.rel)).then(() => true, () => false)) existing.push(file.rel);
-  for (const file of creates) { const id = `brain:${basename(file.rel, '.md')}`; const used = records.find((record) => record.id === id); if (used && !existing.includes(file.rel)) existing.push(`${id} (id already used by ${used.path})`); }
+  const found = (abs: string) => lstat(abs).then(() => true, () => false);
+  const creates = [], registers = [], present = [], covered = [], existing = [];
+  for (const template of [...TEMPLATES, DECISIONS_TEMPLATE]) {
+    if (toVault && template === DECISIONS_TEMPLATE) continue; // decisions stay in the workspace
+    const record = records.find((r) => r.id === `brain:${template.name}`);
+    if (record) { present.push(`${record.id} (${record.path})`); continue; }
+    if (!toVault && OWNED[template.name] && await found(join(ctx.root, OWNED[template.name]))) {
+      const plan = await planRegister(ctx, records, join(ctx.root, OWNED[template.name]), { kind: template.kind, ...(template.name === 'architecture' ? { status: 'proposed' } : {}) });
+      if (Object.keys(plan.missing).length) registers.push(plan); else present.push(`${plan.id} (${plan.rel})`);
+      continue;
+    }
+    const sameKind = template.kind !== 'note' && records.find((r) => r.kind === template.kind && r.state !== 'invalid');
+    if (sameKind) { present.push(`${sameKind.id} (${sameKind.path}, ${template.kind})`); continue; }
+    const doc = toVault ? undefined : (await Promise.all((COVERED[template.name] ?? []).map(async (rel) => (await found(join(ctx.root, rel)) ? rel : null)))).find(Boolean);
+    if (doc) { covered.push({ rel: doc, kind: template.kind }); continue; }
+    const file = templateText(template, toVault ? (ctx.vault.dest === '.' ? '' : ctx.vault.dest) : BRAIN_DIR);
+    if (await found(join(base, file.rel))) existing.push(file.rel); else creates.push(file);
+  }
   if (existing.length) return out(options.json, false, { existing }, ['AgentOS brain init: FAIL', ...existing.map((rel) => `- ${rel} exists; refusing to overwrite it.`), 'Nothing was written. Register existing files with `agentos brain register <path>`.']);
-  const decisions = !toVault && hasDecisions ? await planRegister(ctx, records, join(ctx.root, '.agentos/decisions.md'), { kind: 'decision' }) : null;
-  const registers = decisions && Object.keys(decisions.missing).length ? decisions : null;
-  const stale = options.dryRun ? NO_COMMIT : await commit(ctx, async () => {
-    await mkdirTracked(toVault ? ctx.vault.dir : join(ctx.root, BRAIN_DIR));
+  const stale = options.dryRun || (!creates.length && !registers.length) ? NO_COMMIT : await commit(ctx, async () => {
+    if (creates.length) await mkdirTracked(toVault ? ctx.vault.dir : join(ctx.root, BRAIN_DIR));
     for (const file of creates) if (!(await writeFileExclusiveAtomic(join(base, file.rel), Buffer.from(file.text))).created) throw new Error(`${file.rel} appeared while writing; nothing was written.`);
-    if (registers) await writeFileAtomic(registers.abs, registers.next);
+    for (const plan of registers) await writeFileAtomic(plan.abs, plan.next);
   });
   const verb = options.dryRun ? 'Would create' : 'Created';
-  return out(options.json, true, { dryRun: Boolean(options.dryRun), created: creates.map((file) => file.rel), registered: registers ? [registers.rel] : [], ...stale.flags }, [
+  return out(options.json, true, { dryRun: Boolean(options.dryRun), created: creates.map((file) => file.rel), registered: registers.map((plan) => plan.rel), present, covered: covered.map((doc) => doc.rel), ...stale.flags }, [
     `AgentOS brain init${options.dryRun ? ' (dry run)' : ''}${toVault ? ` into the linked vault folder ${ctx.vault.dir} (paths below are vault-relative)` : ''}`,
     ...creates.map((file) => `- ${verb}: ${file.rel} (status: proposed; sections marked ${UNKNOWN})`),
-    ...(registers ? [`- ${options.dryRun ? 'Would register' : 'Registered'}: .agentos/decisions.md as ${registers.id} (existing file; frontmatter only, not duplicated)`] : decisions ? ['- .agentos/decisions.md is already registered'] : []), ...stale.lines,
+    ...registers.map((plan) => `- ${options.dryRun ? 'Would register' : 'Registered'}: ${plan.rel} as ${plan.id} (existing file; frontmatter only, not duplicated)`),
+    ...present.map((entry) => `- Present: ${entry} (kept as is)`),
+    ...covered.map((doc) => `- Found ${doc.rel}: not duplicated and not edited; adopt it with \`agentos brain register ${doc.rel} --kind ${doc.kind}\``),
+    ...stale.lines,
   ]);
 }
 
