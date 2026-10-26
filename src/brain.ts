@@ -11,12 +11,12 @@
  */
 import { createHash } from 'node:crypto';
 import { lstat, readFile, readdir } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { parseDocument, stringify as stringifyYaml } from 'yaml';
 import { checkpointEvidence, loadCurrent, slugTask } from './checkpoint.js';
 import { subjectOf, taskTerms, termHits } from './context-builder.js';
 import { markdownHeadings } from './markdown.js';
-import { assertRelativeBoundaryPath } from './task-scope.js';
+import { assertRelativeBoundaryPath, isWithin } from './task-scope.js';
 import { mkdirTracked, removeTracked, withMutationTransaction, writeFileAtomic, writeFileExclusiveAtomic } from './core.js';
 
 export const KINDS = ['architecture', 'decision', 'adr', 'convention', 'feature', 'note'];
@@ -203,7 +203,7 @@ export async function loadBrain(root: string, repos: string[], vault?: VaultBind
 }
 
 const valid = (records: BrainRecord[]) => records.filter((record) => record.state !== 'invalid');
-const inside = (dir: string, abs: string) => { const rel = relative(dir, abs); return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel)); };
+const inside = isWithin;
 
 /** Where a path may hold a record: the workspace, or (canonical: vault) the linked folder — never the rest of the vault. */
 function classify(ctx: BrainCtx, abs: string): { location: 'workspace' | 'vault'; base: string } | { refused: string } | null {

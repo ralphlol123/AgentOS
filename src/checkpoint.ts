@@ -14,7 +14,7 @@ import { createHash } from 'node:crypto';
 import { readFile, readdir, realpath, stat } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { collectRunHandoffGitState, runReadOnlyGit } from './git-evidence.js';
-import { assertRelativeBoundaryPath } from './task-scope.js';
+import { assertRelativeBoundaryPath, isWithin } from './task-scope.js';
 import type { ContextBundle } from './context-builder.js';
 import { locateManagedBlock, mkdirTracked, withMutationTransaction, writeFileAtomic, writeFileExclusiveAtomic } from './core.js';
 
@@ -193,8 +193,12 @@ export interface CheckpointOptions {
 async function checkCwd(root: string, value: string | undefined) {
   if (value === undefined) return '.';
   if (!isAbsolute(value)) { const cwd = posix(value); if (cwd !== '.') assertRelativeBoundaryPath(cwd); return cwd; }
-  const rel = relative(root, await realpath(value).catch(() => resolve(value)));
-  if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) throw new Error(`--cwd ${value} is outside the workspace ${root}; use a path inside it (workspace-relative or absolute).`);
+  // Both sides canonical: the root may be reached through an alias of the --cwd path (a symlink, macOS
+  // /var → /private/var, a Windows 8.3 short name such as C:\Users\RUNNER~1) and must still compare equal.
+  const real = async (path: string) => realpath(path).catch(() => resolve(path));
+  const [base, target] = [await real(root), await real(value)];
+  const rel = relative(base, target);
+  if (!isWithin(base, target)) throw new Error(`--cwd ${value} is outside the workspace ${root}; use a path inside it (workspace-relative or absolute).`);
   return posix(rel.split(sep).join('/'));
 }
 

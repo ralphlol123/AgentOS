@@ -161,3 +161,20 @@ test('boundary: doctor rejects escaping repository paths before any repair', asy
     await rejectedWithoutChanges(base, () => doctorAgentOS({ cwd: root, fix: true }));
   }
 });
+
+test('A14: isWithin uses the platform separator: on Windows `..\\x` is a sibling, another drive is outside', async () => {
+  const { win32, posix } = await import('node:path');
+  const { isWithin } = await import('../dist/task-scope.js');
+  for (const [p, root, file, sibling, other] of [
+    [win32, 'C:\\ws', 'C:\\ws\\.agentos\\tasks.md', 'C:\\ws\\AGENTS.md', 'D:\\ws\\x'],
+    [posix, '/ws', '/ws/.agentos/tasks.md', '/ws/AGENTS.md', '/other/x'],
+  ]) {
+    assert.equal(isWithin(root, root, p), true);
+    assert.equal(isWithin(root, file, p), true);
+    assert.equal(isWithin(sibling, p.join(root, '.agentos'), p), false, 'a sibling of a tracked file is not inside it (rollback snapshot)');
+    assert.equal(isWithin(root, p.dirname(root), p), false);
+    assert.equal(isWithin(root, other, p), false);
+    assert.equal(isWithin(root, p.join(root, '..foo'), p), true, 'a name that merely starts with .. is inside');
+  }
+  assert.equal(isWithin('C:\\ws', 'c:\\WS\\x', win32), true, 'Windows paths compare case-insensitively');
+});

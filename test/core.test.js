@@ -851,6 +851,7 @@ test('migrate claude --preserve disables active .claude files and patches CLAUDE
 
   const result = await migrateClaudeAgentOS({ cwd: root, preserve: true });
   assert.equal(result.ok, true);
+  assert.match(result.text, /^Moved: \.claude\/agents -> \.claude\/agents\.agentos-legacy-\S+$/m, 'workspace-relative, `/`-separated on every platform (A14)');
   assert.equal(await exists(join(root, '.claude/agents')), false);
   assert.equal(await exists(join(root, '.claude/settings.local.json')), false);
   assert.equal(await exists(join(root, '.claude/README.agentos.md')), true);

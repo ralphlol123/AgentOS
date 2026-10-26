@@ -10,6 +10,8 @@
  * so a frontend task can read a backend contract without gaining backend edit scope.
  */
 
+import * as nodePath from 'node:path';
+
 export interface TaskScope {
   /** Repo inventory as `id=path`; information only, not permission. */
   repos: string[];
@@ -22,6 +24,13 @@ export function assertRelativeBoundaryPath(value: string) {
   if (!value || value.includes('\0') || value.includes('\\') || value.startsWith('/') || /^[a-z]:/i.test(value) || value.split('/').includes('..')) {
     throw new Error(`Unsafe boundary path; expected a workspace-relative path: ${value}`);
   }
+}
+
+/** `candidate` is `root` or inside it, with the platform's separator (`..\x` on Windows is outside) and
+ *  across Windows drives (an absolute relative path is outside). `p` is injectable so tests can check win32 on Linux. */
+export function isWithin(root: string, candidate: string, p: typeof nodePath.win32 = nodePath) {
+  const rel = p.relative(root, candidate);
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${p.sep}`) && !p.isAbsolute(rel));
 }
 
 const KEYS = ['read', 'edit'];

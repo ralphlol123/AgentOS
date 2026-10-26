@@ -1,7 +1,7 @@
 // Project Brain trial defects D1–D4 (docs/evidence/project-brain-trials.md): subcommand --help, absolute --check
 // --cwd from a nested dir, Brain records outside the Obsidian vault folder, WSL → Windows vault paths.
 import assert from 'node:assert/strict';
-import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -78,6 +78,20 @@ test('D2: from a nested dir, an absolute --cwd inside the workspace is normalize
     assert.match(outside.stderr, /outside the workspace/, extra.join(' '));
     fails(cli(['checkpoint', '--task', 'd2', '--progress', 'p', '--check', CHECK, '--cwd', '../x', ...extra], nested));
   }
+});
+
+test('D2 (A14): an absolute --cwd is compared canonically, so a root reached through an alias of it is still inside', async (t) => {
+  // The Windows runner reaches the workspace through an 8.3 short name (C:\\Users\\RUNNER~1) while realpath gives
+  // the long one; a directory link is the same alias on every platform ('junction' needs no privilege on Windows).
+  const { root } = await project(t);
+  const alias = join(root, '..', 'alias ws');
+  await symlink(root, alias, 'junction');
+  const { checkpointAgentOS } = await import('../dist/core.js');
+  const r = await checkpointAgentOS({ cwd: alias, task: 'd2-alias', progress: 'p', dryRun: true, checks: [{ command: CHECK, cwd: root }, { command: CHECK, cwd: alias }] });
+  assert.equal(r.ok, true, r.text);
+  assert.deepEqual(r.record.receipts.filter((x) => x.note === 'dry run').map((x) => x.cwd), ['.', '.'], 'real and alias spellings both normalize to the root');
+  const outside = checkpointAgentOS({ cwd: alias, task: 'd2-alias', progress: 'p', dryRun: true, checks: [{ command: CHECK, cwd: resolve(root, '..') }] });
+  await assert.rejects(outside, /outside the workspace/);
 });
 
 // --- D3: records outside the Obsidian vault folder ----------------------------------------------------

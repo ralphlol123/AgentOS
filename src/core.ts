@@ -3,7 +3,7 @@ import { withWorkspaceWriter } from './workspace-lock.js';
 import { readImportSource } from './import-source.js';
 import { appendContextRecord, literalMarkdown, markdownHeadings, markdownSection } from './markdown.js';
 import { HANDOFF_ROLES, recognizeSections, resolveObjective, sectionText } from './context-sections.js';
-import { assertRelativeBoundaryPath, validateTaskScope } from './task-scope.js';
+import { assertRelativeBoundaryPath, isWithin, validateTaskScope } from './task-scope.js';
 import { buildContextBundle, findAcceptance } from './context-builder.js';
 import { applyBrain, splitFrontmatter, brainContextRecords, brainDoctor, brainMissing, checkBrain, dirState, indexBrain, initBrain, ioReason, listBrain, newIndexNote, loadBrain, previewBrain, proposeBrain, registerBrain, searchBrain, showBrain, validateBrain, verifyBrain, type BrainCtx, type VaultBinding } from './brain.js';
 import { checkpointContextRecord, checkpointProblems, listCheckpoints, resolveTask, resumeCheckpoint, showCheckpoint, writeCheckpoint, type CheckpointContext } from './checkpoint.js';
@@ -113,8 +113,7 @@ class MutationTransaction {
 
 function isDescendantPath(root: string, candidate: string) {
   if (root === candidate) return false;
-  const rel = relative(root, candidate);
-  return Boolean(rel) && rel !== '..' && !rel.startsWith(`..${'/'}`) && !isAbsolute(rel);
+  return root !== candidate && isWithin(root, candidate);
 }
 
 // Walks up from `path` to find the highest ancestor that does not exist yet
@@ -1515,7 +1514,7 @@ const OBSIDIAN_USAGE = [
   '       agentos obsidian status',
 ].join('\n');
 
-const isInside = (dir: string, abs: string) => { const rel = relative(dir, abs); return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel)); };
+const isInside = isWithin;
 const toPosix = (path: string) => path.split(sep).join('/');
 
 /** The index note: links (relative paths) to the Brain records, never copies; Brain writes refresh its generated block (src/brain.ts). */
@@ -1753,8 +1752,9 @@ async function migrateClaudeAgentOSUnlocked(options: any = {}) {
     const src = join(root, srcRel);
     if (!await exists(src)) continue;
     const dst = await uniqueLegacyPath(root, dstRel);
-    lines.push(`${dryRun ? 'Would move' : 'Moved'}: ${srcRel} -> ${relative(root, dst)}`);
-    await assertBoundaryTarget(root, relative(root, dst));
+    const movedRel = toPosix(relative(root, dst));
+    lines.push(`${dryRun ? 'Would move' : 'Moved'}: ${srcRel} -> ${movedRel}`);
+    await assertBoundaryTarget(root, movedRel);
     plannedMoves.push({ src, dst });
   }
   const readmeRel = '.claude/README.agentos.md';
