@@ -1686,6 +1686,7 @@ async function obsidianStatusAgentOS(options: any = {}) {
       `Vault: ${config.vault ? `${config.vault} (from ${config.vaultFrom})` : '(not bound on this machine)'}`,
       `Workspace: ${config.destination}`,
       workspace ? `Workspace path: ${workspace}` : null,
+      vault ? wslLine('Vault Windows path (WSL)', vault) : null,
       `Linked notes: ${config.linked.length ? config.linked.join(', ') : 'none; engines may create/edit files inside the workspace when explicitly tasked'}`,
       config.managed ? `Canonical: ${config.canonical}; index note: ${config.index || '(none)'}` : null,
       'Safety: no bulk vault access; writes confined to workspace folder',
@@ -1699,9 +1700,26 @@ async function obsidianStatusAgentOS(options: any = {}) {
 function obsidianAppLine(dir: string) {
   const names = process.platform === 'win32' ? ['Obsidian.exe', 'obsidian.exe'] : ['obsidian', 'Obsidian.exe', 'obsidian.exe'];
   const found = String(process.env.PATH || '').split(process.platform === 'win32' ? ';' : ':').filter(Boolean).flatMap((d) => names.map((n) => join(d, n))).find((p) => { try { return statSync(p).isFile(); } catch { return false; } });
-  return found
+  return [found
     ? `Obsidian app: found (${found}). Optional: "Open folder as vault" → ${dir}.`
-    : `Obsidian app: not found on PATH (optional; nothing above needs it). To browse in Obsidian: install it from https://obsidian.md, then "Open folder as vault" → ${dir}.`;
+    : `Obsidian app: not found on PATH (optional; nothing above needs it). To browse in Obsidian: install it from https://obsidian.md, then "Open folder as vault" → ${dir}.`,
+  wslLine('Windows path (WSL)', dir)].filter(Boolean).join('\n');
+}
+
+/** Explicit WSL path mapping for a Windows-side app (Obsidian): `/mnt/<d>/rest` → `<D>:\rest`; any other absolute
+ *  path → `\\wsl$\<distro>\rest`. Null when unmappable (Linux-side path, no distro name). Pure string mapping, no `wslpath`. */
+export function wslWindowsPath(path: string, distro: string | undefined) {
+  const drive = /^\/mnt\/([a-z])(?:\/(.*))?$/i.exec(path);
+  if (drive) return `${drive[1].toUpperCase()}:\\${(drive[2] ?? '').replace(/\/+$/, '').replaceAll('/', '\\')}`;
+  return path.startsWith('/') && distro ? `\\\\wsl$\\${distro}${path.replace(/\/+$/, '').replaceAll('/', '\\')}` : null;
+}
+
+/** `<label>: <Windows path>` under WSL (WSL_DISTRO_NAME, or "microsoft" in the kernel release); otherwise null. */
+function wslLine(label: string, path: string) {
+  let wsl = Boolean(process.env.WSL_DISTRO_NAME);
+  if (!wsl) try { wsl = /microsoft/i.test(readFileSync('/proc/sys/kernel/osrelease', 'utf8')); } catch { /* not Linux */ }
+  const win = wsl ? wslWindowsPath(path, process.env.WSL_DISTRO_NAME || undefined) : null;
+  return win ? `${label}: ${win}` : null;
 }
 
 function obsidianPermissionErrorText(error, vault, destination) {
