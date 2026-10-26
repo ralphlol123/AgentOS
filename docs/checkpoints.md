@@ -71,7 +71,7 @@ A repo whose path is missing, or is not inside any git work tree, is `available:
 | `not-run` | a declared build/test/check/lint command of an in-scope repo that no `--check` ran (or any check under `--dry-run`) |
 | `unavailable` | the check could not start (binary missing, not executable, `--cwd` missing) |
 
-`--check` runs without a shell (`execFile`, quotes are honoured; no pipes, `&&`, globs or `$VARS`; wrap those in a script), in `--cwd` (workspace-relative) or the workspace root. `state_tested` is the workspace `state` measured right before the check ran (for claims: at record time; `null` for `not-run`). `evidence` is the relative path of the saved output log.
+`--check` runs without a shell (`execFile`, quotes are honoured; no pipes, `&&`, globs or `$VARS`; wrap those in a script), in `--cwd` or the workspace root. `--cwd` is relative to the workspace root, never to the directory you run `agentos` from: from any subdirectory, no `--cwd` and `--cwd .` both mean the root, and `--cwd web` means `<root>/web`. An absolute `--cwd` inside the workspace is accepted and recorded workspace-relative (`--cwd "$PWD"` from `<root>/web` records `cwd: web`); one outside the workspace, or a relative one with `..`, is refused before anything runs, including with `--dry-run`. `state_tested` is the workspace `state` measured right before the check ran (for claims: at record time; `null` for `not-run`). `evidence` is the relative path of the saved output log.
 
 ## Writing and atomicity
 

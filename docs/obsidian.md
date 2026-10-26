@@ -29,6 +29,8 @@ A relative `vault` is resolved against the workspace root, never the current dir
 
 This is the preferred Obsidian path: open the knowledge folder itself as a project vault ("Open folder as vault"). Obsidian then adds `.obsidian/` and you may add notes there; Brain writes and `agentos brain index` rewrite only the generated block of `index.md`, and leave `.obsidian/` and every other note byte- and mtime-identical (test-checked).
 
+**What Obsidian can show.** Obsidian opens only files inside the vault folder. The default Brain records (`agentos brain init`: `.agentos/brain/*.md`, `.agentos/decisions.md`) live outside `knowledge/`, so their links in `index.md` (`../.agentos/…`) leave the vault and Obsidian cannot open or edit them. The generated block says so: each such line ends with `— outside this vault: edit in your editor`, and one sentence above the list explains it. Edit those records in your editor or through `agentos brain propose|apply`. To have a record viewable and editable in Obsidian, create it inside the vault folder and register it in place: `agentos brain register knowledge/<note>.md` (that line is not marked). AgentOS never relocates, copies or symlinks a record to make it visible: each record has exactly one editable file.
+
 ## Existing vault: `agentos obsidian link`
 
 ```bash
@@ -37,9 +39,11 @@ agentos obsidian link --vault <abs-path> --dest <sub/folder> [--canonical worksp
 
 Registers one dedicated project folder inside an existing vault. It creates only `<vault>/<dest>/` (with `--create`; without it a missing folder is an error) and `<vault>/<dest>/<Project> AgentOS Index.md`; nothing else in the vault is touched — no `.obsidian/` edits, no other notes, no symlinks, no copies of records (tests snapshot the whole vault, bytes and mtimes, before and after, with an unrelated note and a `.obsidian/` settings file in it). An existing index note is left unchanged; re-running the same command changes nothing in the vault, `project.yaml`, `local.yaml` or `knowledge.md`. It also writes `.agentos/knowledge.md`, patches `knowledge.obsidian` in `project.yaml` with the portable keys (`destination: <dest>`, `canonical`, `index`) and writes the host path to `.agentos/local.yaml`.
 
-With `canonical: workspace` this note is **navigation only**, and says so: it starts with frontmatter `tags: [agentos-navigation]` (a valid Obsidian property) and a `**Navigation only.**` paragraph — the records live in the workspace, outside the vault; the vault does not contain or sync them, and Obsidian may not open links that leave the vault. To edit records in Obsidian, open the workspace knowledge folder (`obsidian init`) as its own vault.
+With `canonical: workspace` this note is **navigation only**, and says so: it starts with frontmatter `tags: [agentos-navigation]` (a valid Obsidian property) and a `**Navigation only.**` paragraph — the records live in the workspace, outside the vault; the vault does not contain or sync them, and Obsidian may not open links that leave the vault. Obsidian edits only records stored inside the vault it opens; every record line here is marked `— outside this vault: edit in your editor` (see *What Obsidian can show* above).
 
 Setup prints optional app guidance only: `Obsidian app: found (<path>)` or `Obsidian app: not found on PATH (optional; nothing above needs it) …`. The check is a `PATH` lookup (`obsidian`, `Obsidian.exe`); an AppImage, Flatpak or Windows-side install reads as not found. AgentOS never installs or launches the app.
+
+**WSL → Windows path mapping.** Under WSL (`WSL_DISTRO_NAME` is set, or `/proc/sys/kernel/osrelease` contains `microsoft`), `obsidian init` and `obsidian link` add `Windows path (WSL): …` and `obsidian status` adds `Vault Windows path (WSL): …`, the folder a Windows Obsidian opens. The mapping is explicit string mapping, no `wslpath` call: `/mnt/<d>/rest` → `<D>:\rest`; any other absolute path → `\\wsl$\<distro>\rest` (`<distro>` from `WSL_DISTRO_NAME`; without it a Linux-side path is not mapped and no line is printed). Code: `wslWindowsPath` in `src/core.ts`.
 
 `obsidian link` is `obsidian link-workspace` (boundary only, no index note, no `canonical`) plus the index note and the canonical location; both share one code path. `link-obsidian` (exact-note `link-only` mode) is unchanged and still works.
 

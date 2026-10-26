@@ -295,6 +295,8 @@ What is enforced and what is only instruction, per engine: [docs/engines.md](doc
 
 ## Commands
 
+`agentos <command> --help` (or `-h`) prints one command's usage.
+
 ```bash
 agentos init [--new|--existing] [--agents minimal|detected|developer,tester,reviewer,release-manager] [--dry-run]
 agentos status
