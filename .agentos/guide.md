@@ -11,6 +11,12 @@ How to operate an AgentOS workspace from any coding engine. This is a command ma
 - Declare your role (`.agentos/agents/`) and the repo scope before editing. Edit only inside that scope.
 - If a command is unclear, run `agentos --help` instead of guessing flags.
 
+## Setup and project knowledge
+
+- `agentos init` (or `--existing`) also sets up the Brain: missing templates in `.agentos/brain/` mark unknowns; existing records and docs are adopted, never duplicated or rewritten. Safe to re-run.
+- Context opens with a bounded overview (`.agentos/memory.md`); Brain records follow by reference when relevant (`agentos brain search <terms>`).
+- Obsidian is optional: `agentos obsidian init` (folder to open as its own vault) or `agentos obsidian link --vault <abs-path> --dest <sub/folder> --create` (navigation note in an existing vault). The vault path is machine-local: `.agentos/local.yaml`.
+
 ## If you started inside a child repo
 
 - This directory is one repo of a larger workspace. The AgentOS root is the nearest parent that has `.agentos/`.
