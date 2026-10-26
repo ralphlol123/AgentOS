@@ -184,7 +184,7 @@ agentos checkpoint --task <id> --progress "<done>" --next "<remaining>"
 agentos resume --task <id>                  # next session or another engine; same <id>
 ```
 
-`context` opens with a bounded overview from `.agentos/memory.md`. A task without a checkpoint starts clean: `resume` says there is nothing to resume and invents no prior work. The full command map is `.agentos/guide.md` in every workspace (also shipped in the package, with this file, under `node_modules/agentos-for-projects/docs/`).
+`context` opens with a bounded overview from `.agentos/memory.md`. A task without a checkpoint starts clean: `resume` reports a clean start (exit 0) and invents no prior work. The full command map is `.agentos/guide.md` in every workspace (also shipped in the package, with this file, under `node_modules/agentos-for-projects/docs/`).
 
 ## Obsidian (optional)
 

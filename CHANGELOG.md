@@ -4,6 +4,14 @@ All notable changes to AgentOS for Projects are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **Checkpoint-driven knowledge proposals (Project Brain goal slice 5).** `agentos brain propose <id> --from <file> --task <id>` ties a proposal to the task's current checkpoint (`task`, `checkpoint`, `evidence`: changed paths and receipt states); a progress-only checkpoint (no changed file, no `observed-pass` check) stages nothing, and re-staging the same event is a no-op (`duplicate: true`). The checkpoint output, the startup loop and `.agentos/guide.md` ask the engine to review whether completed work changed durable knowledge — an instruction, not a runtime hook; AgentOS calls no model and `apply` stays the owner's step. Run `agentos doctor --fix` to refresh the adapters and guide. See `docs/brain.md#knowledge-upkeep-at-completion`.
+
+### Changed
+
+- `agentos resume --task <id>` with no checkpoint and no evidence of work now exits 0 with `Status: clean start …` (was exit 1); it still invents no prior work.
+
 ### Fixed
 
 - **Project Brain independent of Obsidian (Project Brain slice 1).** An absent, disabled (`knowledge.obsidian.enabled: false`, new) or invalid `knowledge.obsidian` block no longer blocks `brain`, `context`, `checkpoint` or `resume`; an invalid block is a `doctor` problem and a `context --json` warning. With `canonical: workspace` a missing linked folder is a warning, not Missing, so `context --require-complete` passes. Records whose only copy is in an offline vault, or in a vault the integration no longer reads, stay under Missing. A corrupted `.agentos/project.yaml` now fails those commands instead of reading as an empty project. A Brain write is kept when regenerating `.agentos/brain/index.json` fails (reported as stale). See `docs/brain.md#independent-of-obsidian`, `docs/project-brain-acceptance.md`.

@@ -273,7 +273,7 @@ The path below is the one Phynceon's 2026-10-25 cross-engine trial walked (Claud
 
    `--claim "<text>"` records something the engine reports but AgentOS did not observe.
 7. **Fresh Codex**: `agentos resume --task greeting` (accomplished / remaining / receipts / reconciliation, read-only), then `agentos context codex --task greeting`. The trial ran `codex exec -a never` with both as the prompt; Codex continued from the `observed-pass`/`claimed`/`not-run` receipts and wrote its own checkpoint (`--engine codex`).
-8. **Brain**: record what the task taught as a proposal; the engine proposes, the owner reviews and applies: `agentos brain propose <id-or-path> --from - --summary "<why>"`, `agentos brain preview <proposal>`, `agentos brain apply <proposal>`. See [docs/brain.md](docs/brain.md).
+8. **Brain**: record what the task taught as a proposal; the engine proposes, the owner reviews and applies: `agentos brain propose <id-or-path> --from - --task <id> --summary "<why>"` (the checkpoint output asks for this review; progress-only work stages nothing), `agentos brain preview <proposal>`, `agentos brain apply <proposal>`. See [docs/brain.md](docs/brain.md).
 9. **Obsidian (optional)**: `agentos obsidian init` (plain `knowledge/` folder) or `agentos obsidian link --vault <abs-path> --dest <sub/folder> [--canonical workspace|vault] --create`. See [docs/obsidian.md](docs/obsidian.md).
 
 What is enforced and what is only instruction, per engine: [docs/engines.md](docs/engines.md). Proven / not proven per scenario: [docs/acceptance-matrix.md](docs/acceptance-matrix.md).
@@ -340,7 +340,7 @@ agentos resume [--task <id>] [--engine <e>] [--json]
 agentos brain init [--location workspace|vault] [--dry-run]
 agentos brain register <path> [--kind architecture|decision|adr|convention|feature|note] [--scope <repo-id|.>] [--status proposed|accepted] [--by <name>] [--dry-run]
 agentos brain list [--status <s>] [--kind <k>] [--json] | show <id-or-path> [--json] | search <terms...> [--json] | check [--json]
-agentos brain propose <id-or-path> --from <file|-> [--summary "<text>"] [--supersedes <id>] [--append] [--by <name>] [--dry-run]
+agentos brain propose <id-or-path> --from <file|-> [--summary "<text>"] [--supersedes <id>] [--append] [--by <name>] [--task <id>] [--dry-run]
 agentos brain preview <proposal> | validate <proposal> [--json]
 agentos brain apply <proposal> [--dry-run]
 agentos brain verify <id-or-path> [--by <name>] [--dry-run]

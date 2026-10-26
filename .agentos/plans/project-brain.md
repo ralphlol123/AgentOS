@@ -37,6 +37,13 @@ Slice 5 (proposals) runs before the real-environment trials so the connected dem
 - Bootloaders: `startupLoop(engine)` line in AGENTS.md (`codex|opencode`), CLAUDE.md (`claude-code`), .hermes.md (`hermes`); guide gains `## Setup and project knowledge` (budget raised 4608 → 5376 B). No `agentos guide` command (the existing ablation-backed test forbids it).
 - Package: `docs/{quickstart,brain,obsidian,engines}.md` added to `files`. Hermes start workflow: proposal only, `docs/evidence/hermes-start-workflow-proposal.md`.
 
+## Slice 4 design (goal slice 5, as built)
+
+- `brain propose … --task <id>` (src/brain.ts) loads the task's `current.json` record (`loadCurrent`), refuses (exit 1, zero writes) when there is none, it is incomplete, or `checkpointEvidence` finds no changed path and no `observed-pass` receipt; otherwise adds `task`, `checkpoint`, `evidence` to the ordinary proposal. Everything after that is the existing lifecycle.
+- Dedupe: file name `<task>-<sha256(target, checkpoint, mode, norm(text), supersedes)[:12]>-<record>.md`; an existing file in `proposals/` or `applied/` → `already staged`, exit 0.
+- Trigger: `knowledgeLine(task)` at the end of every non-recovered checkpoint output, one clause in `startupLoop`, one guide line. Instruction-following only; no hook, no model call.
+- `resume` with no checkpoint and no evidence: `status: none`, exit 0, `Status: clean start …`.
+
 ## Known risks
 
 - `bun` is not installed on the dev host; gates run the same scripts with `npm run` (no global installs allowed).
