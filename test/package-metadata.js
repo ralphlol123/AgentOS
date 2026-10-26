@@ -13,6 +13,9 @@ function run(command, args, options = {}) {
     cwd: options.cwd ?? root,
     encoding: 'utf8',
     stdio: options.stdio ?? 'pipe',
+    // Windows: npm is npm.cmd, which Node only spawns through a shell.
+    // ponytail: args are not shell-quoted; fine while the temp dir has no spaces (CI runners), quote them if that changes.
+    shell: process.platform === 'win32',
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {
