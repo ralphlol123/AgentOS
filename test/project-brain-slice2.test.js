@@ -1,6 +1,7 @@
 // Project Brain slice 2: index refresh, nested status, unreadable storage, missing-index recovery (F7–F10, A05–A08).
 import assert from 'node:assert/strict';
 import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -177,7 +178,7 @@ test('F8/A06: root and nested invocations resolve the same binding', async (t) =
   ok(top);
   ok(nested);
   assert.equal(nested.stdout, top.stdout);
-  assert.match(top.stdout, new RegExp(`Workspace path: ${join(root, 'knowledge').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`), 'resolved against the workspace root');
+  assert.match(top.stdout, new RegExp(`Workspace path: ${join(realpathSync(root), 'knowledge').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`), 'resolved against the workspace root');
   assert.deepEqual(json(['brain', 'list'], deep).out, json(['brain', 'list'], root).out);
   assert.deepEqual(json(['brain', 'check'], deep).out, json(['brain', 'check'], root).out);
   await rm(join(root, NOTE));

@@ -1,6 +1,7 @@
 // Project Brain slice 3: setup and discovery (F5, F6, F10 bindings; A09–A12).
 import assert from 'node:assert/strict';
 import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, unlink, writeFile } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -164,7 +165,7 @@ test('A10: one Brain per workspace: a child repo uses the parent Brain; sibling 
     assert.equal(json(['brain', 'search', 'alpha', 'bravo', 'inner'], root).out.records.filter((rec) => foreign.includes(rec.id)).length, 0);
   }
   const status = cli(['status'], join(alpha, 'web'));
-  assert.match(status.stdout, new RegExp(`Root: ${alpha.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\n`));
+  assert.match(status.stdout, new RegExp(`Root: ${realpathSync(alpha).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\n`));
 });
 
 // --- A11 / F10: machine-local binding ----------------------------------------------------------------
