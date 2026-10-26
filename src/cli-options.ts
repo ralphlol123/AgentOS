@@ -34,7 +34,7 @@ export function validateCommandFlags(command: string, flags: Record<string, Flag
     context: ['task', 'role', 'scope', 'budget', 'json', 'include-superseded', 'require-enforcement', 'require-synced-config', 'require-complete'], engines: ['json'],
     checkpoint: ['task', 'engine', 'role', 'progress', 'blocker', 'next', 'check', 'cwd', 'claim', 'json', 'dry-run', 'recover'],
     resume: ['task', 'engine', 'json'],
-    brain: ['kind', 'scope', 'status', 'by', 'from', 'summary', 'supersedes', 'append', 'json', 'dry-run', 'location', 'adopt'],
+    brain: ['kind', 'scope', 'status', 'by', 'from', 'summary', 'supersedes', 'append', 'task', 'json', 'dry-run', 'location', 'adopt'],
     run: ['engine', 'role', 'repo', 'worktree', 'phase', 'reason', 'dry-run'], doctor: ['fix', 'json', 'normalize-repo-ids', 'adopt-custom-adapters', 'prune-retired', 'dry-run'], compact: ['dry-run', 'rewrite', 'checkpoint', 'objective', 'expect-state', 'diff'],
     'link-obsidian': ['vault', 'dest', 'link', 'create', 'dry-run'], obsidian: ['vault', 'dest', 'create', 'dry-run', 'canonical', 'dir'], adapters: [],
     skills: ['detected', 'mode', 'dry-run', 'replace', 'installed'], agents: ['name', 'dry-run', 'replace', 'installed', 'json', 'from-catalog', 'custom', 'role', 'scope'],

@@ -313,9 +313,10 @@ test('bootloaders stay short and carry the startup loop for their engine; one ta
     assert.match(text, /`agentos resume --task <id>`/, file);
     assert.match(text, /\.agentos\/guide\.md/, file);
   }
-  // No checkpoint yet: a clean start that invents nothing (exit 1 = nothing to resume, by design).
+  // No checkpoint yet: a clean start (exit 0) that invents nothing.
   const fresh = cli(['resume', '--task', 'demo', '--engine', 'codex'], root);
-  assert.match(fresh.stdout, /No checkpoint for task demo.*Nothing to resume; start with `agentos context codex --task demo`/s);
+  ok(fresh);
+  assert.match(fresh.stdout, /clean start — no checkpoint for task demo.*No prior work is assumed; start with `agentos context codex --task demo`/s);
   assert.doesNotMatch(fresh.stdout, /Progress:/);
   ok(cli(['checkpoint', '--task', 'demo', '--engine', 'claude-code', '--progress', 'PROGRESS-SENTINEL', '--next', 'NEXT-SENTINEL'], root));
   const resumed = cli(['resume', '--task', 'demo', '--engine', 'codex'], root);

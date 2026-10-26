@@ -4381,7 +4381,7 @@ const DISCOVERY_LINE = 'Next: open your engine here and run `agentos status`. To
 const STATE_RULE_LINE = 'State files: rewrite `.agentos/handoff.md` to the current state, never append to it; delete finished tasks from `.agentos/tasks.md`. Before an older entry leaves either file, copy it into a note under `.agentos/runs/`; never discard history.';
 const GUIDE_POINTER_LINE = 'Commands and workflows: `.agentos/guide.md` (load on demand). Run `agentos status` first.';
 // The startup loop, in each engine's own bootloader. The task id is the shared identity across engines.
-const startupLoop = (engine: string) => `Startup loop: \`agentos status\` → \`agentos context ${engine} --task <id>\` → work → \`agentos checkpoint --task <id> --progress "<done>" --next "<remaining>"\`. Next session or engine: \`agentos resume --task <id>\` (same <id>; no checkpoint yet means a clean start).`;
+const startupLoop = (engine: string) => `Startup loop: \`agentos status\` → \`agentos context ${engine} --task <id>\` → work → \`agentos checkpoint --task <id> --progress "<done>" --next "<remaining>"\`. If the work changed durable knowledge: \`agentos brain propose <record> --from <file> --task <id>\`. Next session or engine: \`agentos resume --task <id>\` (same <id>; no checkpoint yet means a clean start).`;
 
 // Shared by the AGENTS.md and CLAUDE.md child pointers. The CLI comes first on purpose: some engines
 // (observed: OpenCode run non-interactively) refuse reads outside their start directory, and a refused
@@ -4426,7 +4426,7 @@ function guideMd() {
     '- Before stopping or switching engines: `agentos checkpoint --task <id> --progress "<done>" --next "<remaining>" --check "<cmd>"`. Each `--check` runs as a receipt; `--claim "<text>"` records what AgentOS did not observe.',
     '- Next engine: `agentos resume --task <id>`, then `context`. No checkpoint was written: `agentos checkpoint --recover --task <id>`.',
     '- Prefer these to `agentos run handoff`: it writes only a prose note under `.agentos/runs/`, no receipts for `resume` to reconcile.',
-    '- Durable decision or convention: `agentos brain propose <id-or-path> --from <file|-> --summary "<why>"` (ids: `agentos brain list`). Engines propose, never apply; the owner runs `agentos brain preview <proposal>`, then `agentos brain apply <proposal>`.',
+    '- After the checkpoint, ask: did this work change durable knowledge (architecture, decision, convention)? If yes: `agentos brain propose <id-or-path> --from <file|-> --task <id> --summary "<why>"` (ids: `agentos brain list`); progress only: nothing. Engines propose, never apply; the owner runs `agentos brain preview <proposal>`, then `agentos brain apply <proposal>`.',
     '- Engine role config (`claude-code`, `codex`): `agentos agents sync <engine> --role <id> --dry-run`, then without `--dry-run`. When `agentos doctor` prints `Synced config: STALE`, re-run the command it prints; add `--replace` only when that line does.',
     '',
     '## Which command for which job',
@@ -5307,7 +5307,7 @@ export const BRAIN_USAGE = [
   'Usage: agentos brain init [--location workspace|vault] [--dry-run]   (vault: only with knowledge.obsidian.canonical: vault)',
   '       agentos brain register <path> [--kind architecture|decision|adr|convention|feature|note] [--scope <repo-id|.>] [--status proposed|accepted] [--by <name>] [--dry-run]',
   '       agentos brain list [--status <s>] [--kind <k>] | show <id-or-path> | search <terms…> | check   (read-only; all take --json)',
-  '       agentos brain propose <id-or-path> --from <file|-> [--summary "<text>"] [--supersedes <id>[,<id>]] [--append] [--by <name>] [--dry-run]',
+  '       agentos brain propose <id-or-path> --from <file|-> [--summary "<text>"] [--supersedes <id>[,<id>]] [--append] [--by <name>] [--task <id>] [--dry-run]   (--task: tie to that task\'s checkpoint; same event stages once)',
   '       agentos brain preview <proposal> | validate <proposal>   (read-only)',
   '       agentos brain apply <proposal> [--dry-run]',
   '       agentos brain verify <id-or-path> [--by <name>] [--dry-run]',

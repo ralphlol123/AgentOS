@@ -259,6 +259,9 @@ export function replaceCheckpointBlock(content: string, lines: string[]) {
 
 // --- write ------------------------------------------------------------------------------------------
 
+/** The knowledge-review step (goal Slice 5). An instruction the engine reads and acts on; AgentOS decides nothing. */
+export const knowledgeLine = (task: string) => `Knowledge: did this work change durable project knowledge (architecture, a decision, a convention)? If yes, stage one focused proposal: \`agentos brain propose <record-id> --from <file> --task ${task}\` (ids: \`agentos brain list\`). Progress only: stage nothing. The owner applies.`;
+
 export async function writeCheckpoint(ctx: CheckpointContext, options: CheckpointOptions) {
   if (options.recover && (options.progress || options.next || options.blocker || options.checks?.length || options.claims?.length)) {
     throw new Error('--recover records git evidence only; it cannot be combined with --progress, --next, --blocker, --check or --claim.');
@@ -278,6 +281,7 @@ export async function writeCheckpoint(ctx: CheckpointContext, options: Checkpoin
     `Repos: ${repoLine(record.repos)}`,
     `Receipts: ${receiptCounts(record.receipts)}`,
     ...record.receipts.map(receiptLine),
+    ...(record.recovered ? [] : [knowledgeLine(ctx.task.id)]),
     SINGLE_WRITER,
   ].join('\n');
   const result = (ok: boolean, body: string) => ({ ok, dryRun: Boolean(options.dryRun), path: recordRel, record, text: options.json ? JSON.stringify({ ok, dryRun: Boolean(options.dryRun), path: recordRel, record }, null, 2) : body });
@@ -338,6 +342,19 @@ export async function loadCurrent(root: string, task: string): Promise<Loaded> {
   try { record = JSON.parse(await readFile(join(dir, name), 'utf8')); assertCheckpoint(record); } catch (error) { return incomplete(`record ${name} is invalid`, error.message); }
   if (record.id !== pointer.id || record.task.id !== task) return incomplete(`record ${name} does not match its pointer`);
   return { kind: 'ok', record, path: `.agentos/checkpoints/${task}/${name}` };
+}
+
+/** Evidence a knowledge proposal cites: changed paths (workspace-relative) and every receipt with its state.
+ *  Empty `changed` and no `observed-pass` = progress only: nothing worth a durable-knowledge proposal. */
+export function checkpointEvidence(record: Checkpoint) {
+  const changed = record.repos.flatMap((repo) => repo.changed_paths.map((path) => (posix(repo.path) === '.' ? path : `${posix(repo.path)}/${path}`)));
+  const omitted = record.repos.reduce((sum, repo) => sum + repo.omitted_paths, 0);
+  const lines = [
+    ...changed.slice(0, 20).map((path) => `changed: ${path}`), ...(changed.length > 20 ? [`changed: … ${changed.length - 20} more`] : []),
+    ...(omitted ? [`changed: ${omitted} protected path(s) not listed`] : []),
+    ...record.receipts.map((receipt) => `${receipt.status}: ${receipt.command} (cwd ${receipt.cwd})`),
+  ];
+  return { lines, meaningful: changed.length + omitted > 0 || record.receipts.some((receipt) => receipt.status === 'observed-pass') };
 }
 
 export async function checkpointTasks(root: string) {
@@ -401,7 +418,7 @@ export async function resumeCheckpoint(ctx: CheckpointContext, options: { engine
     const runs = (await readdir(join(ctx.root, '.agentos/runs')).catch(() => [])).filter((name) => name.endsWith('.md') && name !== 'README.md');
     const { record } = await buildRecord(ctx, { recover: true });
     if (!runs.length && !record.repos.some((repo) => repo.changed_paths.length || repo.omitted_paths)) {
-      return out(false, { status: 'none', task: ctx.task }, [`AgentOS resume: ${task}`, `No checkpoint for task ${task}, no run notes and no changed files. Nothing to resume; start with \`${nextCommand}\`.`]);
+      return out(true, { status: 'none', task: ctx.task, next_command: nextCommand }, [`AgentOS resume: ${task}`, `Status: clean start — no checkpoint for task ${task}, no run notes and no changed files. No prior work is assumed; start with \`${nextCommand}\`.`]);
     }
     return out(true, { status: 'recovered', task: ctx.task, record, run_notes: runs, next_command: nextCommand }, [
       `AgentOS resume: ${task}`, `Status: recovered — no checkpoint exists; this view is built from git evidence only (recovered: true). Nothing is assumed done.`,

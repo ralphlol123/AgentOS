@@ -365,11 +365,11 @@ async function assertNoCheckpoints(root) {
   await assert.rejects(lstat(join(root, '.agentos/checkpoints')), /ENOENT/);
 }
 
-test('resume with no record and no evidence of work exits 1 with a clear message', async (t) => {
+test('resume with no record and no evidence of work is a clean start: exit 0 with a clear message', async (t) => {
   const { root } = await multi(t);
   const r = cli(['resume', '--task', TASK], root);
-  assert.equal(r.status, 1);
-  assert.match(r.stdout, /No checkpoint for task token-rotation/);
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, /clean start — no checkpoint for task token-rotation/);
 });
 
 // --- runtime contract, context, doctor -------------------------------------------------------------

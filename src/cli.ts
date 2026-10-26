@@ -287,7 +287,7 @@ async function main() {
       if (!sub) { console.log(BRAIN_USAGE); return; }
       const result = await brainAgentOS({
         cwd: process.cwd(), subcommand: sub, args: rest, kind: flags.kind, scope: flags.scope, status: flags.status, by: flags.by, from: flags.from,
-        summary: flags.summary, supersedes: flags.supersedes, append: flags.append, json: flags.json, dryRun: flags['dry-run'], location: flags.location, adopt: flags.adopt, stdin: readStdin,
+        summary: flags.summary, supersedes: flags.supersedes, append: flags.append, task: flags.task, json: flags.json, dryRun: flags['dry-run'], location: flags.location, adopt: flags.adopt, stdin: readStdin,
       });
       console.log(result.text);
       process.exitCode = result.ok ? 0 : 1;

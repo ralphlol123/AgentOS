@@ -13,6 +13,7 @@ import { createHash } from 'node:crypto';
 import { lstat, readFile, readdir } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { parseDocument, stringify as stringifyYaml } from 'yaml';
+import { checkpointEvidence, loadCurrent, slugTask } from './checkpoint.js';
 import { subjectOf, taskTerms, termHits } from './context-builder.js';
 import { markdownHeadings } from './markdown.js';
 import { assertRelativeBoundaryPath } from './task-scope.js';
@@ -23,7 +24,7 @@ export const STATUSES = ['proposed', 'accepted', 'verified', 'superseded'];
 /** Metadata keys plus four descriptive keys common in ADR/Obsidian notes. Anything else (task_scope, rules,
  *  permissions, engine settings) is refused: a Brain note is data, never instructions. */
 export const RECORD_KEYS = ['id', 'kind', 'scope', 'status', 'sources', 'source_hash', 'verified_at', 'verified_by', 'supersedes', 'superseded_by', 'updated_at', 'history', 'title', 'date', 'tags', 'aliases'];
-const PROPOSAL_KEYS = ['target', 'target_path', 'base_hash', 'proposed_by', 'status', 'mode', 'summary', 'supersedes', 'created_at', 'applied_at'];
+const PROPOSAL_KEYS = ['target', 'target_path', 'base_hash', 'proposed_by', 'status', 'mode', 'summary', 'supersedes', 'task', 'checkpoint', 'evidence', 'created_at', 'applied_at'];
 export const BRAIN_DIR = '.agentos/brain';
 const PROPOSALS = `${BRAIN_DIR}/proposals`;
 const APPLIED = `${PROPOSALS}/applied`;
@@ -695,6 +696,7 @@ function validateProposal(ctx: BrainCtx, records: BrainRecord[], proposal: Propo
   if (!['replace', 'append'].includes(f.mode)) reject('schema', `${proposal.rel}: mode must be replace or append`);
   if (!proposal.body.trim()) reject('schema', `${proposal.rel}: the proposal has no content`);
   if (splitFrontmatter(proposal.body).has) reject('schema', `${proposal.rel}: proposal content must not carry its own frontmatter; metadata is managed by agentos brain`);
+  if (['task', 'checkpoint'].some((key) => f[key] !== undefined && typeof f[key] !== 'string') || (f.evidence !== undefined && (!Array.isArray(f.evidence) || !f.evidence.every((line) => typeof line === 'string')))) reject('schema', `${proposal.rel}: task and checkpoint must be strings, evidence a list of strings`);
   const target = records.find((record) => record.id === f.target);
   if (!target) { reject('identity', `target ${f.target} does not exist`); return { rejections, flags, target: null, newBody: null, supersede: [] }; }
   if (f.target_path !== target.path) reject('identity', `target ${f.target} is ${target.path}, the proposal says ${f.target_path}`);
@@ -746,6 +748,7 @@ function planLines(proposal: Proposal, result: ReturnType<typeof validateProposa
   return [
     `Target: ${target.id} (${target.path})`,
     `Change: ${proposal.fields.mode === 'append' ? 'append section' : 'replace body'}${proposal.fields.summary ? ` — ${proposal.fields.summary}` : ''}`,
+    ...(proposal.fields.checkpoint ? [`Checkpoint: ${proposal.fields.checkpoint} (task ${proposal.fields.task})`, `Evidence: ${asList(proposal.fields.evidence).join('; ') || '(none)'}`] : []),
     'Frontmatter:',
     `- status: ${target.status} -> accepted`, `- source_hash: ${short(target.source_hash)} -> ${short(newHash)}`, '- updated_at: now', `- history: + ${proposal.rel}`,
     ...(result.supersede.length ? [`- supersedes: + ${result.supersede.map((record) => record.id).join(', ')}`] : []),
@@ -755,10 +758,10 @@ function planLines(proposal: Proposal, result: ReturnType<typeof validateProposa
   ];
 }
 
-interface ProposeOptions { from?: string; summary?: string; supersedes?: string; append?: boolean; by?: string; dryRun?: boolean; json?: boolean; stdin?: () => Promise<string> }
+interface ProposeOptions { from?: string; summary?: string; supersedes?: string; append?: boolean; by?: string; task?: string; dryRun?: boolean; json?: boolean; stdin?: () => Promise<string> }
 
 export async function proposeBrain(ctx: BrainCtx, ref: string | undefined, options: ProposeOptions) {
-  if (!ref || !options.from) throw new Error('Usage: agentos brain propose <id-or-path> --from <file|-> [--summary "<text>"] [--supersedes <id>[,<id>]] [--append] [--by <name>] [--dry-run] [--json]');
+  if (!ref || !options.from) throw new Error('Usage: agentos brain propose <id-or-path> --from <file|-> [--summary "<text>"] [--supersedes <id>[,<id>]] [--append] [--by <name>] [--task <id>] [--dry-run] [--json]');
   const records = await loadBrain(ctx.root, ctx.repos, ctx.vault);
   const target = findRecord(records, ctx, ref);
   if (!target) throw new Error(`No Brain record ${ref}; register the file first (\`agentos brain register <path>\`).`);
@@ -766,13 +769,35 @@ export async function proposeBrain(ctx: BrainCtx, ref: string | undefined, optio
   const content = options.from === '-' ? await options.stdin() : await readUtf8(resolve(ctx.cwd, options.from));
   if (Buffer.byteLength(content) > MAX_BYTES) throw new Error(`proposal content is larger than ${MAX_BYTES} bytes.`);
   if (splitFrontmatter(content).has) throw new Error('Proposal content must be the Markdown body only, without frontmatter (metadata is managed by agentos brain). Nothing was written.');
+  // --task: tie the proposal to the task's current checkpoint (goal Slice 5). The engine decides that knowledge
+  // changed; AgentOS only refuses progress-only checkpoints and keys the file so the same event stages once.
+  let tie: { task: string; checkpoint: string; evidence: string[] } | null = null;
+  if (options.task !== undefined) {
+    const task = slugTask(options.task);
+    if (!task) throw new Error('--task must contain letters or digits.');
+    const loaded = await loadCurrent(ctx.root, task);
+    const refuse = (reason: string, checkpoint: string | null = null) => out(options.json, false, { task, checkpoint, staged: false, reason }, ['AgentOS brain propose: NOTHING STAGED', reason, 'Nothing was written.']);
+    if (loaded.kind !== 'ok') return refuse(loaded.kind === 'none' ? `No checkpoint for task ${task}; write one first: \`agentos checkpoint --task ${task} --progress "<done>" --check "<cmd>"\`.` : `The checkpoint of task ${task} is incomplete (${loaded.evidence.reason}); see \`agentos resume --task ${task}\`.`);
+    const evidence = checkpointEvidence(loaded.record);
+    if (!evidence.meaningful) return refuse(`Checkpoint ${loaded.record.id} (task ${task}) records no changed file and no observed-pass check (progress only); a durable-knowledge proposal needs that evidence.`, loaded.record.id);
+    tie = { task, checkpoint: loaded.record.id, evidence: evidence.lines };
+  }
   const now = new Date();
   const supersedes = options.supersedes ? options.supersedes.split(',').map((id) => id.trim()).filter(Boolean) : [];
   const fields = {
     target: target.id, target_path: target.path, base_hash: target.source_hash, proposed_by: options.by || process.env.AGENTOS_ENGINE || 'unknown', status: 'proposed',
-    mode: options.append ? 'append' : 'replace', ...(options.summary ? { summary: options.summary } : {}), ...(supersedes.length ? { supersedes } : {}), created_at: now.toISOString(),
+    mode: options.append ? 'append' : 'replace', ...(options.summary ? { summary: options.summary } : {}), ...(supersedes.length ? { supersedes } : {}), ...(tie ?? {}), created_at: now.toISOString(),
   };
-  const rel = `${PROPOSALS}/${now.toISOString().replace(/[:.]/g, '-')}-${target.id.slice('brain:'.length)}.md`;
+  const name = tie
+    ? `${tie.task}-${sha256(JSON.stringify([target.id, tie.checkpoint, fields.mode, norm(content), supersedes])).slice(0, 12)}-${target.id.slice('brain:'.length)}.md`
+    : `${now.toISOString().replace(/[:.]/g, '-')}-${target.id.slice('brain:'.length)}.md`;
+  const rel = `${PROPOSALS}/${name}`;
+  // Same checkpoint, target, mode and text = the same event: report the existing proposal (pending or applied).
+  for (const seen of tie ? [rel, `${APPLIED}/${name}`] : []) {
+    if (await lstat(join(ctx.root, seen)).then((info) => info.isFile(), () => false)) {
+      return out(options.json, true, { dryRun: Boolean(options.dryRun), duplicate: true, path: seen, proposal: fields }, [`AgentOS brain propose: already staged as ${seen} (same checkpoint, target and text); nothing written.`]);
+    }
+  }
   const text = patchFrontmatter(content, fields);
   const proposal: Proposal = { rel, applied: false, text, fields, body: content, problems: [] };
   const result = validateProposal(ctx, records, proposal);
