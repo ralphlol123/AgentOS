@@ -7,9 +7,9 @@ How to operate an AgentOS workspace from any coding engine. This is a command ma
 
 - Run `agentos status`. It finds the workspace root from any subdirectory and prints the current objective, the open tasks and, from a child repo, that repo's verification commands.
 - Then `agentos context <engine> --task "<task>" --role <id>` (engine: `claude-code`, `codex`, `opencode`, `hermes`) prints the objective, read/edit scope, role card and relevant decisions. Reuse that `--task` value for `checkpoint` and `resume`.
-- If its `Edit scope` is none because no `task_scope` is declared, ask the owner to set `task_scope` (`read`/`edit`) in `.agentos/project.yaml`. Engines do not edit that file.
+- `Edit scope: not set` (no `task_scope`): edit only files the owner's task names; ask the owner to set `task_scope` in `.agentos/project.yaml`. Engines never edit that file.
 - Declare your role (`.agentos/agents/`) and the repo scope before editing. Edit only inside that scope.
-- If a command is unclear, run `agentos --help` instead of guessing flags.
+- If a command is unclear, run `agentos --help` or `<command> --help` instead of guessing flags.
 
 ## Setup and project knowledge
 
@@ -21,14 +21,14 @@ How to operate an AgentOS workspace from any coding engine. This is a command ma
 
 - This directory is one repo of a larger workspace. The AgentOS root is the nearest parent that has `.agentos/`.
 - Run `agentos status`. It works from any subdirectory and needs no file reads.
-- Some engines refuse file reads outside the directory they started in, and a refused read can end the session immediately instead of letting you continue. Use the CLI first and read parent files only if reads work.
+- In some engines a refused read outside the start directory ends the session. Use the CLI first; read parent files only if reads work.
 - `agentos handoff` prints the full handoff and the reading list when you need more than the status summary.
 
 ## Stopping, switching engines, decisions
 
-- Before stopping or switching engines: `agentos checkpoint --task <id> --progress "<done>" --next "<remaining>" --check "<cmd>"`. Each `--check` runs as a receipt; `--claim "<text>"` records what AgentOS did not observe.
+- Before stopping or switching engines: `agentos checkpoint --task <id> --progress "<done>" --next "<remaining>" --check "<cmd>"`. Each `--check` runs as a receipt, from the workspace root or the `--cwd <dir>` after it (root-relative, or absolute inside the workspace); `--claim "<text>"` records what AgentOS did not observe.
 - Next engine: `agentos resume --task <id>`, then `context`. No checkpoint was written: `agentos checkpoint --recover --task <id>`.
-- Prefer these to `agentos run handoff`: it writes only a prose note under `.agentos/runs/`, no receipts for `resume` to reconcile.
+- Prefer these to `agentos run handoff`: it writes only a prose note, no receipts for `resume` to reconcile.
 - After the checkpoint, ask: did this work change durable knowledge (architecture, decision, convention)? If yes: `agentos brain propose <id-or-path> --from <file|-> --task <id> --summary "<why>"` (ids: `agentos brain list`); progress only: nothing. Engines propose, never apply; the owner runs `agentos brain preview <proposal>`, then `agentos brain apply <proposal>`.
 - Engine role config (`claude-code`, `codex`): `agentos agents sync <engine> --role <id> --dry-run`, then without `--dry-run`. When `agentos doctor` prints `Synced config: STALE`, re-run the command it prints; add `--replace` only when that line does.
 
