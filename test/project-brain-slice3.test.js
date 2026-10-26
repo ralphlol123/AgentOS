@@ -143,6 +143,24 @@ test('F6/A10: context opens with a bounded overview from memory.md; Brain record
   assert.ok(other.omitted.some((item) => item.id === 'brain:0001-db' && item.reason === 'no-match'), 'irrelevant record omitted');
 });
 
+test('D7: a Brain record whose file is shown section by section is reported as covered, not no-match', async (t) => {
+  const root = await project(await base(t), 'ws', {});
+  await writeFile(join(root, '.agentos/decisions.md'), '# Decisions\n\n## 2026-10-01 Storage: use Postgres\n\nTenant data lives in Postgres.\n');
+  ok(cli(['brain', 'register', '.agentos/decisions.md', '--kind', 'decision'], root));
+  const { r, out } = json(['context', 'claude', '--task', 'storage'], root);
+  ok(r);
+  const record = out.omitted.find((item) => item.id === 'brain:decisions');
+  assert.ok(record, JSON.stringify(out.omitted));
+  const section = out.included.find((item) => item.kind === 'decision');
+  assert.ok(section && section.source.startsWith('.agentos/decisions.md#'), JSON.stringify(out.included));
+  assert.deepEqual(record, { id: record.id, kind: 'brain', reason: 'covered', via: section.id });
+  assert.ok(!out.omitted.some((item) => item.reason === 'no-match' && item.id === record.id));
+  assert.match(out.text, new RegExp(`- ${record.id} \\(brain\\): covered by ${section.id} \\(same file, shown above\\)`));
+  // Nothing from that file shown: still an honest no-match.
+  const other = json(['context', 'claude', '--task', 'billing'], root).out;
+  assert.equal(other.omitted.find((item) => item.id === record.id).reason, 'no-match');
+});
+
 test('A10: one Brain per workspace: a child repo uses the parent Brain; sibling and nested projects never see each other', async (t) => {
   const dir = await base(t);
   const alpha = await project(dir, 'alpha ws', { 'web/package.json': '{"name":"web"}', 'notes/alpha.md': '# Alpha plan\n\nALPHA.\n' });

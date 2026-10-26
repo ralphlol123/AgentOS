@@ -19,7 +19,7 @@ export const ENGINE_OVERHEAD: Record<string, number> = { 'claude-code': 2000, co
 const GENERIC_OVERHEAD = 1000;
 /** The project overview is `.agentos/memory.md` (the authoritative summary), cut at this many characters. */
 export const OVERVIEW_CHARS = 1500;
-const REASONS = ['budget', 'superseded', 'out-of-scope', 'no-match'] as const;
+const REASONS = ['budget', 'superseded', 'out-of-scope', 'no-match', 'covered'] as const;
 type OmitReason = typeof REASONS[number];
 
 export const estimateTokens = (text: string) => Math.ceil(text.length / 4);
@@ -33,7 +33,7 @@ export interface ContextBundle {
   scope: { repos: string[]; read: string[]; edit: string[] };
   budget: { limit: number; estimate: number; overhead: number; label: string };
   included: ContextItem[];
-  omitted: Array<{ id: string; kind: string; reason: OmitReason }>;
+  omitted: Array<{ id: string; kind: string; reason: OmitReason; via?: string }>;
   conflicts: Array<{ subject: string; ids: string[] }>;
   missing: string[];
   warnings: string[];
@@ -316,9 +316,18 @@ export async function buildContextBundle(input: ContextInput): Promise<ContextBu
     running += cost;
     selected.push(candidate);
   }
+  // D7: a Brain record that matched nothing but whose file is already shown section by section (e.g. brain:decisions vs the
+  // decision:* sections of .agentos/decisions.md) is reported as covered by that section, not as no-match.
+  const brainSource = new Map(candidates.filter((candidate) => candidate.kind === 'brain').map((candidate) => [candidate.id, candidate.source]));
+  const relabel = () => omitted.map((item) => {
+    const source = item.reason === 'no-match' ? brainSource.get(item.id) : undefined;
+    const via = source && selected.find((candidate) => candidate.source.startsWith(`${source}#`))?.id;
+    return via ? { ...item, reason: 'covered' as const, via } : item;
+  });
   for (;;) {
     const conflicts = findConflicts(selected);
-    const text = render(input, task, role, selected, omitted, conflicts, missing);
+    const shown = relabel();
+    const text = render(input, task, role, selected, shown, conflicts, missing);
     const estimate = overhead + estimateTokens(text);
     const last = selected.at(-1);
     if (estimate <= limit || last.mandatory) {
@@ -326,7 +335,7 @@ export async function buildContextBundle(input: ContextInput): Promise<ContextBu
       return finish({
         ok: true, engine, task, role, scope, budget: { limit, estimate, overhead, label: TOKEN_LABEL },
         included: selected.map((candidate) => ({ id: candidate.id, kind: candidate.kind, source: candidate.source, reason: candidate.mandatory ? 'mandatory' : candidate.reason, tokens: estimateTokens(renderSection(candidate)) })),
-        omitted, conflicts, missing, warnings, text,
+        omitted: shown, conflicts, missing, warnings, text,
       });
     }
     selected.pop(); // the trailer (omitted/conflicts/missing) pushed the total over the limit
@@ -355,7 +364,7 @@ function renderSection(candidate: Candidate) {
 
 function render(input: ContextInput, task: string | null, role: string | null, selected: Candidate[], omitted: ContextBundle['omitted'], conflicts: ContextBundle['conflicts'], missing: string[]) {
   const parts = [headerLines(input, task, role).join('\n'), ...selected.map(renderSection)];
-  if (omitted.length) parts.push(`## Omitted (${omitted.length})\n${omitted.map((item) => `- ${item.id} (${item.kind}): ${item.reason}`).join('\n')}`);
+  if (omitted.length) parts.push(`## Omitted (${omitted.length})\n${omitted.map((item) => `- ${item.id} (${item.kind}): ${item.via ? `covered by ${item.via} (same file, shown above)` : item.reason}`).join('\n')}`);
   if (conflicts.length) parts.push(`## Conflicts\n${conflicts.map((item) => `- ${item.subject}: ${item.ids.join(' vs ')}`).join('\n')}`);
   if (missing.length) parts.push(`## Missing\n${missing.map((item) => `- ${item}`).join('\n')}`);
   return parts.join('\n\n');
