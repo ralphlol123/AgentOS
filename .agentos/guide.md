@@ -29,7 +29,7 @@ How to operate an AgentOS workspace from any coding engine. This is a command ma
 - Before stopping or switching engines: `agentos checkpoint --task <id> --progress "<done>" --next "<remaining>" --check "<cmd>"`. Each `--check` runs as a receipt, from the workspace root or the `--cwd <dir>` after it (root-relative, or absolute inside the workspace); `--claim "<text>"` records what AgentOS did not observe.
 - Next engine: `agentos resume --task <id>`, then `context`. No checkpoint was written: `agentos checkpoint --recover --task <id>`.
 - Prefer these to `agentos run handoff`: it writes only a prose note, no receipts for `resume` to reconcile.
-- After the checkpoint, ask: did this work change durable knowledge (architecture, decision, convention)? If yes: `agentos brain propose <id-or-path> --from <file|-> --task <id> --summary "<why>"` (ids: `agentos brain list`); progress only: nothing. Engines propose, never apply; the owner runs `agentos brain preview <proposal>`, then `agentos brain apply <proposal>`.
+- After the checkpoint, ask: did this work change durable knowledge (architecture, decision, convention)? If yes: `agentos brain propose <id-or-path> --from <file|-> --task <id> --summary "<why>"` (ids: `agentos brain list`); else nothing. Engines propose, never apply; the owner runs `agentos brain preview <proposal>`, then `agentos brain apply <proposal> --by <owner>`.
 - Engine role config (`claude-code`, `codex`): `agentos agents sync <engine> --role <id> --dry-run`, then without `--dry-run`. When `agentos doctor` prints `Synced config: STALE`, re-run the command it prints; add `--replace` only when that line does.
 
 ## Which command for which job
