@@ -45,12 +45,14 @@ test('writeFileAtomic replaces content correctly and preserves the existing file
   const target = join(dir, 'tasks.md');
   await writeFile(target, '# Tasks\n\nold\n', 'utf8');
   await chmod(target, 0o640);
+  // Windows keeps only the read-only bit of a mode (0o640 reads back as 0o666): expect the mode the file system reported.
+  const originalMode = (await stat(target)).mode & 0o777;
 
   await writeFileAtomic(target, '# Tasks\n\nnew\n');
 
   assert.equal(await readFile(target, 'utf8'), '# Tasks\n\nnew\n');
   const mode = (await stat(target)).mode & 0o777;
-  assert.equal(mode, 0o640, 'replacing an existing file should preserve its mode');
+  assert.equal(mode, originalMode, 'replacing an existing file should preserve its mode');
   assert.deepEqual(await siblingArtifacts(dir, 'tasks.md'), [], 'no leftover atomic-write artifacts should remain after a successful write');
 });
 
@@ -64,7 +66,7 @@ test('writeFileAtomic creates a brand-new file with default permissions and no l
   assert.deepEqual(await siblingArtifacts(dir, 'skills.md'), []);
 });
 
-test('writeFileAtomic fails closed under a real filesystem permission fault and leaves no partial file', async (t) => {
+test('writeFileAtomic fails closed under a real filesystem permission fault and leaves no partial file', { skip: process.platform === 'win32' && 'POSIX-only fault: Windows ignores directory mode bits (chmod 0o555 does not stop file creation) and Node has no ACL API; the injected-fault tests above cover the same cleanup' }, async (t) => {
   const dir = await tempDir(t);
   await chmod(dir, 0o555);
   const target = join(dir, 'knowledge.md');

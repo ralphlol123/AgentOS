@@ -291,5 +291,5 @@ test('fault injection: a failure while writing the record rolls back every file,
   const result = await agentsAgentOS({ cwd: root, command: 'sync', engine: 'claude-code', replace: true });
   assert.equal(result.ok, true, result.text);
   const after = await snapshot(root);
-  assert.deepEqual(changed(before, after).filter((k) => !k.startsWith(join('.agentos', 'runs'))), [AGENT, SETTINGS, RECORD].map((p) => p.split('/').join('/')).sort());
+  assert.deepEqual(changed(before, after).filter((k) => !k.startsWith(join('.agentos', 'runs'))), [AGENT, SETTINGS, RECORD].map((p) => join(p)).sort()); // snapshot keys use the native separator
 });

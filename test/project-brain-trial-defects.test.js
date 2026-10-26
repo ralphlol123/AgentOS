@@ -128,7 +128,7 @@ test('D4: wslWindowsPath maps /mnt/<drive> to a drive path and Linux-side paths 
   assert.equal(wslWindowsPath('', 'Ubuntu'), null);
 });
 
-test('D4: under WSL, obsidian init, link and status also print the Windows path of the vault', async (t) => {
+test('D4: under WSL, obsidian init, link and status also print the Windows path of the vault', { skip: process.platform === 'win32' && 'WSL-only: the WSL → Windows path line is for Linux paths under WSL; on native Windows the vault path printed is already a Windows path' }, async (t) => {
   const { root } = await project(t);
   const env = { WSL_DISTRO_NAME: 'Ubuntu' };
   const win = (path) => `\\\\wsl$\\Ubuntu${path.replaceAll('/', '\\')}`;

@@ -21,6 +21,12 @@ const git = (cwd, ...args) => { const r = spawnSync('git', args, { cwd, encoding
 const read = (root, rel) => readFile(join(root, rel), 'utf8');
 const exists = (path) => lstat(path).then(() => true, () => false);
 const asRoot = process.getuid?.() === 0;
+
+/** Make the index note unwritable. POSIX: a read-only folder, so no temp file can be created next to the note.
+ *  Windows ignores directory mode bits; there the note's read-only attribute makes the atomic rename over it fail. */
+const blockNote = (root, blocked) => process.platform === 'win32'
+  ? chmod(join(root, 'knowledge', 'index.md'), blocked ? 0o444 : 0o644)
+  : chmod(join(root, 'knowledge'), blocked ? 0o555 : 0o755);
 const PROPOSALS = '.agentos/brain/proposals';
 const ADR_PATH = 'docs/adr/0003-use-postgres.md';
 const ADR = '# ADR 0003: Use Postgres for storage\n\nWe store tenant data in Postgres.\n';
@@ -176,7 +182,7 @@ test('A20: apply survives a broken optional index note: the record is accepted, 
   const { root, proposal } = await workspace(t);
   await complete(root);
   const { out } = stage(root, proposal);
-  await chmod(join(root, 'knowledge'), 0o555);
+  await blockNote(root, true);
   const { r, out: res } = json(['brain', 'apply', out.path], root);
   ok(r);
   assert.equal(res.note_stale, true);
@@ -184,7 +190,7 @@ test('A20: apply survives a broken optional index note: the record is accepted, 
   assert.equal((await applied(root)).length, 1, 'history kept');
   assert.match(await read(root, '.agentos/brain/index.json'), /Postgres 16/);
   assert.doesNotMatch(await read(root, 'knowledge/index.md'), /Postgres 16/, 'note not written');
-  await chmod(join(root, 'knowledge'), 0o755);
+  await blockNote(root, false);
   ok(cli(['brain', 'index'], root));
   assert.match(await read(root, 'knowledge/index.md'), /Postgres 16/);
 });

@@ -60,6 +60,8 @@ for (const via of ['add', 'copy']) {
     await mkdir(join(root, dir, 'references'), { recursive: true });
     await writeFile(join(root, ref), Buffer.from([0xff, 0, 42]));
     await chmod(join(root, ref), 0o640);
+    // Windows keeps only the read-only bit of a mode (0o640 reads back as 0o666): expect the mode the file system reported.
+    const originalMode = (await lstat(join(root, ref))).mode & 0o777;
     await writeFile(join(root, dir, 'references/owner.md'), 'Owner-only reference\n');
     const before = await snapshot(parent);
     for (const dryRun of [true, false]) {
@@ -69,7 +71,7 @@ for (const via of ['add', 'copy']) {
     assert.equal((await install(root, via, { replace: true })).ok, true);
     assert.deepEqual(await readFile(join(root, ref)), await readFile(new URL('../templates/skills/core/code-review/references/security-review.md', import.meta.url)));
     assert.equal(await readFile(join(root, dir, 'references/owner.md'), 'utf8'), 'Owner-only reference\n');
-    assert.equal((await lstat(join(root, ref))).mode & 0o777, 0o640);
+    assert.equal((await lstat(join(root, ref))).mode & 0o777, originalMode);
   });
   for (const existing of [false, true]) for (const failing of [ref, '.agentos/skills.md']) {
     test(`${via}: rollback ${existing ? 'replacement' : 'new install'} on ${failing}`, async t => {

@@ -253,9 +253,10 @@ test('context creates, changes or locks nothing in any mode (whole parent tree, 
   const broken = await snapshot(base);
   cli(['context', 'claude', '--json'], root, env);
   assert.deepEqual(await snapshot(base), broken, 'missing-objective mode');
-  delete broken['ws/.agentos/handoff.md'];
+  const handoffKey = join('ws', '.agentos', 'handoff.md'); // snapshot keys use the native separator
+  delete broken[handoffKey];
   const expected = { ...before };
-  delete expected['ws/.agentos/handoff.md'];
+  delete expected[handoffKey];
   assert.deepEqual(broken, expected, 'all other modes');
 });
 

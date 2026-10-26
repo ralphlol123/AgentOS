@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, readdir, lstat, writeFile, rm, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import { initAgentOS, compactAgentOS, __setAtomicWriteFaultForTests, __clearAtomicWriteFaultForTests } from '../dist/core.js';
@@ -67,7 +67,7 @@ test('compact dry-run exposes exact proposals through the API and a concise CLI 
 test('compact previews deterministic archive links that resolve to exact previous content', async (t) => {
   const root = await fixture(t);
   const dry = await compactAgentOS({ cwd: root, checkpoint: true, dryRun: true });
-  const archiveName = dry.archivePath.split('/').at(-1);
+  const archiveName = basename(dry.archivePath);
   assert.match(archiveName, /^compact-archive-[a-f0-9]{64}\.md$/);
   for (const [name, anchor] of [['handoff', 'previous-handoff'], ['tasks', 'previous-tasks']]) {
     assert.ok(dry.proposed[name].includes(`(runs/${archiveName}#${anchor})`));
@@ -97,9 +97,9 @@ test('compact is a write-free no-op on unchanged state and keeps archive chains 
   await writeFile(tasksPath, (await readFile(tasksPath, 'utf8')) + '\n## New blocker\n- [ ] Wait for approval\n');
   const third = await compactAgentOS({ cwd: root, checkpoint: true });
   assert.notEqual(third.archivePath, first.archivePath);
-  assert.ok(third.proposed.tasks.includes(first.archivePath.split('/').at(-1)));
+  assert.ok(third.proposed.tasks.includes(basename(first.archivePath)));
   assert.match(third.proposed.tasks, /Wait for approval/);
-  assert.equal(await readFile(first.archivePath, 'utf8'), Buffer.from(before['./.agentos/runs/' + first.archivePath.split('/').at(-1)].bytes, 'hex').toString());
+  assert.equal(await readFile(first.archivePath, 'utf8'), Buffer.from(before['./.agentos/runs/' + basename(first.archivePath)].bytes, 'hex').toString());
   assert.equal((await compactAgentOS({ cwd: root, checkpoint: true })).changed, false);
 });
 
@@ -196,7 +196,7 @@ test('compact archive isolates arbitrary Markdown so source fences cannot hide a
   assert.ok(archive.includes('``````markdown\n' + handoff + '\n``````\n'), 'source must be wrapped in a longer fence');
   assert.ok(result.proposed.handoff.startsWith(handoff));
   assert.match(result.text, /unclosed Markdown fence can render appended archive links as literal text/i);
-  assert.ok(result.text.includes(`.agentos/runs/${result.archivePath.split('/').at(-1)}#previous-handoff`));
+  assert.ok(result.text.includes(`.agentos/runs/${basename(result.archivePath)}#previous-handoff`));
   const preview = await compactAgentOS({ cwd: root, checkpoint: true, dryRun: true });
   assert.match(preview.text, /unclosed Markdown fence can render appended archive links as literal text/i);
   assert.equal((await compactAgentOS({ cwd: root, checkpoint: true })).changed, false);

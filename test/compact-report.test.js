@@ -10,8 +10,9 @@ import { renderUnifiedDiff } from '../dist/compact-report.js';
 const NO_DIFFERENCES = 'No differences: proposed live files are unchanged.';
 const render = (before, after, path = 'state.md') => renderUnifiedDiff([{ path, before, after }]);
 
+// core.autocrlf=false: the patch must reproduce exact bytes; Windows git defaults to autocrlf=true and would write CRLF.
 function git(cwd, args) {
-  return spawnSync('git', args, { cwd, encoding: 'utf8' });
+  return spawnSync('git', ['-c', 'core.autocrlf=false', ...args], { cwd, encoding: 'utf8' });
 }
 
 test('returned non-empty patch applies unchanged and reproduces exact bytes', async (t) => {

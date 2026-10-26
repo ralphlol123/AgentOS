@@ -596,7 +596,7 @@ test('doctor --json CLI prints parseable JSON only', async () => {
   const parsed = JSON.parse(result.stdout);
   assert.equal(parsed.ok, true);
   assert.equal(parsed.status, 'OK');
-  assert.equal(parsed.root, await realpath(root));
+  assert.equal(await realpath(parsed.root), await realpath(root)); // same directory: macOS /var → /private/var, Windows 8.3 RUNNER~1 → runneradmin
   assert.ok(Array.isArray(parsed.problems));
   assert.ok(Array.isArray(parsed.warnings));
   assert.ok(Array.isArray(parsed.diagnostics));
@@ -772,7 +772,7 @@ test('prompt includes Obsidian workspace boundary when configured', async () => 
 
   assert.equal(prompt.ok, true);
   assert.match(prompt.text, /Obsidian workspace:/);
-  assert.match(prompt.text, /Projects\/KargaX\/AgentOS/);
+  assert.ok(prompt.text.includes(join('Projects', 'KargaX', 'AgentOS')), 'the vault folder path, in native separators');
   assert.match(prompt.text, /read\/write only inside that folder/i);
   assert.match(prompt.text, /Do not bulk-load the Obsidian vault/);
 });

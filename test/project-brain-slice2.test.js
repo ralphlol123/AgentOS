@@ -25,6 +25,12 @@ const NOTE = 'knowledge/index.md';
 const DEST = 'Projects/Demo';
 const asRoot = process.getuid?.() === 0; // root ignores chmod 000
 
+/** Make the index note unwritable. POSIX: a read-only folder, so no temp file can be created next to the note.
+ *  Windows ignores directory mode bits; there the note's read-only attribute makes the atomic rename over it fail. */
+const blockNote = (root, blocked) => process.platform === 'win32'
+  ? chmod(join(root, 'knowledge', 'index.md'), blocked ? 0o444 : 0o644)
+  : chmod(join(root, 'knowledge'), blocked ? 0o555 : 0o755);
+
 /** Every file under dir (path → bytes + mtime); dot-git excluded. */
 async function snapshot(dir) {
   const result = {};
@@ -155,7 +161,7 @@ test('A05/A20: an index note write failure keeps the Brain write and reports the
   if (asRoot) return t.skip('running as root');
   const { root } = await workspace(t);
   await writeFile(join(root, 'notes.md'), '# Notes\n\nLocal.\n');
-  await chmod(join(root, 'knowledge'), 0o555);
+  await blockNote(root, true);
   const r = json(['brain', 'register', 'notes.md'], root);
   ok(r.r);
   assert.equal(r.out.note_stale, true, r.r.stdout);
@@ -163,7 +169,7 @@ test('A05/A20: an index note write failure keeps the Brain write and reports the
   assert.match(await read(root, 'notes.md'), /^---\nid: brain:notes/);
   assert.match(await read(root, '.agentos/brain/index.json'), /brain:notes/);
   assert.match(cli(['brain', 'verify', 'brain:notes'], root).stdout, /index note .* is stale/);
-  await chmod(join(root, 'knowledge'), 0o755);
+  await blockNote(root, false);
   ok(cli(['brain', 'index'], root));
   assert.match(await read(root, NOTE), /`brain:notes`/, 'the next run catches up');
 });
@@ -189,7 +195,7 @@ test('F8/A06: root and nested invocations resolve the same binding', async (t) =
 
 // --- A07 / F9: unreadable vs empty vs absent ---------------------------------------------------------
 
-test('F9/A07: an unreadable directory holding records is not reported complete; its last-known records are kept', async (t) => {
+test('F9/A07: an unreadable directory holding records is not reported complete; its last-known records are kept', { skip: process.platform === 'win32' && 'POSIX-only fault: chmod 0o000 cannot make a directory unreadable on Windows (only the read-only attribute exists; Node has no ACL API). The product treats any non-ENOENT read error (EACCES/EPERM) the same way' }, async (t) => {
   if (asRoot) return t.skip('running as root');
   const { root } = await workspace(t, { obsidian: false });
   await mkdir(join(root, 'docs/adr'), { recursive: true });
@@ -224,7 +230,7 @@ test('F9/A07: an unreadable directory holding records is not reported complete; 
   ok(cli(['context', 'claude', '--task', 'adr', '--require-complete'], root));
 });
 
-test('A07: an unreadable directory with no known records is a warning, not missing knowledge', async (t) => {
+test('A07: an unreadable directory with no known records is a warning, not missing knowledge', { skip: process.platform === 'win32' && 'POSIX-only fault: chmod 0o000 cannot make a directory unreadable on Windows (only the read-only attribute exists; Node has no ACL API). The product treats any non-ENOENT read error (EACCES/EPERM) the same way' }, async (t) => {
   if (asRoot) return t.skip('running as root');
   const { root } = await workspace(t, { obsidian: false });
   await mkdir(join(root, 'pgdata'));
@@ -251,13 +257,15 @@ test('A07: vault folder unreadable vs absent vs empty are reported differently; 
   const { base, root, dir } = await vaultWorkspace(t);
   const missing = () => { const c = json(['context', 'claude', '--task', 'design', '--require-complete'], root); fails(c.r); return c.out.missing; };
 
-  await chmod(dir, 0o000);
-  assert.ok(missing().some((m) => m.startsWith('brain:design') && /vault unreadable: .*EACCES: permission denied/.test(m)));
-  assert.equal(json(['brain', 'list'], root).out.records.find((r) => r.id === 'brain:design')?.state, 'unavailable');
-  const status = cli(['obsidian', 'status'], root);
-  fails(status);
-  assert.match(status.stdout, /Workspace folder unreadable: .*EACCES/);
-  await chmod(dir, 0o755);
+  if (process.platform !== 'win32') { // unreadable: POSIX-only fault (chmod 0o000 cannot deny reads on Windows); absent/empty run everywhere
+    await chmod(dir, 0o000);
+    assert.ok(missing().some((m) => m.startsWith('brain:design') && /vault unreadable: .*EACCES: permission denied/.test(m)));
+    assert.equal(json(['brain', 'list'], root).out.records.find((r) => r.id === 'brain:design')?.state, 'unavailable');
+    const status = cli(['obsidian', 'status'], root);
+    fails(status);
+    assert.match(status.stdout, /Workspace folder unreadable: .*EACCES/);
+    await chmod(dir, 0o755);
+  }
 
   await rename(dir, join(base, 'moved'));
   assert.ok(missing().includes(`vault unavailable: ${dir}`));

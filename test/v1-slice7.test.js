@@ -221,7 +221,7 @@ test('nested start: context, checkpoint and resume run from inside a child direc
   ok(context);
   assert.match(context.stdout, /^## Objective/m);
   const { out } = json(['checkpoint', '--task', TASK, '--progress', 'from web/'], web);
-  assert.equal(out.record.project.root, await realpath(root)); // canonical root (macOS /private/var)
+  assert.equal(await realpath(out.record.project.root), await realpath(root)); // same directory (macOS /private/var, Windows 8.3 short names)
   assert.ok(out.record.repos.every((repo) => repo.available));
   assert.equal(json(['resume', '--task', TASK], web).out.reconciliation.status, 'clean');
 });

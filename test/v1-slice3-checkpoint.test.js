@@ -124,7 +124,7 @@ test('record carries ids, objective, scope, per-repo branch/HEAD/fingerprint, kn
   assert.equal(record.task.id, 'ship-the-token-rotation-feature');
   assert.equal(record.task.source, 'objective');
   assert.match(record.objective.text, /Ship the token rotation feature/);
-  assert.equal(record.project.root, await realpath(root)); // canonical root (macOS /private/var)
+  assert.equal(await realpath(record.project.root), await realpath(root)); // same directory (macOS /private/var, Windows 8.3 short names)
   assert.equal(record.role, 'developer');
   assert.deepEqual(record.scope.read, ['.']);
   const web = record.repos.find((repo) => repo.name === 'web');

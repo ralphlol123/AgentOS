@@ -80,6 +80,8 @@ test('init appends the managed block after pre-existing custom content, preservi
   const originalAgents = '# Existing Agent Rules\n\nKeep this content exactly, please.\n';
   await writeFile(join(root, 'AGENTS.md'), originalAgents);
   await chmod(join(root, 'AGENTS.md'), 0o640);
+  // Windows keeps only the read-only bit of a mode (0o640 reads back as 0o666): expect the mode the file system reported.
+  const originalMode = (await stat(join(root, 'AGENTS.md'))).mode & 0o777;
 
   await initAgentOS({ cwd: root, mode: 'existing', yes: true, agents: 'minimal' });
 
@@ -93,7 +95,7 @@ test('init appends the managed block after pre-existing custom content, preservi
   assert.equal(await exists(backupPath), true);
   assert.equal(await readFile(backupPath, 'utf8'), originalAgents, 'backup must hold the exact pre-conversion bytes');
   const mode = (await stat(backupPath)).mode & 0o777;
-  assert.equal(mode, 0o640, 'backup must preserve the original file mode');
+  assert.equal(mode, originalMode, 'backup must preserve the original file mode');
 });
 
 test('missing adapter files need no backup', async () => {

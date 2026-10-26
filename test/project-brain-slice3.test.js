@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, unlink, writeFile } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import { parse as parseYaml } from 'yaml';
@@ -295,10 +295,11 @@ test('A12: Obsidian app availability is detected and only advised; setup succeed
   assert.match(noApp.stdout, /Obsidian app: not found on PATH \(optional/);
   const bin = join(dir, 'bin');
   await mkdir(bin);
-  await writeFile(join(bin, 'obsidian'), '#!/bin/sh\nexit 0\n');
-  await chmod(join(bin, 'obsidian'), 0o755);
+  const app = process.platform === 'win32' ? 'Obsidian.exe' : 'obsidian'; // the executable name looked up on PATH
+  await writeFile(join(bin, app), '#!/bin/sh\nexit 0\n');
+  await chmod(join(bin, app), 0o755);
   const root2 = await project(dir, 'ws2');
-  const withApp = cli(['obsidian', 'init'], root2, { PATH: `${bin}:${dirname(process.execPath)}` });
+  const withApp = cli(['obsidian', 'init'], root2, { PATH: `${bin}${delimiter}${dirname(process.execPath)}` });
   ok(withApp);
   assert.match(withApp.stdout, /Obsidian app: found/);
 });
