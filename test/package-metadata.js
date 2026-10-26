@@ -45,7 +45,9 @@ test('package metadata is ready for public npm publishing', async () => {
 test('packed npm tarball contains only publishable runtime files', async () => {
   const packDir = await mkdtemp(join(tmpdir(), 'agentos-metadata-pack-'));
   const json = run('npm', ['pack', '--json', '--pack-destination', packDir]);
-  const [packed] = JSON.parse(json);
+  // npm ≤ 11 prints an array; npm 12 prints an object keyed by package name.
+  const parsed = JSON.parse(json);
+  const [packed] = Array.isArray(parsed) ? parsed : Object.values(parsed);
   const files = packed.files.map((file) => file.path).sort();
 
   assert.ok(files.includes('package.json'));
