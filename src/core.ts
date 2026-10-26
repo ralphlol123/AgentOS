@@ -5,7 +5,7 @@ import { appendContextRecord, literalMarkdown, markdownHeadings, markdownSection
 import { HANDOFF_ROLES, recognizeSections, resolveObjective, sectionText } from './context-sections.js';
 import { assertRelativeBoundaryPath, validateTaskScope } from './task-scope.js';
 import { buildContextBundle, findAcceptance } from './context-builder.js';
-import { applyBrain, splitFrontmatter, brainContextRecords, brainDoctor, brainMissing, checkBrain, initBrain, listBrain, loadBrain, previewBrain, proposeBrain, registerBrain, searchBrain, showBrain, validateBrain, verifyBrain, type BrainCtx, type VaultBinding } from './brain.js';
+import { applyBrain, splitFrontmatter, brainContextRecords, brainDoctor, brainMissing, checkBrain, dirState, indexBrain, initBrain, ioReason, listBrain, newIndexNote, loadBrain, previewBrain, proposeBrain, registerBrain, searchBrain, showBrain, validateBrain, verifyBrain, type BrainCtx, type VaultBinding } from './brain.js';
 import { checkpointContextRecord, checkpointProblems, listCheckpoints, resolveTask, resumeCheckpoint, showCheckpoint, writeCheckpoint, type CheckpointContext } from './checkpoint.js';
 import { planCompactRewrite } from './compact-rewrite.js';
 import { STATE_SIZE_WARN_CHARS, largestSections, sectionSizes, tasksShapeWarnings } from './state-size.js';
@@ -1511,21 +1511,11 @@ const OBSIDIAN_USAGE = [
 const isInside = (dir: string, abs: string) => { const rel = relative(dir, abs); return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel)); };
 const toPosix = (path: string) => path.split(sep).join('/');
 
-/** The index note: links (relative paths) to the Brain records, never copies. Written once; never overwritten. */
+/** The index note: links (relative paths) to the Brain records, never copies; Brain writes refresh its generated block (src/brain.ts). */
 async function obsidianIndexText(root: string, projectText: string, indexAbs: string, canonical: string, binding: VaultBinding | null) {
-  const projectName = firstYamlValue(projectText, 'name') ?? basename(root);
-  const records = (await loadBrain(root, brainScopes(projectText), binding)).filter((record) => record.state !== 'invalid');
-  const link = (abs: string) => toPosix(relative(dirname(indexAbs), abs));
-  return [
-    `# ${title(projectName)} AgentOS Index`, '',
-    'Written once by `agentos obsidian init|link`; AgentOS never overwrites it. Edit it freely.', '',
-    `Canonical location of the Project Brain: **${canonical}**. Records live there only; this note holds links, never copies (no sync).`,
-    'Runtime state stays in the workspace `.agentos/`. Agents read only the notes a task needs, never the whole vault, and change records only through `agentos brain register|propose|apply`.', '',
-    '## Brain records', '',
-    ...(records.length ? records.map((record) => `- [${record.title}](<${link(record.abs)}>) — \`${record.id}\` (${record.kind}, ${record.status})`) : ['- None registered yet (`agentos brain init`, `agentos brain register <path>`).']),
-    '',
-  ].join('\n');
+  return newIndexNote(indexNoteName(root, projectText), canonical, await loadBrain(root, brainScopes(projectText), binding), indexAbs);
 }
+const indexNoteName = (root: string, projectText: string) => title(firstYamlValue(projectText, 'name') ?? basename(root));
 
 /** `agentos obsidian init`: no vault yet — a plain folder inside (or next to) the workspace, openable as a vault. */
 async function obsidianInitAgentOS(options: any = {}) {
@@ -1537,7 +1527,7 @@ async function obsidianInitAgentOS(options: any = {}) {
   await assertProjectYamlWellFormed(projectPath);
   const project = await safeRead(projectPath);
   const existing = obsidianConfigFromProject(project);
-  if (existing) return { ok: false, text: `AgentOS obsidian init: FAIL\nknowledge.obsidian is already configured (vault: ${existing.vault}, destination: ${existing.destination}); nothing was written. Use \`agentos obsidian status\`.` };
+  if (existing) return { ok: false, text: `AgentOS obsidian init: FAIL\nknowledge.obsidian is already configured (vault: ${existing.vault}, destination: ${existing.destination}); nothing was written. Use \`agentos obsidian status\`; \`agentos brain index\` recreates a missing index note.` };
   const dryRun = Boolean(options.dryRun);
   const dir = options.dir ? resolve(cwd, String(options.dir)) : join(root, 'knowledge');
   const inWorkspace = isInside(root, dir) && dir !== root;
@@ -1656,11 +1646,18 @@ async function obsidianStatusAgentOS(options: any = {}) {
   const config = obsidianConfigFromProject(project);
   if (!config) return { ok: false, text: 'AgentOS Obsidian: NOT CONFIGURED\nRun `agentos obsidian link-workspace --vault <path> --dest <folder>`.' };
   if (config.enabled === false) return { ok: true, text: 'AgentOS Obsidian: DISABLED (knowledge.obsidian.enabled: false)\nProject knowledge is unaffected: Brain, context, checkpoint and resume work without Obsidian. Remove the key or set it to true to re-enable.' };
-  const workspace = config.vault && config.destination ? join(config.vault, config.destination) : '';
+  // A relative vault (`obsidian init`) is relative to the workspace root, never to the cwd (F8).
+  const vault = config.vault ? resolve(root, config.vault) : '';
+  const workspace = vault && config.destination ? join(vault, config.destination) : '';
   const diagnostics = [];
-  if (config.vault && !await exists(config.vault)) diagnostics.push(`Vault missing: ${config.vault}`);
-  if (workspace && !await exists(workspace)) diagnostics.push(`Workspace folder missing: ${workspace}`);
-  else diagnostics.push(...await obsidianIndexWarnings(root, project));
+  const state = async (label: string, dir: string) => {
+    const found = await dirState(dir);
+    if (found === 'absent') diagnostics.push(`${label} missing: ${dir}`);
+    else if (found !== 'ok' && found !== 'empty') diagnostics.push(`${label} unreadable: ${dir} (${ioReason(found)})`);
+    return found === 'ok' || found === 'empty';
+  };
+  if (vault) await state('Vault', vault);
+  if (!workspace || await state('Workspace folder', workspace)) diagnostics.push(...await obsidianIndexWarnings(root, project));
   const ok = diagnostics.length === 0;
   return {
     ok,
@@ -4631,6 +4628,7 @@ async function contextInputFor(root: string, engine: string, options: any) {
   // An optional viewer folder that is gone (canonical: workspace) is an integration warning, not missing knowledge.
   const viewerGone = binding && binding.canonical === 'workspace' && !await exists(binding.dir) ? `optional Obsidian folder unavailable: ${binding.dir} (canonical: workspace; no Brain record lives there)` : null;
   const agents = project.agents && typeof project.agents === 'object' ? project.agents : {};
+  const brainRecords = await loadBrain(root, brainScopes(projectText), binding);
   return {
     root, engine, project, projectText,
     repos: parseReposFromProjectYaml(projectText, { includeRoot: true }),
@@ -4639,8 +4637,8 @@ async function contextInputFor(root: string, engine: string, options: any) {
     header: promptHeaderLines(engine, root, projectText),
     rules: [PROMPT_RULES, ...engineSpecificRules(engine), obsidianPromptLine(projectText)].filter(Boolean),
     task: options.task, role: options.role ? normalizeAgentAlias(String(options.role)) : undefined, scope: options.scope, budget: options.budget, includeSuperseded: Boolean(options.includeSuperseded),
-    brain: await brainContextRecords(root, brainScopes(projectText), binding),
-    missing: await brainMissing(root, binding, obsidian.off),
+    brain: brainContextRecords(brainRecords),
+    missing: await brainMissing(root, brainRecords, binding, obsidian.off),
     warnings: [obsidian.off, viewerGone].filter(Boolean),
   };
 }
@@ -4911,7 +4909,7 @@ async function obsidianIndexWarnings(root: string, projectText: string) {
   const binding = obsidianBinding(root, projectText);
   if (!config?.managed || !binding || !await exists(binding.dir)) return [];
   const index = config.index ? join(binding.dir, config.index) : '';
-  return index && await exists(index) ? [] : [`Obsidian linked folder ${binding.dir} has no index note${config.index ? ` (${config.index})` : ''}; it is not treated as linked. ${config.destination === '.' ? 'Restore the note (any Markdown index), or remove knowledge.obsidian and re-run `agentos obsidian init`.' : 'Re-run `agentos obsidian link` with the same --vault/--dest (it creates only the missing note).'}`];
+  return index && await exists(index) ? [] : [`Obsidian linked folder ${binding.dir} has no index note${config.index ? ` (${config.index})` : ''}; it is not treated as linked. Run \`agentos brain index\` to recreate it from the Brain records (records, config and history are not touched).`];
 }
 
 function firstYamlValue(text, key) {
@@ -5196,16 +5194,18 @@ export async function checkpointAgentOS(options: any = {}) {
 }
 
 const brainScopes = (projectText: string) => parseReposFromProjectYaml(projectText, { includeRoot: true }).map((repo) => repo.name);
-const BRAIN_WRITES = new Set(['init', 'register', 'propose', 'apply', 'verify']);
+const BRAIN_WRITES = new Set(['init', 'register', 'propose', 'apply', 'verify', 'index']);
 
-/** `agentos brain`: writes (init/register/propose/apply/verify) take the workspace lock unless --dry-run; the rest are read-only. */
+/** `agentos brain`: writes (init/register/propose/apply/verify/index) take the workspace lock unless --dry-run; the rest are read-only. */
 export async function brainAgentOS(options: any = {}) {
   const cwd = options.cwd ?? process.cwd();
   const root = await findAgentOSRoot(cwd);
   if (!root) return { ok: false, text: 'AgentOS brain: FAIL\nNo .agentos directory found here or in parent directories.' };
   const projectText = await readCoreProjectYaml(root);
   const { binding, off } = obsidianIntegration(root, projectText);
-  const ctx: BrainCtx = { root, cwd, repos: brainScopes(projectText), vault: binding, vaultOff: off };
+  const config = obsidianIntegration(root, projectText).config;
+  const note = binding && config?.managed && config.index ? { abs: join(binding.dir, config.index), name: indexNoteName(root, projectText) } : null;
+  const ctx: BrainCtx = { root, cwd, repos: brainScopes(projectText), vault: binding, vaultOff: off, note };
   const [ref] = options.args ?? [];
   const run = () => {
     switch (options.subcommand) {
@@ -5220,6 +5220,7 @@ export async function brainAgentOS(options: any = {}) {
       case 'apply': return applyBrain(ctx, ref, options);
       case 'check': return checkBrain(ctx, options);
       case 'verify': return verifyBrain(ctx, ref, options);
+      case 'index': return indexBrain(ctx, options);
       default: return { ok: false, text: BRAIN_USAGE };
     }
   };
@@ -5236,6 +5237,7 @@ export const BRAIN_USAGE = [
   '       agentos brain preview <proposal> | validate <proposal>   (read-only)',
   '       agentos brain apply <proposal> [--dry-run]',
   '       agentos brain verify <id-or-path> [--by <name>] [--dry-run]',
+  '       agentos brain index [--adopt] [--dry-run]   (recreate/refresh the derived index.json and Obsidian index note; --adopt an older unmarked note)',
 ].join('\n');
 
 /** `agentos resume`: read-only. */

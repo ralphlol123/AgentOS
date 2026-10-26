@@ -65,4 +65,7 @@ if want F10; then echo "## F10 machine-specific vault path; missing-index recove
   echo '$ grep vault: .agentos/project.yaml'; grep 'vault:' .agentos/project.yaml | sed "s#$BASE#\$BASE#g"
   ws F10b; a obsidian init >/dev/null; rm knowledge/index.md
   LINES_MAX=14 run obsidian status; LINES_MAX=3 run obsidian init
-  a brain init >/dev/null; rm .agentos/brain/index.json; run brain list >/dev/null; echo '$ ls .agentos/brain/index.json'; ls .agentos/brain/index.json 2>&1 | sed "s#$BASE#\$BASE#g"; fi
+  a brain init >/dev/null; rm .agentos/brain/index.json; run brain list >/dev/null; echo '$ ls .agentos/brain/index.json'; ls .agentos/brain/index.json 2>&1 | sed "s#$BASE#\$BASE#g"
+  echo "-- recovery (slice 2): both derived indexes deleted"; rm -f knowledge/index.md
+  LINES_MAX=4 run brain index; echo '$ ls knowledge/index.md .agentos/brain/index.json'; ls knowledge/index.md .agentos/brain/index.json 2>&1 | sed "s#$BASE#\$BASE#g"
+  LINES_MAX=1 run obsidian status; LINES_MAX=3 run brain index; fi
