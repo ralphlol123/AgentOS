@@ -1655,6 +1655,7 @@ async function obsidianStatusAgentOS(options: any = {}) {
   const project = await safeRead(join(root, '.agentos/project.yaml'));
   const config = obsidianConfigFromProject(project);
   if (!config) return { ok: false, text: 'AgentOS Obsidian: NOT CONFIGURED\nRun `agentos obsidian link-workspace --vault <path> --dest <folder>`.' };
+  if (config.enabled === false) return { ok: true, text: 'AgentOS Obsidian: DISABLED (knowledge.obsidian.enabled: false)\nProject knowledge is unaffected: Brain, context, checkpoint and resume work without Obsidian. Remove the key or set it to true to re-enable.' };
   const workspace = config.vault && config.destination ? join(config.vault, config.destination) : '';
   const diagnostics = [];
   if (config.vault && !await exists(config.vault)) diagnostics.push(`Vault missing: ${config.vault}`);
@@ -2999,9 +3000,9 @@ async function doctorAgentOSUnlocked(options: any = {}) {
   problems.push(...cards.problems);
   diagnostics.push(...cards.diagnostics);
   const doctorProject = await safeRead(join(root, '.agentos/project.yaml'));
-  let binding: VaultBinding | null = null;
-  try { binding = obsidianBinding(root, doctorProject); } catch (error) { problems.push(error.message); }
-  const brain = await brainDoctor(root, brainScopes(doctorProject), binding);
+  const { binding, off } = obsidianIntegration(root, doctorProject);
+  if (off && !off.startsWith('Obsidian integration disabled')) problems.push(off);
+  const brain = await brainDoctor(root, brainScopes(doctorProject), binding, off);
   problems.push(...brain.problems);
   warnings.push(...brain.warnings);
   if (binding) warnings.push(...await obsidianIndexWarnings(root, doctorProject));
@@ -4614,9 +4615,21 @@ function promptHeaderLines(engine, root, project) {
   ];
 }
 
+/** project.yaml for core commands (brain, context, checkpoint, resume): unparseable YAML fails honestly instead of
+ *  reading as an empty project. Only the optional knowledge.obsidian block may be invalid without failing. */
+async function readCoreProjectYaml(root: string) {
+  const text = await safeRead(join(root, '.agentos/project.yaml'));
+  try { parseYaml(text); } catch (error) { throw new Error(`.agentos/project.yaml is not valid YAML (${String(error.message).split('\n')[0]}); fix it by hand. Nothing was read or written.`); }
+  return text;
+}
+
 async function contextInputFor(root: string, engine: string, options: any) {
-  const projectText = await safeRead(join(root, '.agentos/project.yaml'));
+  const projectText = await readCoreProjectYaml(root);
   const project = parseProjectYaml(projectText);
+  const obsidian = obsidianIntegration(root, projectText);
+  const binding = obsidian.binding;
+  // An optional viewer folder that is gone (canonical: workspace) is an integration warning, not missing knowledge.
+  const viewerGone = binding && binding.canonical === 'workspace' && !await exists(binding.dir) ? `optional Obsidian folder unavailable: ${binding.dir} (canonical: workspace; no Brain record lives there)` : null;
   const agents = project.agents && typeof project.agents === 'object' ? project.agents : {};
   return {
     root, engine, project, projectText,
@@ -4626,8 +4639,9 @@ async function contextInputFor(root: string, engine: string, options: any) {
     header: promptHeaderLines(engine, root, projectText),
     rules: [PROMPT_RULES, ...engineSpecificRules(engine), obsidianPromptLine(projectText)].filter(Boolean),
     task: options.task, role: options.role ? normalizeAgentAlias(String(options.role)) : undefined, scope: options.scope, budget: options.budget, includeSuperseded: Boolean(options.includeSuperseded),
-    brain: await brainContextRecords(root, brainScopes(projectText), obsidianBinding(root, projectText)),
-    missing: await brainMissing(root, obsidianBinding(root, projectText)),
+    brain: await brainContextRecords(root, brainScopes(projectText), binding),
+    missing: await brainMissing(root, binding, obsidian.off),
+    warnings: [obsidian.off, viewerGone].filter(Boolean),
   };
 }
 
@@ -4682,7 +4696,7 @@ function renderEnginePrompt({ engine, root, project, objective, tasks, scope }) 
 }
 
 function obsidianPromptLine(project) {
-  const config = obsidianConfigFromProject(project);
+  const config = obsidianIntegration('.', project).config;
   if (!config || !config.vault || !config.destination) return null;
   if (config.mode === 'workspace-folder') {
     return `Obsidian workspace: ${join(config.vault, config.destination)}. For Obsidian notes, plans, summaries, decisions, or durable knowledge, read/write only inside that folder when explicitly tasked. Do not bulk-load the Obsidian vault.`;
@@ -4858,6 +4872,8 @@ function obsidianConfigFromProject(project) {
     destination: normalizeVaultRelativePath(obsidian.destination ?? obsidian.dest),
     linked: Array.isArray(obsidian.linked) ? obsidian.linked.map((note) => normalizeVaultRelativePath(note)).filter(Boolean) : [],
     canonical: stringValue(obsidian.canonical, 'workspace'),
+    /** `enabled: false` switches the optional integration off; files and the rest of the config are kept. */
+    enabled: obsidian.enabled ?? true,
     index: obsidian.index ? normalizeVaultRelativePath(obsidian.index) : '',
     /** Written by `obsidian init|link` (slice 6); older link-workspace configs have no `canonical`/`index`. */
     managed: 'canonical' in obsidian,
@@ -4873,6 +4889,20 @@ function obsidianBinding(root: string, projectText: string): VaultBinding | null
   const vault = resolve(root, config.vault);
   const dest = config.destination || '.';
   return { vault, dest, dir: resolve(vault, dest), canonical: config.canonical as VaultBinding['canonical'] };
+}
+
+/** knowledge.obsidian for core commands; never throws. `off` says why the optional integration is not used
+ *  (`enabled: false`, or an invalid setting), so Brain, context, checkpoint and resume continue without it;
+ *  vault records last known in index.json are then reported as unavailable, never silently dropped. */
+function obsidianIntegration(root: string, projectText: string): { config: ReturnType<typeof obsidianConfigFromProject>; binding: VaultBinding | null; off: string | null } {
+  try {
+    const config = obsidianConfigFromProject(projectText);
+    if (config && typeof config.enabled !== 'boolean') throw new Error(`.agentos/project.yaml knowledge.obsidian.enabled must be true or false (got ${JSON.stringify(config.enabled)})`);
+    if (config && !config.enabled) return { config: null, binding: null, off: 'Obsidian integration disabled (knowledge.obsidian.enabled: false)' };
+    return { config, binding: obsidianBinding(root, projectText), off: null };
+  } catch (error) {
+    return { config: null, binding: null, off: `Obsidian integration invalid, ignored: ${error.message}` };
+  }
 }
 
 /** A linked folder that exists but lacks its index note is reported, not treated as linked. */
@@ -5173,8 +5203,9 @@ export async function brainAgentOS(options: any = {}) {
   const cwd = options.cwd ?? process.cwd();
   const root = await findAgentOSRoot(cwd);
   if (!root) return { ok: false, text: 'AgentOS brain: FAIL\nNo .agentos directory found here or in parent directories.' };
-  const projectText = await safeRead(join(root, '.agentos/project.yaml'));
-  const ctx: BrainCtx = { root, cwd, repos: brainScopes(projectText), vault: obsidianBinding(root, projectText) };
+  const projectText = await readCoreProjectYaml(root);
+  const { binding, off } = obsidianIntegration(root, projectText);
+  const ctx: BrainCtx = { root, cwd, repos: brainScopes(projectText), vault: binding, vaultOff: off };
   const [ref] = options.args ?? [];
   const run = () => {
     switch (options.subcommand) {

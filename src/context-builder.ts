@@ -61,6 +61,8 @@ export interface ContextInput {
   brain?: Array<{ id: string; kind: string; status: string; scope: string; title: string; path: string; changed: boolean; location?: 'workspace' | 'vault' }>;
   /** Known-unreadable inputs (e.g. `vault unavailable: <dir>`); listed under Missing, so the bundle never reads as complete. */
   missing?: string[];
+  /** Diagnostics that do not make the bundle incomplete (e.g. an optional Obsidian viewer that is off or gone). */
+  warnings?: string[];
 }
 
 interface Candidate {
@@ -101,7 +103,7 @@ export async function buildContextBundle(input: ContextInput): Promise<ContextBu
   const overhead = ENGINE_OVERHEAD[engine] ?? GENERIC_OVERHEAD;
   const task = input.task?.trim() || null;
   const missing: string[] = [...(input.missing ?? [])];
-  const warnings: string[] = [];
+  const warnings: string[] = [...(input.warnings ?? [])];
 
   // --- role ---------------------------------------------------------------------------------------
   if (input.role && !input.enabledAgents.includes(input.role)) {

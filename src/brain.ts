@@ -44,7 +44,8 @@ export interface BrainRecord {
  *  binding and lives only in project.yaml; records under `dir` carry vault-relative paths. Records are walked
  *  there only when `canonical: vault` (records live in exactly one place; the other side holds links). */
 export interface VaultBinding { vault: string; dest: string; dir: string; canonical: 'workspace' | 'vault' }
-export interface BrainCtx { root: string; cwd: string; repos: string[]; vault?: VaultBinding | null }
+/** `vaultOff`: why the optional Obsidian integration is not used (disabled or invalid config); see docs/obsidian.md. */
+export interface BrainCtx { root: string; cwd: string; repos: string[]; vault?: VaultBinding | null; vaultOff?: string | null }
 
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
 const norm = (text: string) => text.replace(/\s+/g, ' ').trim();
@@ -209,20 +210,25 @@ export async function brainContextRecords(root: string, repos: string[], vault?:
   return valid(await loadBrain(root, repos, vault)).map((record) => ({ id: record.id, kind: record.kind, status: record.status, scope: record.scope, title: record.title, path: record.location === 'vault' ? record.abs : record.path, location: record.location, changed: record.state === 'changed' }));
 }
 
-/** The linked folder is absent (vault unmounted, renamed, removed): its records are `unavailable`. The last known
- *  list comes from index.json (derived, but the only list that survives the folder going away). */
-export async function vaultUnavailable(root: string, vault?: VaultBinding | null) {
-  if (!vault) return null;
-  if (await lstat(vault.dir).then((info) => info.isDirectory(), () => false)) return null;
+/** Vault records that cannot be read now: the linked folder is absent (vault unmounted, renamed, removed), or the
+ *  integration is off (`off`: disabled or invalid config), so the folder is not walked. Their last known list comes
+ *  from index.json (derived, but the only list that survives the folder going away). `required`: the folder is the
+ *  canonical store (canonical: vault), so its absence is missing knowledge, not just a missing viewer. */
+export async function vaultUnavailable(root: string, vault?: VaultBinding | null, off?: string | null) {
+  if (!off && (!vault || await lstat(vault.dir).then((info) => info.isDirectory(), () => false))) return null;
   let records: any[] = [];
   try { records = JSON.parse(await readFile(join(root, INDEX), 'utf8')).records.filter((record: any) => record.location === 'vault'); } catch { /* no index yet */ }
-  return { dir: vault.dir, records: records.map((record) => ({ id: record.id, kind: record.kind, status: record.status, scope: record.scope, title: record.title, path: record.path, location: 'vault', state: 'unavailable' })) };
+  if (off && !records.length) return null;
+  return {
+    dir: off ? null : vault.dir, reason: off ?? `vault unavailable: ${vault.dir}`, required: !off && vault.canonical === 'vault',
+    records: records.map((record) => ({ id: record.id, kind: record.kind, status: record.status, scope: record.scope, title: record.title, path: record.path, location: 'vault', state: 'unavailable' })),
+  };
 }
 
-/** `context` input: what cannot be read right now. */
-export async function brainMissing(root: string, vault?: VaultBinding | null) {
-  const gone = await vaultUnavailable(root, vault);
-  return gone ? [`vault unavailable: ${gone.dir}`, ...gone.records.map((record) => `${record.id} (${record.path}): vault unavailable: ${gone.dir}`)] : [];
+/** `context` input: required knowledge that cannot be read right now (never an optional viewer on its own). */
+export async function brainMissing(root: string, vault?: VaultBinding | null, off?: string | null) {
+  const gone = await vaultUnavailable(root, vault, off);
+  return gone ? [...(gone.required ? [gone.reason] : []), ...gone.records.map((record) => `${record.id} (${record.path}): ${gone.reason}`)] : [];
 }
 
 const indexEntry = (record: BrainRecord) => ({ id: record.id, kind: record.kind, status: record.status, scope: record.scope, title: record.title, path: record.path, ...(record.location === 'vault' ? { location: 'vault' } : {}), source_hash: record.source_hash, ...(record.fields.superseded_by ? { superseded_by: record.fields.superseded_by } : {}) });
@@ -238,12 +244,20 @@ function indexContent(records: BrainRecord[], kept: any[] = []) {
 
 async function writeIndex(ctx: BrainCtx) {
   await mkdirTracked(join(ctx.root, BRAIN_DIR));
-  // An unavailable vault keeps its last known entries, so its records stay reportable as `unavailable`.
+  // An unavailable vault (or an integration that is off) keeps its last known entries, so its records stay reportable as `unavailable`.
   let kept: any[] = [];
-  if (await vaultUnavailable(ctx.root, ctx.vault)) {
+  if (await vaultUnavailable(ctx.root, ctx.vault, ctx.vaultOff)) {
     try { kept = JSON.parse(await readFile(join(ctx.root, INDEX), 'utf8')).records.filter((record: any) => record.location === 'vault'); } catch { /* none */ }
   }
   await writeFileAtomic(join(ctx.root, INDEX), indexContent(await loadBrain(ctx.root, ctx.repos, ctx.vault), kept));
+}
+
+/** A Brain write, then the derived index in its own transaction. The index is rebuildable, so its failure keeps the
+ *  record write and is reported as stale (returned lines) instead of rolling the knowledge back. */
+async function commit(ctx: BrainCtx, write: () => Promise<void>) {
+  await withMutationTransaction(write);
+  try { await withMutationTransaction(() => writeIndex(ctx)); return []; }
+  catch (error) { return [`Warning: ${INDEX} is stale (${error.message}); the record write above is kept. The index is derived: the next successful brain write regenerates it.`]; }
 }
 
 const out = (json: boolean, ok: boolean, data: any, lines: string[]) => ({ ok, ...data, text: json ? JSON.stringify({ ok, ...data }, null, 2) : lines.join('\n') });
@@ -331,10 +345,10 @@ export async function registerBrain(ctx: BrainCtx, pathArg: string | undefined, 
   const added = Object.keys(plan.missing);
   const data = { dryRun: Boolean(options.dryRun), path: plan.rel, record: publicRecord(plan.record), added, conflicts: plan.conflicts };
   if (!added.length) return out(options.json, true, data, [`AgentOS brain register: ${plan.rel} is already registered as ${plan.id} (no-op; nothing written).`, ...conflictLines(plan.conflicts)]);
-  if (!options.dryRun) await withMutationTransaction(async () => { await writeFileAtomic(plan.abs, plan.next); await writeIndex(ctx); });
-  return out(options.json, true, data, [
+  const stale = options.dryRun ? [] : await commit(ctx, () => writeFileAtomic(plan.abs, plan.next));
+  return out(options.json, true, { ...data, ...(stale.length ? { index_stale: true } : {}) }, [
     `AgentOS brain register${options.dryRun ? ' (dry run)' : ''}: ${plan.rel} as ${plan.id}`,
-    `${options.dryRun ? 'Would add' : 'Added'} frontmatter keys: ${added.join(', ')} (body untouched)`, ...conflictLines(plan.conflicts),
+    `${options.dryRun ? 'Would add' : 'Added'} frontmatter keys: ${added.join(', ')} (body untouched)`, ...conflictLines(plan.conflicts), ...stale,
   ]);
 }
 
@@ -355,7 +369,7 @@ export async function initBrain(ctx: BrainCtx, options: { dryRun?: boolean; json
   const toVault = options.location === 'vault';
   if (options.location !== undefined && !['vault', 'workspace'].includes(options.location)) throw new Error('--location must be workspace or vault');
   if (toVault && ctx.vault?.canonical !== 'vault') throw new Error('brain init --location vault needs a linked Obsidian folder with knowledge.obsidian.canonical: vault (see `agentos obsidian link --canonical vault`). Nothing was written.');
-  if (toVault && await vaultUnavailable(ctx.root, ctx.vault)) throw new Error(`vault unavailable: ${ctx.vault.dir}. Nothing was written.`);
+  if (toVault && await vaultUnavailable(ctx.root, ctx.vault, ctx.vaultOff)) throw new Error(`vault unavailable: ${ctx.vault.dir}. Nothing was written.`);
   const records = await loadBrain(ctx.root, ctx.repos, ctx.vault);
   const base = toVault ? ctx.vault.vault : ctx.root;
   const hasDecisions = toVault || await lstat(join(ctx.root, '.agentos/decisions.md')).then(() => true, () => false);
@@ -366,19 +380,16 @@ export async function initBrain(ctx: BrainCtx, options: { dryRun?: boolean; json
   if (existing.length) return out(options.json, false, { existing }, ['AgentOS brain init: FAIL', ...existing.map((rel) => `- ${rel} exists; refusing to overwrite it.`), 'Nothing was written. Register existing files with `agentos brain register <path>`.']);
   const decisions = !toVault && hasDecisions ? await planRegister(ctx, records, join(ctx.root, '.agentos/decisions.md'), { kind: 'decision' }) : null;
   const registers = decisions && Object.keys(decisions.missing).length ? decisions : null;
-  if (!options.dryRun) {
-    await withMutationTransaction(async () => {
-      await mkdirTracked(toVault ? ctx.vault.dir : join(ctx.root, BRAIN_DIR));
-      for (const file of creates) if (!(await writeFileExclusiveAtomic(join(base, file.rel), Buffer.from(file.text))).created) throw new Error(`${file.rel} appeared while writing; nothing was written.`);
-      if (registers) await writeFileAtomic(registers.abs, registers.next);
-      await writeIndex(ctx);
-    });
-  }
+  const stale = options.dryRun ? [] : await commit(ctx, async () => {
+    await mkdirTracked(toVault ? ctx.vault.dir : join(ctx.root, BRAIN_DIR));
+    for (const file of creates) if (!(await writeFileExclusiveAtomic(join(base, file.rel), Buffer.from(file.text))).created) throw new Error(`${file.rel} appeared while writing; nothing was written.`);
+    if (registers) await writeFileAtomic(registers.abs, registers.next);
+  });
   const verb = options.dryRun ? 'Would create' : 'Created';
-  return out(options.json, true, { dryRun: Boolean(options.dryRun), created: creates.map((file) => file.rel), registered: registers ? [registers.rel] : [] }, [
+  return out(options.json, true, { dryRun: Boolean(options.dryRun), created: creates.map((file) => file.rel), registered: registers ? [registers.rel] : [], ...(stale.length ? { index_stale: true } : {}) }, [
     `AgentOS brain init${options.dryRun ? ' (dry run)' : ''}${toVault ? ` into the linked vault folder ${ctx.vault.dir} (paths below are vault-relative)` : ''}`,
     ...creates.map((file) => `- ${verb}: ${file.rel} (status: proposed; sections marked ${UNKNOWN})`),
-    ...(registers ? [`- ${options.dryRun ? 'Would register' : 'Registered'}: .agentos/decisions.md as ${registers.id} (existing file; frontmatter only, not duplicated)`] : decisions ? ['- .agentos/decisions.md is already registered'] : []),
+    ...(registers ? [`- ${options.dryRun ? 'Would register' : 'Registered'}: .agentos/decisions.md as ${registers.id} (existing file; frontmatter only, not duplicated)`] : decisions ? ['- .agentos/decisions.md is already registered'] : []), ...stale,
   ]);
 }
 
@@ -386,9 +397,9 @@ export async function initBrain(ctx: BrainCtx, options: { dryRun?: boolean; json
 
 export async function listBrain(ctx: BrainCtx, options: { status?: string; kind?: string; json?: boolean }) {
   const records = (await loadBrain(ctx.root, ctx.repos, ctx.vault)).filter((record) => (!options.status || record.status === options.status) && (!options.kind || record.kind === options.kind));
-  const gone = await vaultUnavailable(ctx.root, ctx.vault);
+  const gone = await vaultUnavailable(ctx.root, ctx.vault, ctx.vaultOff);
   const lines = records.map((record) => `- ${record.id ?? '(no id)'} [${record.status}${record.state === 'changed' ? ', source changed since verification' : ''}] ${record.kind ?? '?'} ${record.path}${record.location === 'vault' ? ` (vault: ${record.abs})` : ''} — ${record.title}`);
-  for (const record of gone?.records ?? []) lines.push(`- ${record.id} [unavailable] ${record.kind} ${record.path} (vault unavailable: ${gone.dir}) — ${record.title}`);
+  for (const record of gone?.records ?? []) lines.push(`- ${record.id} [unavailable] ${record.kind} ${record.path} (${gone.reason}) — ${record.title}`);
   return out(options.json, true, { records: [...records.map(publicRecord), ...(gone?.records ?? [])] }, lines.length ? lines
     : ['No Brain records. Start with `agentos brain init` or `agentos brain register <path>`.']);
 }
@@ -425,26 +436,26 @@ const CHANGED = 'source changed since verification — recheck (a hash change sa
 /** Exit 1 only on `invalid`; `unavailable` (vault folder absent) is reported, like doctor's warning. */
 export async function checkBrain(ctx: BrainCtx, options: { json?: boolean }) {
   const records = await loadBrain(ctx.root, ctx.repos, ctx.vault);
-  const gone = await vaultUnavailable(ctx.root, ctx.vault);
+  const gone = await vaultUnavailable(ctx.root, ctx.vault, ctx.vaultOff);
   const invalid = records.filter((record) => record.state === 'invalid');
-  return out(options.json, invalid.length === 0, { ...(gone ? { vault_unavailable: gone.dir } : {}), records: [...records.map((record) => ({ ...publicRecord(record), source_hash: record.source_hash, current_hash: record.current_hash, problems: record.problems })), ...(gone?.records ?? [])] }, [
+  return out(options.json, invalid.length === 0, { ...(gone ? { vault_unavailable: gone.dir ?? gone.reason } : {}), records: [...records.map((record) => ({ ...publicRecord(record), source_hash: record.source_hash, current_hash: record.current_hash, problems: record.problems })), ...(gone?.records ?? [])] }, [
     `AgentOS brain check: ${records.length + (gone?.records.length ?? 0)} record(s), ${records.filter((r) => r.state === 'ok').length} ok, ${records.filter((r) => r.state === 'changed').length} changed, ${invalid.length} invalid${gone ? `, ${gone.records.length} unavailable` : ''}`,
     ...records.map((record) => record.state === 'ok' ? `- ok ${record.id} (${record.path})`
       : record.state === 'changed' ? `- changed ${record.id} (${record.path}): ${CHANGED}; after review run \`agentos brain verify ${record.id} --by <name>\``
         : `- invalid ${record.path}: ${record.problems.join('; ')} (file left as is; fix it by hand)`),
-    ...(gone ? [...gone.records.map((record) => `- unavailable ${record.id} (${record.path}): vault unavailable: ${gone.dir}`), ...(gone.records.length ? [] : [`- vault unavailable: ${gone.dir} (no records known there)`])] : []),
+    ...(gone ? [...gone.records.map((record) => `- unavailable ${record.id} (${record.path}): ${gone.reason}`), ...(gone.records.length ? [] : [`- ${gone.reason} (no records known there)`])] : []),
   ]);
 }
 
 /** Doctor: invalid metadata is a problem, a changed source or an unavailable vault folder a warning. */
-export async function brainDoctor(root: string, repos: string[], vault?: VaultBinding | null) {
+export async function brainDoctor(root: string, repos: string[], vault?: VaultBinding | null, off?: string | null) {
   const records = await loadBrain(root, repos, vault);
-  const gone = await vaultUnavailable(root, vault);
+  const gone = await vaultUnavailable(root, vault, off);
   return {
     problems: records.filter((record) => record.state === 'invalid').flatMap((record) => record.problems.map((problem) => `Brain record ${problem}`)),
     warnings: [
       ...records.filter((record) => record.state === 'changed').map((record) => `Brain record ${record.id} (${record.path}): ${CHANGED}; run \`agentos brain verify ${record.id}\` after review`),
-      ...(gone ? [`Obsidian vault unavailable: ${gone.dir} (absent or not mounted); ${gone.records.length} Brain record(s) under it are unavailable and \`agentos context\` lists them under Missing`] : []),
+      ...(gone ? [`${gone.dir ? `Obsidian vault unavailable: ${gone.dir} (absent or not mounted)` : gone.reason}; ${gone.records.length} Brain record(s) under it are unavailable and \`agentos context\` lists them under Missing`] : []),
     ],
   };
 }
@@ -462,10 +473,10 @@ export async function verifyBrain(ctx: BrainCtx, ref: string | undefined, option
     status: record.status === 'superseded' ? 'superseded' : 'verified', verified_at: now, verified_by: by, source_hash: record.current_hash,
     history: [...(record.fields.history ?? []), `${now} verified by ${by}: ${short(record.source_hash)} -> ${short(record.current_hash)}`],
   });
-  if (!options.dryRun) await withMutationTransaction(async () => { await writeFileAtomic(record.abs, next); await writeIndex(ctx); });
-  return out(options.json, true, { dryRun: Boolean(options.dryRun), id: record.id, path: record.path, source_hash: record.current_hash }, [
+  const stale = options.dryRun ? [] : await commit(ctx, () => writeFileAtomic(record.abs, next));
+  return out(options.json, true, { dryRun: Boolean(options.dryRun), id: record.id, path: record.path, source_hash: record.current_hash, ...(stale.length ? { index_stale: true } : {}) }, [
     `AgentOS brain verify${options.dryRun ? ' (dry run)' : ''}: ${record.id} (${record.path})`,
-    `${options.dryRun ? 'Would record' : 'Recorded'} verified_by ${by}; source_hash ${short(record.source_hash)} -> ${short(record.current_hash)}${record.state === 'ok' ? ' (unchanged)' : ''}`,
+    `${options.dryRun ? 'Would record' : 'Recorded'} verified_by ${by}; source_hash ${short(record.source_hash)} -> ${short(record.current_hash)}${record.state === 'ok' ? ' (unchanged)' : ''}`, ...stale,
   ]);
 }
 
@@ -636,18 +647,15 @@ export async function applyBrain(ctx: BrainCtx, ref: string | undefined, options
   });
   const appliedRel = `${APPLIED}/${basename(proposal.rel)}`;
   const appliedText = patchFrontmatter(proposal.text, { status: 'applied', applied_at: now });
-  if (!options.dryRun) {
-    await withMutationTransaction(async () => {
-      await writeFileAtomic(target.abs, targetText);
-      for (const old of result.supersede) await writeFileAtomic(old.abs, patchFrontmatter(old.text, { status: 'superseded', superseded_by: target.id, updated_at: now }));
-      await mkdirTracked(join(ctx.root, APPLIED));
-      if (!(await writeFileExclusiveAtomic(join(ctx.root, appliedRel), Buffer.from(appliedText))).created) throw new Error(`${appliedRel} already exists; nothing was written.`);
-      await removeTracked(join(ctx.root, proposal.rel));
-      await writeIndex(ctx);
-    });
-  }
-  return out(options.json, true, { ...data, applied_path: appliedRel, source_hash: newHash }, [
+  const stale = options.dryRun ? [] : await commit(ctx, async () => {
+    await writeFileAtomic(target.abs, targetText);
+    for (const old of result.supersede) await writeFileAtomic(old.abs, patchFrontmatter(old.text, { status: 'superseded', superseded_by: target.id, updated_at: now }));
+    await mkdirTracked(join(ctx.root, APPLIED));
+    if (!(await writeFileExclusiveAtomic(join(ctx.root, appliedRel), Buffer.from(appliedText))).created) throw new Error(`${appliedRel} already exists; nothing was written.`);
+    await removeTracked(join(ctx.root, proposal.rel));
+  });
+  return out(options.json, true, { ...data, applied_path: appliedRel, source_hash: newHash, ...(stale.length ? { index_stale: true } : {}) }, [
     `AgentOS brain apply${options.dryRun ? ' (dry run; nothing written)' : ''}: ${proposal.rel}`, ...planLines(proposal, result), 'Validation:', ...validationLines(result),
-    `${options.dryRun ? 'Would regenerate' : 'Regenerated'}: ${INDEX}`, SINGLE_WRITER,
+    ...(stale.length ? stale : [`${options.dryRun ? 'Would regenerate' : 'Regenerated'}: ${INDEX}`]), SINGLE_WRITER,
   ]);
 }
