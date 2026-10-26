@@ -27,6 +27,16 @@ Slice 5 (proposals) runs before the real-environment trials so the connected dem
 - `loadBrain` returns `.unreadable` (non-ENOENT readdir/read failures); `unreadableKnowledge()` joins them, and the vault folder state (`dirState`: ok/empty/absent/error code), with the records `index.json` last knew there. `writeIndex` keeps those entries.
 - `obsidian status` resolves a relative vault with `resolve(root, …)` (F8); all other paths already went through `obsidianBinding(root, …)`.
 
+## Slice 3 design (as built)
+
+- `agentos init` ends with the shared `initBrain` (src/brain.ts): per starting record, existing id → kept; AgentOS-owned file (`.agentos/decisions.md`, `.agentos/architecture.md`) → registered in place; same-kind record → kept; covering doc (six fixed paths) → named with its `brain register` command, never edited; else a `(unknown — fill in)` template. A set-up Brain is a no-op; a Brain error is printed and never undoes init. Discovery is a printed instruction to the engine (no model call).
+- Context: mandatory `overview` candidate = `.agentos/memory.md` body, cut at `OVERVIEW_CHARS` = 1500 (src/context-builder.ts).
+- One Brain per workspace: `loadBrain` stops at any subfolder with its own `.agentos/`.
+- Machine-local binding: `.agentos/local.yaml` `obsidian.vault` (read in `obsidianConfigFromProject(project, root)`), precedence over `project.yaml` `knowledge.obsidian.vault`; `obsidian link|link-workspace` and `obsidian init --dir <outside>` write it; `.agentos/.gitignore` lists it (written by init and by every local.yaml write). No vault bound → integration off with `UNBOUND` reason.
+- Navigation note: `newIndexNote(…, root)` adds `tags: [agentos-navigation]` frontmatter and a `**Navigation only.**` paragraph when canonical is workspace and the note is outside the workspace. `obsidianAppLine` = PATH lookup, advice only.
+- Bootloaders: `startupLoop(engine)` line in AGENTS.md (`codex|opencode`), CLAUDE.md (`claude-code`), .hermes.md (`hermes`); guide gains `## Setup and project knowledge` (budget raised 4608 → 5376 B). No `agentos guide` command (the existing ablation-backed test forbids it).
+- Package: `docs/{quickstart,brain,obsidian,engines}.md` added to `files`. Hermes start workflow: proposal only, `docs/evidence/hermes-start-workflow-proposal.md`.
+
 ## Known risks
 
 - `bun` is not installed on the dev host; gates run the same scripts with `npm run` (no global installs allowed).

@@ -388,7 +388,7 @@ Schema, receipt vocabulary, reconciliation states and limits: [`docs/checkpoints
 `agentos brain` keeps durable project knowledge (architecture, decisions, ADRs, conventions, feature notes) in ordinary Markdown files, registered by reference:
 
 ```bash
-agentos brain init                                   # templates for a project without knowledge files
+agentos brain init                                   # `agentos init` already ran this: templates for what is missing, existing records/docs adopted
 agentos brain register docs/adr/0003-use-postgres.md --kind adr
 agentos brain propose brain:0003-use-postgres --from new-text.md --summary "pin Postgres 16"   # an engine writes the text
 agentos brain preview <proposal>   &&   agentos brain apply <proposal>
@@ -673,7 +673,7 @@ Obsidian is a second location for the same Project Brain, never a second store; 
 
 - **No vault yet:** `agentos obsidian init [--dir <path>] [--dry-run]` creates a plain `knowledge/` folder with an `index.md` that links the Brain records by relative path, and registers it as `knowledge.obsidian` (keys added only). Open the folder in Obsidian if you like; `.obsidian/` is created by Obsidian, not by AgentOS.
 - **Existing vault:** `agentos obsidian link --vault <abs-path> --dest <sub/folder> [--canonical workspace|vault] [--create] [--dry-run]` registers one project folder. It creates only that folder and `<Project> AgentOS Index.md` in it; nothing else in the vault is touched.
-- **Canonical location** (`knowledge.obsidian.canonical`, default `workspace`): every record is one file in one place; the other side holds links, never copies; no sync. With `canonical: vault`, notes in the linked folder are Brain records with portable identity (`id`, vault-relative `sources`); the absolute vault path lives only in `project.yaml`. Notes are read and changed only through `agentos brain register|propose|apply`, and only inside `<vault>/<dest>`.
+- **Canonical location** (`knowledge.obsidian.canonical`, default `workspace`): every record is one file in one place; the other side holds links, never copies; no sync. With `canonical: vault`, notes in the linked folder are Brain records with portable identity (`id`, vault-relative `sources`); the absolute vault path lives only in the git-ignored, machine-local `.agentos/local.yaml` (`obsidian.vault`; older setups: `project.yaml`, still read). Notes are read and changed only through `agentos brain register|propose|apply`, and only inside `<vault>/<dest>`.
 - **Unavailable vault:** its records are `unavailable` in `brain check`, listed under Missing by `agentos context` (`--require-complete` exits 1), and `doctor` warns. An edit made in Obsidian shows up as `changed`.
 
 The boundary-only form (no index note) still works:

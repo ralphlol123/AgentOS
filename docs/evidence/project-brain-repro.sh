@@ -63,6 +63,8 @@ if want F9; then echo "## F9 unreadable directory read as empty"; ws F9; mkdir -
 if want F10; then echo "## F10 machine-specific vault path; missing-index recovery"; ws F10; V="$BASE/F10 vault"; mkdir -p "$V"
   a obsidian link --vault "$V" --dest Projects/Demo --create >/dev/null
   echo '$ grep vault: .agentos/project.yaml'; grep 'vault:' .agentos/project.yaml | sed "s#$BASE#\$BASE#g"
+  echo '$ cat .agentos/local.yaml (slice 3: machine-local binding)'; cat .agentos/local.yaml 2>&1 | sed "s#$BASE#\$BASE#g"
+  echo '$ git check-ignore -v .agentos/local.yaml'; git init -q . 2>/dev/null; git check-ignore -v .agentos/local.yaml 2>&1 | sed "s#$BASE#\$BASE#g"
   ws F10b; a obsidian init >/dev/null; rm knowledge/index.md
   LINES_MAX=14 run obsidian status; LINES_MAX=3 run obsidian init
   a brain init >/dev/null; rm .agentos/brain/index.json; run brain list >/dev/null; echo '$ ls .agentos/brain/index.json'; ls .agentos/brain/index.json 2>&1 | sed "s#$BASE#\$BASE#g"

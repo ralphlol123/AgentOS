@@ -16,6 +16,18 @@ Statuses: `verified` (observed in a recorded engine trial; the evidence names th
 
 The verified cells come from one host-side trial on 2026-10-25 (Claude Code 2.1.310, Codex CLI 0.156.1, a disposable root-repo fixture with `web/`, `api/`, `docs/adr/`): [`evidence/2026-10-25-cross-engine/REPORT.md`](evidence/2026-10-25-cross-engine/REPORT.md) (T1–T5), plus the closure re-trials the same day (boundary probe T6a–T6e, Codex role block T7, Claude subagent T8, subagent `tools:` T9): [`evidence/2026-10-25-cross-engine/closure/REPORT-closure.md`](evidence/2026-10-25-cross-engine/closure/REPORT-closure.md). Sample size n=1 per probe item (T7: n=2 plus two controls). This repository's sandbox cannot run either engine; nothing in the table was observed here.
 
+## Startup loop in each engine's bootloader
+
+Each engine's auto-loaded file names the same short loop with its own engine id, and points to `.agentos/guide.md` for everything else (bootloaders stay ~1.1–1.2 KB):
+
+| File | Engines | Loop line |
+|---|---|---|
+| `CLAUDE.md` | claude-code | `agentos status` → `agentos context claude-code --task <id>` → work → `agentos checkpoint --task <id> …`; next session or engine: `agentos resume --task <id>` |
+| `AGENTS.md` | codex, opencode (and generic) | same, `agentos context codex\|opencode --task <id>` |
+| `.hermes.md` | hermes | same, `agentos context hermes --task <id>` |
+
+The task id is the one identity across engines: a checkpoint written by one engine is what `resume --task <id>` shows another (`test/project-brain-slice3.test.js`). This is generated instruction, not proof that an engine reads or follows it; observed consumption is the Slice 4 trial (acceptance row A16). Phynceon's Hermes project-start workflow lives outside this repository; the proposed change is [`evidence/hermes-start-workflow-proposal.md`](evidence/hermes-start-workflow-proposal.md).
+
 ```bash
 agentos engines            # the table below
 agentos engines --json     # { ok, rows, matrix: { <engine>: { <row>: { status, evidence, edit_scope? } } } }
