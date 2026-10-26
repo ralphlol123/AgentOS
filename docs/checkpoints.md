@@ -116,7 +116,7 @@ The block is replaced in place on every checkpoint (inserted once at the end of 
 
 ## Integrations
 
-- Every non-recovered checkpoint output ends with the knowledge-review instruction (`Knowledge: did this work change durable project knowledge …? If yes, stage one focused proposal: \`agentos brain propose <record-id> --from <file> --task <id>\` … Progress only: stage nothing. The owner applies.`). It is an instruction the engine follows or not; the checkpoint itself never stages a proposal. Staging, evidence and dedupe: [`docs/brain.md`](brain.md#knowledge-upkeep-at-completion).
+- Every non-recovered checkpoint output ends with the knowledge-review instruction (`Knowledge: did this work change durable project knowledge …? If yes, stage one focused proposal: \`agentos brain propose <record-id> --from <file> --task <id>\` … Progress only: stage nothing. Never run \`agentos brain apply\`: the owner applies with \`--by <owner>\`.`). It is an instruction the engine follows or not (an engine can still run `brain apply --by <name>`; the applier is then recorded in the record's `history`, see [`docs/brain.md`](brain.md)); the checkpoint itself never stages a proposal. Staging, evidence and dedupe: [`docs/brain.md`](brain.md#knowledge-upkeep-at-completion).
 - `agentos context` adds the current checkpoint for its task (`--task`, else the objective slug) as an `always` record, source `.agentos/checkpoints/<task>/current.json`.
 - `agentos doctor` reports a `current.json` that points at a missing or invalid record as a problem (exit 1).
 

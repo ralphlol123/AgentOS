@@ -273,7 +273,7 @@ The path below is the one Phynceon's 2026-10-25 cross-engine trial walked (Claud
 
    `--claim "<text>"` records something the engine reports but AgentOS did not observe.
 7. **Fresh Codex**: `agentos resume --task greeting` (accomplished / remaining / receipts / reconciliation, read-only), then `agentos context codex --task greeting`. The trial ran `codex exec -a never` with both as the prompt; Codex continued from the `observed-pass`/`claimed`/`not-run` receipts and wrote its own checkpoint (`--engine codex`).
-8. **Brain**: record what the task taught as a proposal; the engine proposes, the owner reviews and applies: `agentos brain propose <id-or-path> --from - --task <id> --summary "<why>"` (the checkpoint output asks for this review; progress-only work stages nothing), `agentos brain preview <proposal>`, `agentos brain apply <proposal>`. See [docs/brain.md](docs/brain.md).
+8. **Brain**: record what the task taught as a proposal; the engine proposes, the owner reviews and applies: `agentos brain propose <id-or-path> --from - --task <id> --summary "<why>"` (the checkpoint output asks for this review; progress-only work stages nothing), `agentos brain preview <proposal>`, `agentos brain apply <proposal> --by <owner>` (owner only; the applier is recorded). See [docs/brain.md](docs/brain.md).
 9. **Obsidian (optional)**: `agentos obsidian init` (plain `knowledge/` folder) or `agentos obsidian link --vault <abs-path> --dest <sub/folder> [--canonical workspace|vault] --create`. See [docs/obsidian.md](docs/obsidian.md).
 
 What is enforced and what is only instruction, per engine: [docs/engines.md](docs/engines.md). Proven / not proven per scenario: [docs/acceptance-matrix.md](docs/acceptance-matrix.md).
@@ -345,7 +345,7 @@ agentos brain register <path> [--kind architecture|decision|adr|convention|featu
 agentos brain list [--status <s>] [--kind <k>] [--json] | show <id-or-path> [--json] | search <terms...> [--json] | check [--json]
 agentos brain propose <id-or-path> --from <file|-> [--summary "<text>"] [--supersedes <id>] [--append] [--by <name>] [--task <id>] [--dry-run]
 agentos brain preview <proposal> | validate <proposal> [--json]
-agentos brain apply <proposal> [--dry-run]
+agentos brain apply <proposal> --by <owner> [--dry-run]   # owner step; engines never apply
 agentos brain verify <id-or-path> [--by <name>] [--dry-run]
 agentos brain index [--adopt] [--dry-run]   # recreate/refresh index.json and the Obsidian index note
 ```
@@ -394,7 +394,7 @@ Schema, receipt vocabulary, reconciliation states and limits: [`docs/checkpoints
 agentos brain init                                   # `agentos init` already ran this: templates for what is missing, existing records/docs adopted
 agentos brain register docs/adr/0003-use-postgres.md --kind adr
 agentos brain propose brain:0003-use-postgres --from new-text.md --summary "pin Postgres 16"   # an engine writes the text
-agentos brain preview <proposal>   &&   agentos brain apply <proposal>
+agentos brain preview <proposal>   &&   agentos brain apply <proposal> --by <owner>
 agentos brain check                                  # changed / invalid records
 agentos brain verify brain:0003-use-postgres --by ralph
 ```
