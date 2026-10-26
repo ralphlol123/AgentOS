@@ -106,4 +106,3 @@ Phynceon prepared `/mnt/c/_/agentos-trial/obs project` (Windows `C:\_\agentos-tr
 - **Native Windows (A14):** the main suite passes on Windows (CI run 40307106781); the `test:metadata` fix awaits the next Windows run. See [windows-validation.md](windows-validation.md).
 - **Enforcement:** not tested at any layer. D6 adds an audit trail, not a gate.
 - **The D6/D7 fixes have not been exercised by an engine session**; they are covered by the CLI tests named above.
-

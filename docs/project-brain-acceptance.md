@@ -52,4 +52,6 @@ Run on `ef09f0d` (local, pre-reorder SHA; the commit after it changes only this 
 | `node dist/cli.js doctor --json` | 0 | `ok: true` |
 | `git diff --check` (branch commits) | 0 | clean |
 
+Card 8 (D6, D7, `test:metadata` on Windows), Linux/WSL2 on 03aa92c with `npm_config_cache=$TMPDIR/npm-cache`: `npm run check` 0; `npm test` 0, 806/806 (805 + the D7 test; D6 assertions extend the lifecycle test); `npm run smoke` 0; `node dist/cli.js doctor --json` 0, `ok: true`; `npm run test:metadata` 0, 3/3.
+
 CI on the pushed part of the branch: run 40297753207 on 385c53a, all green (see A13). Windows job: run 40302164627 on 1325b56 failed 47/803 (triaged and fixed locally, pending CI on 582a31f; see A14).
