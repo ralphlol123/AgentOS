@@ -217,6 +217,8 @@ test('stale write: a second proposal on the old base_hash is rejected after the 
   assert.ok(stale, JSON.stringify(out));
   assert.match(stale.message, new RegExp(base));
   assert.match(stale.message, new RegExp(current));
+  assert.match(stale.message, /re-verified after this proposal was written/);
+  assert.doesNotMatch(stale.message, /edited since verification/, 'the body was not edited; do not blame it');
   const apply = cli(['brain', 'apply', second], root);
   fails(apply);
   assert.match(apply.stdout, /stale/i);
@@ -229,6 +231,15 @@ test('stale write: a human body edit after the proposal also rejects the apply (
   const path = join(root, 'docs/adr/0003-use-postgres.md');
   await writeFile(path, `${await readFile(path, 'utf8')}\nHuman note.\n`);
   const snap = await snapshot(root);
+  const { r, out } = json(['brain', 'validate', proposal], root);
+  fails(r);
+  const stale = out.rejections.find((item) => item.check === 'stale');
+  assert.ok(stale, JSON.stringify(out));
+  // The cause is body drift (current_hash), not the base: never print `base_hash X != source_hash X`.
+  assert.match(stale.message, /target body was edited since verification \(verified source_hash (\w+), body now hashes to (\w+)\)/);
+  const [, verified, now] = stale.message.match(/verified source_hash (\w+), body now hashes to (\w+)/);
+  assert.notEqual(verified, now);
+  assert.doesNotMatch(stale.message, /re-verified|!=/);
   fails(cli(['brain', 'apply', proposal], root));
   assert.deepEqual(await snapshot(root), snap);
 });

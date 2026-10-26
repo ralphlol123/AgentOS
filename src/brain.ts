@@ -576,7 +576,7 @@ export async function listBrain(ctx: BrainCtx, options: { status?: string; kind?
   const records = all.filter((record) => (!options.status || record.status === options.status) && (!options.kind || record.kind === options.kind));
   const groups = await unreadableKnowledge(ctx.root, all, ctx.vault, ctx.vaultOff);
   const lines = records.map((record) => `- ${record.id ?? '(no id)'} [${record.status}${record.state === 'changed' ? ', source changed since verification' : ''}] ${record.kind ?? '?'} ${record.path}${record.location === 'vault' ? ` (vault: ${record.abs})` : ''} — ${record.title}`);
-  for (const gone of groups) for (const record of gone.records) lines.push(`- ${record.id} [${record.state}] ${record.kind} ${record.path} (${gone.reason}) — ${record.title}`);
+  for (const gone of groups) for (const record of gone.records) lines.push(`- ${record.id} [${record.state}] ${record.kind} ${record.path}: ${gone.reason} — ${record.title}`);
   for (const gone of groups) if (gone.failed && !gone.records.length) lines.push(`- ${gone.reason}; no records known there`);
   return out(options.json, true, { records: [...records.map(publicRecord), ...groups.flatMap((gone) => gone.records)] }, lines.length ? lines
     : ['No Brain records. Start with `agentos brain init` or `agentos brain register <path>`.']);
@@ -710,9 +710,12 @@ function validateProposal(ctx: BrainCtx, records: BrainRecord[], proposal: Propo
     else if (old.state === 'invalid') reject('references', `supersedes ${id}: its metadata is invalid`);
     else supersede.push(old);
   }
-  if (f.base_hash !== target.source_hash || target.current_hash !== target.source_hash) {
-    reject('stale', `stale write: base_hash ${f.base_hash} != target source_hash ${target.source_hash}${target.current_hash !== target.source_hash ? `; the file body now hashes to ${target.current_hash} (edited since verification: review, then \`agentos brain verify ${target.id}\` and propose again)` : '; the target changed after this proposal was written: propose again from the current text'}`);
-  }
+  // Name each actual cause: a base that no longer matches, and/or a body edited since verification.
+  const causes = [
+    ...(f.base_hash !== target.source_hash ? [`the target was re-verified after this proposal was written (base_hash ${f.base_hash}, target source_hash now ${target.source_hash}): propose again from the current text`] : []),
+    ...(target.current_hash !== target.source_hash ? [`the target body was edited since verification (verified source_hash ${target.source_hash}, body now hashes to ${target.current_hash}): review, then \`agentos brain verify ${target.id}\` and propose again`] : []),
+  ];
+  if (causes.length) reject('stale', `stale write: ${causes.join('; ')}`);
   const content = proposal.body;
   const newBody = f.mode === 'append' ? `${target.body}${target.body.endsWith('\n') ? '\n' : '\n\n'}${content}` : content;
   const dup = f.mode === 'append' ? (norm(target.body).includes(norm(content)) ? target : null) : (norm(content) === norm(target.body) ? target : null);
