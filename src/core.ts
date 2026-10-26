@@ -1520,7 +1520,7 @@ const toPosix = (path: string) => path.split(sep).join('/');
 
 /** The index note: links (relative paths) to the Brain records, never copies; Brain writes refresh its generated block (src/brain.ts). */
 async function obsidianIndexText(root: string, projectText: string, indexAbs: string, canonical: string, binding: VaultBinding | null) {
-  return newIndexNote(indexNoteName(root, projectText), canonical, await loadBrain(root, brainScopes(projectText), binding), indexAbs, root);
+  return newIndexNote(indexNoteName(root, projectText), canonical, await loadBrain(root, brainScopes(projectText), binding), indexAbs, root, binding?.vault);
 }
 const indexNoteName = (root: string, projectText: string) => title(firstYamlValue(projectText, 'name') ?? basename(root));
 
