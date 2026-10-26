@@ -4399,7 +4399,7 @@ const DISCOVERY_LINE = 'Next: open your engine here and run `agentos status`. To
 const STATE_RULE_LINE = 'State files: rewrite `.agentos/handoff.md` to the current state, never append to it; delete finished tasks from `.agentos/tasks.md`. Before an older entry leaves either file, copy it into a note under `.agentos/runs/`; never discard history.';
 const GUIDE_POINTER_LINE = 'Commands and workflows: `.agentos/guide.md` (load on demand). Run `agentos status` first.';
 // The startup loop, in each engine's own bootloader. The task id is the shared identity across engines.
-const startupLoop = (engine: string) => `Startup loop: \`agentos status\` → \`agentos context ${engine} --task <id>\` → work → \`agentos checkpoint --task <id> --progress "<done>" --next "<remaining>"\`. If the work changed durable knowledge: \`agentos brain propose <record> --from <file> --task <id>\`. Next session or engine: \`agentos resume --task <id>\` (same <id>; no checkpoint yet means a clean start).`;
+const startupLoop = (engine: string) => `Startup loop: \`agentos status\` → \`agentos context ${engine} --task <id>\` → work → \`agentos checkpoint --task <id> --progress "<done>" --next "<remaining>"\`. If the work changed durable knowledge: \`agentos brain propose <record> --from <file> --task <id>\` (never \`brain apply\`: the owner applies). Next session or engine: \`agentos resume --task <id>\` (same <id>; no checkpoint yet means a clean start).`;
 
 // Shared by the AGENTS.md and CLAUDE.md child pointers. The CLI comes first on purpose: some engines
 // (observed: OpenCode run non-interactively) refuse reads outside their start directory, and a refused
@@ -4444,7 +4444,7 @@ function guideMd() {
     '- Before stopping or switching engines: `agentos checkpoint --task <id> --progress "<done>" --next "<remaining>" --check "<cmd>"`. Each `--check` runs as a receipt, from the workspace root or the `--cwd <dir>` after it (root-relative, or absolute inside the workspace); `--claim "<text>"` records what AgentOS did not observe.',
     '- Next engine: `agentos resume --task <id>`, then `context`. No checkpoint was written: `agentos checkpoint --recover --task <id>`.',
     '- Prefer these to `agentos run handoff`: it writes only a prose note, no receipts for `resume` to reconcile.',
-    '- After the checkpoint, ask: did this work change durable knowledge (architecture, decision, convention)? If yes: `agentos brain propose <id-or-path> --from <file|-> --task <id> --summary "<why>"` (ids: `agentos brain list`); progress only: nothing. Engines propose, never apply; the owner runs `agentos brain preview <proposal>`, then `agentos brain apply <proposal>`.',
+    '- After the checkpoint, ask: did this work change durable knowledge (architecture, decision, convention)? If yes: `agentos brain propose <id-or-path> --from <file|-> --task <id> --summary "<why>"` (ids: `agentos brain list`); else nothing. Engines propose, never apply; the owner runs `agentos brain preview <proposal>`, then `agentos brain apply <proposal> --by <owner>`.',
     '- Engine role config (`claude-code`, `codex`): `agentos agents sync <engine> --role <id> --dry-run`, then without `--dry-run`. When `agentos doctor` prints `Synced config: STALE`, re-run the command it prints; add `--replace` only when that line does.',
     '',
     '## Which command for which job',
@@ -5327,7 +5327,7 @@ export const BRAIN_USAGE = [
   '       agentos brain list [--status <s>] [--kind <k>] | show <id-or-path> | search <terms…> | check   (read-only; all take --json)',
   '       agentos brain propose <id-or-path> --from <file|-> [--summary "<text>"] [--supersedes <id>[,<id>]] [--append] [--by <name>] [--task <id>] [--dry-run]   (--task: tie to that task\'s checkpoint; same event stages once)',
   '       agentos brain preview <proposal> | validate <proposal>   (read-only)',
-  '       agentos brain apply <proposal> [--dry-run]',
+  '       agentos brain apply <proposal> --by <owner> [--dry-run]   (owner step; engines never apply)',
   '       agentos brain verify <id-or-path> [--by <name>] [--dry-run]',
   '       agentos brain index [--adopt] [--dry-run]   (recreate/refresh the derived index.json and Obsidian index note; --adopt an older unmarked note)',
 ].join('\n');

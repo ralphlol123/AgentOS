@@ -24,7 +24,7 @@ export const STATUSES = ['proposed', 'accepted', 'verified', 'superseded'];
 /** Metadata keys plus four descriptive keys common in ADR/Obsidian notes. Anything else (task_scope, rules,
  *  permissions, engine settings) is refused: a Brain note is data, never instructions. */
 export const RECORD_KEYS = ['id', 'kind', 'scope', 'status', 'sources', 'source_hash', 'verified_at', 'verified_by', 'supersedes', 'superseded_by', 'updated_at', 'history', 'title', 'date', 'tags', 'aliases'];
-const PROPOSAL_KEYS = ['target', 'target_path', 'base_hash', 'proposed_by', 'status', 'mode', 'summary', 'supersedes', 'task', 'checkpoint', 'evidence', 'created_at', 'applied_at'];
+const PROPOSAL_KEYS = ['target', 'target_path', 'base_hash', 'proposed_by', 'status', 'mode', 'summary', 'supersedes', 'task', 'checkpoint', 'evidence', 'created_at', 'applied_at', 'applied_by'];
 export const BRAIN_DIR = '.agentos/brain';
 const PROPOSALS = `${BRAIN_DIR}/proposals`;
 const APPLIED = `${PROPOSALS}/applied`;
@@ -841,8 +841,12 @@ export async function validateBrain(ctx: BrainCtx, ref: string | undefined, opti
     [`AgentOS brain validate: ${proposal.rel}: ${ok ? 'OK' : 'REJECTED'}`, ...validationLines(result)]);
 }
 
-export async function applyBrain(ctx: BrainCtx, ref: string | undefined, options: { dryRun?: boolean; json?: boolean }) {
-  if (!ref) throw new Error('Usage: agentos brain apply <proposal> [--dry-run] [--json]');
+/** Applying is the owner's step: a real apply needs an explicit `--by <applier>` (never defaulted to the proposer). Instruction-level and
+ *  auditable, not enforcement: anyone who can run the CLI can pass `--by`. */
+export async function applyBrain(ctx: BrainCtx, ref: string | undefined, options: { by?: unknown; dryRun?: boolean; json?: boolean }) {
+  if (!ref) throw new Error('Usage: agentos brain apply <proposal> --by <owner> [--dry-run] [--json]');
+  const by = typeof options.by === 'string' ? options.by.trim() : '';
+  if (!by && !options.dryRun) throw new Error('agentos brain apply needs --by <owner>: applying a proposal is the owner\'s step and the applier is recorded in history. Engines stage with `agentos brain propose` and never apply. Nothing was written.');
   const proposal = await loadProposal(ctx, ref);
   if (proposal.applied) return out(options.json, true, { applied: true, noop: true, path: `${APPLIED}/${basename(proposal.rel)}` }, [`AgentOS brain apply: ${basename(proposal.rel)} was already applied (${APPLIED}/); no-op, nothing written.`]);
   const records = await loadBrain(ctx.root, ctx.repos, ctx.vault);
@@ -856,10 +860,10 @@ export async function applyBrain(ctx: BrainCtx, ref: string | undefined, options
   const supersedes = [...new Set([...asList(target.fields.supersedes), ...result.supersede.map((record) => record.id)])];
   const targetText = patchFrontmatter(`${split.head}${split.fm}${split.close}${result.newBody}`, {
     status: 'accepted', source_hash: newHash, updated_at: now, ...(supersedes.length ? { supersedes } : {}),
-    history: [...(target.fields.history ?? []), `${now} applied ${proposal.rel} by ${proposal.fields.proposed_by}: ${short(target.source_hash)} -> ${short(newHash)}`],
+    history: [...(target.fields.history ?? []), `${now} applied ${proposal.rel} by ${by || '(--by not set)'} (proposed by ${proposal.fields.proposed_by ?? 'unknown'}): ${short(target.source_hash)} -> ${short(newHash)}`],
   });
   const appliedRel = `${APPLIED}/${basename(proposal.rel)}`;
-  const appliedText = patchFrontmatter(proposal.text, { status: 'applied', applied_at: now });
+  const appliedText = patchFrontmatter(proposal.text, { status: 'applied', applied_at: now, applied_by: by || '(--by not set)' });
   const stale = options.dryRun ? NO_COMMIT : await commit(ctx, async () => {
     await writeFileAtomic(target.abs, targetText);
     for (const old of result.supersede) await writeFileAtomic(old.abs, patchFrontmatter(old.text, { status: 'superseded', superseded_by: target.id, updated_at: now }));
@@ -867,8 +871,9 @@ export async function applyBrain(ctx: BrainCtx, ref: string | undefined, options
     if (!(await writeFileExclusiveAtomic(join(ctx.root, appliedRel), Buffer.from(appliedText))).created) throw new Error(`${appliedRel} already exists; nothing was written.`);
     await removeTracked(join(ctx.root, proposal.rel));
   });
-  return out(options.json, true, { ...data, applied_path: appliedRel, source_hash: newHash, ...stale.flags }, [
-    `AgentOS brain apply${options.dryRun ? ' (dry run; nothing written)' : ''}: ${proposal.rel}`, ...planLines(proposal, result), 'Validation:', ...validationLines(result),
+  return out(options.json, true, { ...data, applied_path: appliedRel, applied_by: by || null, source_hash: newHash, ...stale.flags }, [
+    `AgentOS brain apply${options.dryRun ? ' (dry run; nothing written)' : ''}: ${proposal.rel}`, ...planLines(proposal, result),
+    `Applied by: ${by || '(not set; a real apply needs --by <owner>)'} (proposed by ${proposal.fields.proposed_by ?? 'unknown'})`, 'Validation:', ...validationLines(result),
     ...(stale.flags.index_stale ? [] : [`${options.dryRun ? 'Would regenerate' : 'Regenerated'}: ${INDEX}`]), ...stale.lines, SINGLE_WRITER,
   ]);
 }

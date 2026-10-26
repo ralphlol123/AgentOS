@@ -274,7 +274,7 @@ export function replaceCheckpointBlock(content: string, lines: string[]) {
 // --- write ------------------------------------------------------------------------------------------
 
 /** The knowledge-review step (goal Slice 5). An instruction the engine reads and acts on; AgentOS decides nothing. */
-export const knowledgeLine = (task: string) => `Knowledge: did this work change durable project knowledge (architecture, a decision, a convention)? If yes, stage one focused proposal: \`agentos brain propose <record-id> --from <file> --task ${task}\` (ids: \`agentos brain list\`). Progress only: stage nothing. The owner applies.`;
+export const knowledgeLine = (task: string) => `Knowledge: did this work change durable project knowledge (architecture, a decision, a convention)? If yes, stage one focused proposal: \`agentos brain propose <record-id> --from <file> --task ${task}\` (ids: \`agentos brain list\`). Progress only: stage nothing. Never run \`agentos brain apply\`: the owner applies with \`--by <owner>\`.`;
 
 export async function writeCheckpoint(ctx: CheckpointContext, options: CheckpointOptions) {
   if (options.recover && (options.progress || options.next || options.blocker || options.checks?.length || options.claims?.length)) {

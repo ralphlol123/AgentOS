@@ -180,7 +180,7 @@ test('register/propose of a vault note outside <dest> is refused with zero write
   await writeFile(join(base, 'p2.md'), '# Design notes\n\nThe API is versioned per major release.\n');
   ok(cli(['brain', 'propose', 'brain:design', '--from', join(base, 'p2.md')], root));
   const proposal = (await readdir(join(root, '.agentos/brain/proposals'))).find((name) => name.endsWith('.md'));
-  ok(cli(['brain', 'apply', proposal], root));
+  ok(cli(['brain', 'apply', proposal, '--by', 'owner'], root));
   assert.match(await read(vault, `${DEST}/design.md`), /per major release/);
 });
 

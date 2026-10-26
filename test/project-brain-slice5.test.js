@@ -127,7 +127,7 @@ test('A19: repeating the same event (same checkpoint, target and content) leaves
   assert.equal(await read(root, first.out.path), before, 'byte-identical');
   assert.equal((await pending(root)).length, 1);
   // after apply, the same event is still recognised: no new proposal
-  ok(cli(['brain', 'apply', first.out.path], root));
+  ok(cli(['brain', 'apply', first.out.path, '--by', 'owner'], root));
   const late = stage(root, proposal);
   ok(late.r);
   assert.equal(late.out.duplicate, true);
@@ -145,7 +145,7 @@ test('A19: a staged proposal whose base went stale after a human edit is rejecte
   const { out } = stage(root, proposal);
   const edited = `${await read(root, ADR_PATH)}\nHuman: we also keep nightly dumps.\n`;
   await writeFile(join(root, ADR_PATH), edited);
-  const apply = cli(['brain', 'apply', out.path], root);
+  const apply = cli(['brain', 'apply', out.path, '--by', 'owner'], root);
   fails(apply);
   assert.match(apply.stdout, /REJECTED \(stale\)/);
   assert.equal(await read(root, ADR_PATH), edited, 'human edit preserved byte for byte');
@@ -161,7 +161,7 @@ test('A20: apply (explicit) keeps history, does not verify, and refreshes index.
   const { out } = stage(root, proposal);
   assert.match(await read(root, ADR_PATH), /\nstatus: accepted\n/);
   assert.equal(await read(root, ADR_PATH).then((text) => text.includes('Postgres 16')), false, 'staging changed nothing');
-  ok(cli(['brain', 'apply', out.path], root));
+  ok(cli(['brain', 'apply', out.path, '--by', 'owner'], root));
   const text = await read(root, ADR_PATH);
   assert.ok(text.endsWith(NEW_BODY));
   assert.match(text, /\nstatus: accepted\n/);
@@ -183,7 +183,7 @@ test('A20: apply survives a broken optional index note: the record is accepted, 
   await complete(root);
   const { out } = stage(root, proposal);
   await blockNote(root, true);
-  const { r, out: res } = json(['brain', 'apply', out.path], root);
+  const { r, out: res } = json(['brain', 'apply', out.path, '--by', 'owner'], root);
   ok(r);
   assert.equal(res.note_stale, true);
   assert.ok((await read(root, ADR_PATH)).endsWith(NEW_BODY), 'record accepted');
@@ -199,7 +199,7 @@ test('A20: the accepted record is readable by a different engine through context
   const { root, proposal } = await workspace(t);
   await complete(root);
   const { out } = stage(root, proposal, ['--by', 'claude-code']);
-  ok(cli(['brain', 'apply', out.path], root));
+  ok(cli(['brain', 'apply', out.path, '--by', 'owner'], root));
   for (const engine of ['codex', 'claude']) {
     const { r, out: ctx } = json(['context', engine, '--task', 'storage choice'], root);
     ok(r);

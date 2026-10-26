@@ -180,8 +180,16 @@ test('lifecycle: propose -> preview (no writes) -> validate -> apply updates tar
   ok(cli(['brain', 'apply', proposal, '--dry-run'], root));
   assert.deepEqual(await snapshot(root), snap, 'preview/validate/apply --dry-run write nothing');
 
-  ok(cli(['brain', 'apply', proposal], root));
+  // D6: a real apply needs an explicit applier; it never defaults to the proposer.
+  const refused = cli(['brain', 'apply', proposal], root);
+  fails(refused);
+  assert.match(refused.stderr, /needs --by <owner>[\s\S]*Nothing was written/);
+  for (const by of [['--by', ''], ['--by']]) fails(cli(['brain', 'apply', proposal, ...by], root));
+  assert.deepEqual(await snapshot(root), snap, 'apply without --by writes nothing');
+
+  ok(cli(['brain', 'apply', proposal, '--by', 'owner'], root));
   const text = await read(root, 'docs/adr/0003-use-postgres.md');
+  assert.match(text, new RegExp(`\\n {2}- \\S+ applied ${proposal.replace(/[.]/g, '\\.')} by owner \\(proposed by codex\\): ${hash0.slice(0, 7)}`));
   assert.equal(bodyOf(text), NEW_BODY);
   assert.match(text, /\nstatus: accepted\n/);
   const hash1 = text.match(/source_hash: (\w+)/)[1];
@@ -191,12 +199,14 @@ test('lifecycle: propose -> preview (no writes) -> validate -> apply updates tar
   await assert.rejects(readFile(join(root, proposal)), /ENOENT/);
   const applied = proposal.replace('proposals/', 'proposals/applied/');
   assert.match(await read(root, applied), /\nstatus: applied\n/);
+  assert.match(await read(root, applied), /\napplied_by: owner\n/);
+  assert.match(await read(root, applied), /\nproposed_by: codex\n/);
   const index = JSON.parse(await read(root, '.agentos/brain/index.json'));
   assert.equal(index.records.find((rec) => rec.id === 'brain:0003-use-postgres').source_hash, hash1);
 
   snap = await snapshot(root);
   for (const ref of [proposal, applied]) {
-    const again = cli(['brain', 'apply', ref], root);
+    const again = cli(['brain', 'apply', ref, '--by', 'owner'], root);
     ok(again);
     assert.match(again.stdout, /already applied/i);
   }
@@ -207,7 +217,7 @@ test('stale write: a second proposal on the old base_hash is rejected after the 
   const { root } = await registered(t);
   const first = (await propose(root, 'brain:0003-use-postgres', NEW_BODY)).out.path;
   const second = (await propose(root, 'docs/adr/0003-use-postgres.md', `${ADR}\nAlso cache in Redis.\n`)).out.path;
-  ok(cli(['brain', 'apply', first], root));
+  ok(cli(['brain', 'apply', first, '--by', 'owner'], root));
   const current = (await read(root, 'docs/adr/0003-use-postgres.md')).match(/source_hash: (\w+)/)[1];
   const base = (await read(root, second)).match(/base_hash: (\w+)/)[1];
   const snap = await snapshot(root);
@@ -219,7 +229,7 @@ test('stale write: a second proposal on the old base_hash is rejected after the 
   assert.match(stale.message, new RegExp(current));
   assert.match(stale.message, /re-verified after this proposal was written/);
   assert.doesNotMatch(stale.message, /edited since verification/, 'the body was not edited; do not blame it');
-  const apply = cli(['brain', 'apply', second], root);
+  const apply = cli(['brain', 'apply', second, '--by', 'owner'], root);
   fails(apply);
   assert.match(apply.stdout, /stale/i);
   assert.deepEqual(await snapshot(root), snap, 'rejected apply writes nothing');
@@ -240,7 +250,7 @@ test('stale write: a human body edit after the proposal also rejects the apply (
   const [, verified, now] = stale.message.match(/verified source_hash (\w+), body now hashes to (\w+)/);
   assert.notEqual(verified, now);
   assert.doesNotMatch(stale.message, /re-verified|!=/);
-  fails(cli(['brain', 'apply', proposal], root));
+  fails(cli(['brain', 'apply', proposal, '--by', 'owner'], root));
   assert.deepEqual(await snapshot(root), snap);
 });
 
@@ -273,7 +283,7 @@ test('propose reads stdin with --from - and defaults proposed_by to $AGENTOS_ENG
   const text = await read(root, JSON.parse(r.stdout).path);
   assert.match(text, /\nproposed_by: claude-code\n/);
   assert.match(text, /\nmode: append\n/);
-  ok(cli(['brain', 'apply', JSON.parse(r.stdout).path], root));
+  ok(cli(['brain', 'apply', JSON.parse(r.stdout).path, '--by', 'owner'], root));
   assert.equal(bodyOf(await read(root, 'docs/adr/0003-use-postgres.md')), `${ADR}\n## Backups\n\nNightly.\n`);
 });
 
@@ -288,7 +298,7 @@ test('supersedes: the old record becomes superseded; context omits it by default
   const proposal = (await propose(root, 'brain:0003-use-postgres', NEW_BODY, ['--supersedes', 'brain:0001-use-sqlite'])).out.path;
   const preview = cli(['brain', 'preview', proposal], root);
   assert.match(preview.stdout, /brain:0001-use-sqlite.*superseded/);
-  ok(cli(['brain', 'apply', proposal], root));
+  ok(cli(['brain', 'apply', proposal, '--by', 'owner'], root));
   const old = await read(root, 'docs/adr/0001-use-sqlite.md');
   assert.match(old, /\nstatus: superseded\n/);
   assert.match(old, /\nsuperseded_by: brain:0003-use-postgres\n/);
