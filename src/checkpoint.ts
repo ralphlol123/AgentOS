@@ -12,7 +12,7 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFile, readdir, realpath, stat } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { collectRunHandoffGitState, runReadOnlyGit } from './git-evidence.js';
 import { assertRelativeBoundaryPath } from './task-scope.js';
 import type { ContextBundle } from './context-builder.js';
@@ -188,8 +188,18 @@ export interface CheckpointOptions {
   checks?: Array<{ command: string; cwd?: string }>; claims?: string[]; dryRun?: boolean; recover?: boolean; json?: boolean; now?: Date;
 }
 
+/** `--cwd` is workspace-root-relative, never relative to the invocation dir (a nested invocation means the same
+ *  thing as one at the root); an absolute path inside the workspace is normalized to that form, one outside is refused. */
+async function checkCwd(root: string, value: string | undefined) {
+  if (value === undefined) return '.';
+  if (!isAbsolute(value)) { const cwd = posix(value); if (cwd !== '.') assertRelativeBoundaryPath(cwd); return cwd; }
+  const rel = relative(root, await realpath(value).catch(() => resolve(value)));
+  if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) throw new Error(`--cwd ${value} is outside the workspace ${root}; use a path inside it (workspace-relative or absolute).`);
+  return posix(rel.split(sep).join('/'));
+}
+
 export async function buildRecord(ctx: CheckpointContext, options: CheckpointOptions): Promise<{ record: Checkpoint; logs: Array<{ path: string; content: string }> }> {
-  const checks = options.checks ?? [];
+  const checks = await Promise.all((options.checks ?? []).map(async (check) => ({ command: check.command, cwd: await checkCwd(ctx.root, check.cwd) })));
   const logs: Array<{ path: string; content: string }> = [];
   const receipts: Receipt[] = [];
   const dir = `.agentos/checkpoints/${ctx.task.id}`;
