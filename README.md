@@ -287,6 +287,7 @@ What is enforced and what is only instruction, per engine: [docs/engines.md](doc
 - [docs/agents.md](docs/agents.md) — agent manifests and lifecycle
 - [docs/engines.md](docs/engines.md) — engine adapters and the trial-backed capability matrix
 - [docs/obsidian.md](docs/obsidian.md) — optional Obsidian location for the Brain
+- [docs/migration-project-brain.md](docs/migration-project-brain.md) — moving link-only and vault-canonical setups to the Project Brain; disabling Obsidian without losing records
 - [docs/migration.md](docs/migration.md) — adopting v1 in an existing workspace; keep / simplify / remove inventory
 - [docs/acceptance-matrix.md](docs/acceptance-matrix.md) — v1 acceptance per priority and scenario (PASS / FAIL / BLOCKED)
 - [docs/improve-later.md](docs/improve-later.md) — consolidated backlog

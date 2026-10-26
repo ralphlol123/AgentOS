@@ -107,6 +107,8 @@ Agent reads, creates and updates of vault notes go through `agentos brain regist
 
 ## Disable the integration
 
+Migrating a legacy `link-obsidian` setup, or relocating vault-canonical records before disabling: [`docs/migration-project-brain.md`](migration-project-brain.md).
+
 Set `enabled: false` under `knowledge.obsidian` in `.agentos/project.yaml`. Nothing is deleted: the folder, the index note, the records and the rest of the block stay. `obsidian status` prints `DISABLED`, `context` drops the Obsidian rule line, and the linked folder is not read. Brain, context, checkpoint and resume keep working. Records that live only in the vault (`canonical: vault`) are then unavailable and listed under **Missing** (see [`docs/brain.md`](brain.md#independent-of-obsidian)); to keep them available, keep the integration enabled. Remove the key or set `enabled: true` to re-enable. An invalid `knowledge.obsidian` block (e.g. `canonical: bogus`) is treated the same way: ignored, with a `doctor` problem and a `context --json` warning.
 
 ## Not done

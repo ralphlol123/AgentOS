@@ -97,7 +97,7 @@ One Brain per workspace: the nearest folder with `.agentos/` is the workspace (`
 
 ## Independent of Obsidian
 
-The Brain is workspace Markdown plus `.agentos/project.yaml`; nothing else is required. No Obsidian install, executable, account, vault or GUI is needed for `brain`, `context`, `checkpoint` or `resume` ([`docs/obsidian.md`](obsidian.md) is optional).
+The Brain is workspace Markdown plus `.agentos/project.yaml`; nothing else is required. No Obsidian install, executable, account, vault or GUI is needed for `brain`, `context`, `checkpoint` or `resume` ([`docs/obsidian.md`](obsidian.md) is optional). Moving from a link-only or vault-canonical setup: [`docs/migration-project-brain.md`](migration-project-brain.md).
 
 - **Integration absent, disabled (`knowledge.obsidian.enabled: false`) or invalid** (e.g. `canonical: bogus`, a `destination` outside the vault, a non-boolean `enabled`): the integration is ignored and local operations run. An invalid block is a `context --json` warning (`Obsidian integration invalid, ignored: …`) and a `doctor` problem; it never fails `brain`, `context`, `checkpoint` or `resume`.
 - **Integration health is not knowledge completeness.** With `canonical: workspace`, a missing linked folder is only a viewer problem: a `context --json` warning (`optional Obsidian folder unavailable: …`), and `context --require-complete` still passes. Required knowledge that cannot be read is listed under **Missing** and fails `--require-complete`: a record whose only copy is in an offline vault (`canonical: vault`), and a vault record last known in `index.json` while the integration is disabled or invalid (`brain:x (path): Obsidian integration disabled …`). Switching the viewer off never hides such a record.
