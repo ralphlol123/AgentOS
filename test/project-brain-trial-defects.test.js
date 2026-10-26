@@ -133,3 +133,24 @@ test('D4: under WSL, obsidian init, link and status also print the Windows path 
   assert.ok(link.stdout.includes(`Windows path (WSL): ${win(vault)}`), link.stdout);
   assert.equal(await exists(join(root, 'Windows')), false);
 });
+
+// --- D5: no task_scope -> the Edit scope line says "not set" and what to do; a declared scope is unchanged --
+
+test('D5: without task_scope, context says edit scope is not set and names the owner step; JSON edit stays []; a declared scope is unchanged', async (t) => {
+  const { root } = await project(t);
+  for (const args of [['context', 'claude', '--task', 'demo'], ['context', 'claude', '--task', 'demo', '--scope', '.']]) {
+    const r = cli(args, root);
+    ok(r);
+    assert.match(r.stdout, /^Edit scope: not set \(no task_scope in \.agentos\/project\.yaml\)\. Edit only the files the owner's task names; ask the owner to set task_scope\.$/m, args.join(' '));
+    assert.doesNotMatch(r.stdout, /read-only task/);
+  }
+  const json = cli(['context', 'claude', '--task', 'demo', '--json'], root);
+  ok(json);
+  assert.deepEqual(JSON.parse(json.stdout).scope.edit, [], 'no default scope is invented');
+  const path = join(root, '.agentos/project.yaml');
+  await writeFile(path, `${await readFile(path, 'utf8')}task_scope:\n  read: [tools]\n  edit: []\n`);
+  const declared = cli(['context', 'claude', '--task', 'demo'], root);
+  ok(declared);
+  assert.match(declared.stdout, /^Edit scope: \(none; read-only task\)\. Do not edit anything outside it\.$/m);
+  assert.doesNotMatch(declared.stdout, /not set/);
+});

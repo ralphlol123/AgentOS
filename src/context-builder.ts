@@ -144,8 +144,9 @@ export async function buildContextBundle(input: ContextInput): Promise<ContextBu
     read = ['.'];
     edit = [];
     scopeSource = '(default: no task_scope declared)';
-    warnings.push('No task_scope declared: read scope is the whole workspace and edit scope is empty until project.yaml task_scope or --scope declares it.');
+    warnings.push('No task_scope declared: read scope is the whole workspace; edit scope is not set until the owner declares project.yaml task_scope.');
   }
+
   // The task decides the scope; the role manifest can only narrow it (src/agents.ts).
   const narrowed = effectiveEditScope(edit, card?.manifest ?? null, covers);
   edit = narrowed.edit;
@@ -201,7 +202,9 @@ export async function buildContextBundle(input: ContextInput): Promise<ContextBu
     text: [
       `Repos (inventory, not permission): ${scope.repos.join('; ') || '(none)'}`,
       `Read scope: ${read.join(', ') || '(none)'}`,
-      `Edit scope: ${edit.join(', ') || '(none; read-only task)'}. Do not edit anything outside it.`,
+      // D5: unset is not "read-only": say so and what to do. No default edit scope is invented.
+      projectScope ? `Edit scope: ${edit.join(', ') || '(none; read-only task)'}. Do not edit anything outside it.`
+        : "Edit scope: not set (no task_scope in .agentos/project.yaml). Edit only the files the owner's task names; ask the owner to set task_scope.",
     ].join('\n'),
   });
   if (role) {

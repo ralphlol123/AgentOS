@@ -58,6 +58,9 @@ test('the guide names the everyday loop: context, checkpoint/resume, brain, agen
     [/`agentos agents sync <engine> --role/, 'agents sync'],
     [/Synced config: STALE/, 'the doctor STALE warning'],
     [/`agentos run handoff/, 'run handoff and how it differs'],
+    [/`<command> --help`/, 'per-command --help (D1)'],
+    [/`--cwd <dir>`[^.\n]*root-relative[^.\n]*absolute inside the workspace/, 'checkpoint --cwd semantics (D2)'],
+    [/`Edit scope: not set`/, 'the unset edit scope line (D5)'],
   ]) assert.match(guide, pattern, `guide must cover: ${label}`);
   // Engines propose; the owner applies. Engines never edit project.yaml themselves.
   assert.match(guide, /owner[^.\n]*task_scope|task_scope[^.\n]*owner/i);
