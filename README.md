@@ -273,7 +273,7 @@ The path below is the one Phynceon's 2026-10-25 cross-engine trial walked (Claud
 
    `--claim "<text>"` records something the engine reports but AgentOS did not observe.
 7. **Fresh Codex**: `agentos resume --task greeting` (accomplished / remaining / receipts / reconciliation, read-only), then `agentos context codex --task greeting`. The trial ran `codex exec -a never` with both as the prompt; Codex continued from the `observed-pass`/`claimed`/`not-run` receipts and wrote its own checkpoint (`--engine codex`).
-8. **Brain**: record what the task taught as a proposal; the engine proposes, the owner reviews and applies: `agentos brain propose <id-or-path> --from - --summary "<why>"`, `agentos brain preview <proposal>`, `agentos brain apply <proposal>`. See [docs/brain.md](docs/brain.md).
+8. **Brain**: record what the task taught as a proposal; the engine proposes, the owner reviews and applies: `agentos brain propose <id-or-path> --from - --task <id> --summary "<why>"` (the checkpoint output asks for this review; progress-only work stages nothing), `agentos brain preview <proposal>`, `agentos brain apply <proposal> --by <owner>` (owner only; the applier is recorded). See [docs/brain.md](docs/brain.md).
 9. **Obsidian (optional)**: `agentos obsidian init` (plain `knowledge/` folder) or `agentos obsidian link --vault <abs-path> --dest <sub/folder> [--canonical workspace|vault] --create`. See [docs/obsidian.md](docs/obsidian.md).
 
 What is enforced and what is only instruction, per engine: [docs/engines.md](docs/engines.md). Proven / not proven per scenario: [docs/acceptance-matrix.md](docs/acceptance-matrix.md).
@@ -287,6 +287,7 @@ What is enforced and what is only instruction, per engine: [docs/engines.md](doc
 - [docs/agents.md](docs/agents.md) — agent manifests and lifecycle
 - [docs/engines.md](docs/engines.md) — engine adapters and the trial-backed capability matrix
 - [docs/obsidian.md](docs/obsidian.md) — optional Obsidian location for the Brain
+- [docs/migration-project-brain.md](docs/migration-project-brain.md) — moving link-only and vault-canonical setups to the Project Brain; disabling Obsidian without losing records
 - [docs/migration.md](docs/migration.md) — adopting v1 in an existing workspace; keep / simplify / remove inventory
 - [docs/acceptance-matrix.md](docs/acceptance-matrix.md) — v1 acceptance per priority and scenario (PASS / FAIL / BLOCKED)
 - [docs/improve-later.md](docs/improve-later.md) — consolidated backlog
@@ -294,6 +295,8 @@ What is enforced and what is only instruction, per engine: [docs/engines.md](doc
 - [docs/evidence/2026-10-25-cross-engine/](docs/evidence/2026-10-25-cross-engine/README.md) — engine trial report, prompts, transcripts, checkpoint records
 
 ## Commands
+
+`agentos <command> --help` (or `-h`) prints one command's usage.
 
 ```bash
 agentos init [--new|--existing] [--agents minimal|detected|developer,tester,reviewer,release-manager] [--dry-run]
@@ -340,10 +343,11 @@ agentos resume [--task <id>] [--engine <e>] [--json]
 agentos brain init [--location workspace|vault] [--dry-run]
 agentos brain register <path> [--kind architecture|decision|adr|convention|feature|note] [--scope <repo-id|.>] [--status proposed|accepted] [--by <name>] [--dry-run]
 agentos brain list [--status <s>] [--kind <k>] [--json] | show <id-or-path> [--json] | search <terms...> [--json] | check [--json]
-agentos brain propose <id-or-path> --from <file|-> [--summary "<text>"] [--supersedes <id>] [--append] [--by <name>] [--dry-run]
+agentos brain propose <id-or-path> --from <file|-> [--summary "<text>"] [--supersedes <id>] [--append] [--by <name>] [--task <id>] [--dry-run]
 agentos brain preview <proposal> | validate <proposal> [--json]
-agentos brain apply <proposal> [--dry-run]
+agentos brain apply <proposal> --by <owner> [--dry-run]   # owner step; engines never apply
 agentos brain verify <id-or-path> [--by <name>] [--dry-run]
+agentos brain index [--adopt] [--dry-run]   # recreate/refresh index.json and the Obsidian index note
 ```
 
 ## Task-specific context
@@ -357,7 +361,7 @@ agentos context codex --task "..." --json      # structured bundle only
 
 - Mandatory records come first and are never truncated: objective (same resolver as `status`/`doctor`), constraints (handoff "Protected files / do not touch" plus the generated rules), scope, and the role's agent card.
 - Optional records are filtered before ranking: out of read scope → `out-of-scope`; `superseded`/`deprecated` heading or `status:` line → `superseded` (shown labelled with `--include-superseded`); decisions, skills and linked notes that share no term with `--task` → `no-match`. The rest (acceptance criteria, handoff current state / next action, repo notes and verification commands for repos in scope, decisions, skills, linked notes by reference) is ranked by term overlap, then freshness, and added until the budget is reached; the rest is listed as `budget`.
-- `--scope` narrows `task_scope`: it replaces the read scope and keeps only the edit entries it still covers, so it never widens edit. Without any scope the read scope is the whole workspace and edit scope is empty.
+- `--scope` narrows `task_scope`: it replaces the read scope and keeps only the edit entries it still covers, so it never widens edit. Without any scope the read scope is the whole workspace and edit scope is empty; `context` prints `Edit scope: not set` and tells the engine to edit only the files the owner's task names and to ask the owner to set `task_scope`.
 - Tokens are `estimate (chars/4)` plus a fixed per-engine overhead; default budget 24000. If the mandatory records alone exceed the budget, the command exits 1 with `overflow` and renders nothing. A missing objective also exits 1; a missing agent card or scope path is listed under `missing` as a warning; two current decisions with the same heading subject are listed under `conflicts`.
 
 Selection signals, budget numbers and the JSON shape: [`docs/context-builder.md`](docs/context-builder.md).
@@ -387,10 +391,10 @@ Schema, receipt vocabulary, reconciliation states and limits: [`docs/checkpoints
 `agentos brain` keeps durable project knowledge (architecture, decisions, ADRs, conventions, feature notes) in ordinary Markdown files, registered by reference:
 
 ```bash
-agentos brain init                                   # templates for a project without knowledge files
+agentos brain init                                   # `agentos init` already ran this: templates for what is missing, existing records/docs adopted
 agentos brain register docs/adr/0003-use-postgres.md --kind adr
 agentos brain propose brain:0003-use-postgres --from new-text.md --summary "pin Postgres 16"   # an engine writes the text
-agentos brain preview <proposal>   &&   agentos brain apply <proposal>
+agentos brain preview <proposal>   &&   agentos brain apply <proposal> --by <owner>
 agentos brain check                                  # changed / invalid records
 agentos brain verify brain:0003-use-postgres --by ralph
 ```
@@ -672,7 +676,7 @@ Obsidian is a second location for the same Project Brain, never a second store; 
 
 - **No vault yet:** `agentos obsidian init [--dir <path>] [--dry-run]` creates a plain `knowledge/` folder with an `index.md` that links the Brain records by relative path, and registers it as `knowledge.obsidian` (keys added only). Open the folder in Obsidian if you like; `.obsidian/` is created by Obsidian, not by AgentOS.
 - **Existing vault:** `agentos obsidian link --vault <abs-path> --dest <sub/folder> [--canonical workspace|vault] [--create] [--dry-run]` registers one project folder. It creates only that folder and `<Project> AgentOS Index.md` in it; nothing else in the vault is touched.
-- **Canonical location** (`knowledge.obsidian.canonical`, default `workspace`): every record is one file in one place; the other side holds links, never copies; no sync. With `canonical: vault`, notes in the linked folder are Brain records with portable identity (`id`, vault-relative `sources`); the absolute vault path lives only in `project.yaml`. Notes are read and changed only through `agentos brain register|propose|apply`, and only inside `<vault>/<dest>`.
+- **Canonical location** (`knowledge.obsidian.canonical`, default `workspace`): every record is one file in one place; the other side holds links, never copies; no sync. With `canonical: vault`, notes in the linked folder are Brain records with portable identity (`id`, vault-relative `sources`); the absolute vault path lives only in the git-ignored, machine-local `.agentos/local.yaml` (`obsidian.vault`; older setups: `project.yaml`, still read). Notes are read and changed only through `agentos brain register|propose|apply`, and only inside `<vault>/<dest>`.
 - **Unavailable vault:** its records are `unavailable` in `brain check`, listed under Missing by `agentos context` (`--require-complete` exits 1), and `doctor` warns. An edit made in Obsidian shows up as `changed`.
 
 The boundary-only form (no index note) still works:

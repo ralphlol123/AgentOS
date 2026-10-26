@@ -149,7 +149,7 @@ test('mandatory content over budget: ok:false with overflow, exit 1, nothing ren
   assert.equal(bundle.ok, false);
   assert.equal(bundle.overflow.budget, 1000);
   assert.ok(bundle.overflow.needed > 1000);
-  assert.deepEqual(bundle.overflow.mandatory.map((item) => item.kind).sort(), ['constraints', 'objective', 'role', 'scope']);
+  assert.deepEqual(bundle.overflow.mandatory.map((item) => item.kind).sort(), ['constraints', 'objective', 'overview', 'role', 'scope']);
   assert.ok(bundle.overflow.mandatory.find((item) => item.kind === 'objective').tokens >= Math.ceil(long.trim().length / 4));
   assert.doesNotMatch(bundle.text, /Rotate tokens safely/, 'no partial objective');
   assert.deepEqual(bundle.included, []);
@@ -253,9 +253,10 @@ test('context creates, changes or locks nothing in any mode (whole parent tree, 
   const broken = await snapshot(base);
   cli(['context', 'claude', '--json'], root, env);
   assert.deepEqual(await snapshot(base), broken, 'missing-objective mode');
-  delete broken['ws/.agentos/handoff.md'];
+  const handoffKey = join('ws', '.agentos', 'handoff.md'); // snapshot keys use the native separator
+  delete broken[handoffKey];
   const expected = { ...before };
-  delete expected['ws/.agentos/handoff.md'];
+  delete expected[handoffKey];
   assert.deepEqual(broken, expected, 'all other modes');
 });
 

@@ -124,7 +124,8 @@ test('obsidian link creates only <dest>/ and its index note; every byte elsewher
   const index = await read(vault, `${DEST}/Ws AgentOS Index.md`);
   assert.match(index, /architecture\.md>\)/);
   const data = parseYaml(await read(root, '.agentos/project.yaml')).knowledge.obsidian;
-  assert.equal(data.vault, vault);
+  assert.equal(data.vault, undefined, 'no host path in the shared project.yaml (F10)');
+  assert.equal(parseYaml(await read(root, '.agentos/local.yaml')).obsidian.vault, vault, 'host path in the machine-local file');
   assert.equal(data.destination, DEST);
   assert.equal(data.canonical, 'workspace');
 
@@ -142,7 +143,7 @@ test('obsidian link creates only <dest>/ and its index note; every byte elsewher
 
 // --- F1: canonical vault, portable identity, boundary ---------------------------------------------
 
-test('canonical: vault records use vault-relative sources; the absolute vault path lives only in project.yaml', async (t) => {
+test('canonical: vault records use vault-relative sources; the absolute vault path lives only in the machine-local .agentos/local.yaml', async (t) => {
   const { base, root, vault, note } = await vaultRecord(t);
   const rel = `${DEST}/design.md`;
   const text = await readFile(note, 'utf8');
@@ -150,7 +151,7 @@ test('canonical: vault records use vault-relative sources; the absolute vault pa
   assert.match(text, /^id: brain:design$/m);
   const ws = await snapshot(root);
   const holders = Object.entries(ws).filter(([, v]) => v[0] === 'file' && Buffer.from(v[2], 'base64').toString('utf8').includes(vault)).map(([k]) => k);
-  assert.deepEqual(holders, ['.agentos/project.yaml'], 'absolute vault path only in project.yaml');
+  assert.deepEqual(holders, ['.agentos/local.yaml'], 'absolute vault path only in the machine-local local.yaml');
   assert.ok(!text.includes(base));
   const index = JSON.parse(await read(root, '.agentos/brain/index.json'));
   assert.deepEqual(index.records.find((r) => r.id === 'brain:design'), { id: 'brain:design', kind: 'architecture', status: 'accepted', scope: '.', title: 'Design notes', path: rel, location: 'vault', source_hash: index.records.find((r) => r.id === 'brain:design').source_hash });
@@ -179,7 +180,7 @@ test('register/propose of a vault note outside <dest> is refused with zero write
   await writeFile(join(base, 'p2.md'), '# Design notes\n\nThe API is versioned per major release.\n');
   ok(cli(['brain', 'propose', 'brain:design', '--from', join(base, 'p2.md')], root));
   const proposal = (await readdir(join(root, '.agentos/brain/proposals'))).find((name) => name.endsWith('.md'));
-  ok(cli(['brain', 'apply', proposal], root));
+  ok(cli(['brain', 'apply', proposal, '--by', 'owner'], root));
   assert.match(await read(vault, `${DEST}/design.md`), /per major release/);
 });
 

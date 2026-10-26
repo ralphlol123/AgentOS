@@ -17,7 +17,9 @@ export const DEFAULT_BUDGET = 24000;
  *  scaffolding). Assumptions, not measurements; see docs/context-builder.md. */
 export const ENGINE_OVERHEAD: Record<string, number> = { 'claude-code': 2000, codex: 1500, opencode: 1500, hermes: 2000 };
 const GENERIC_OVERHEAD = 1000;
-const REASONS = ['budget', 'superseded', 'out-of-scope', 'no-match'] as const;
+/** The project overview is `.agentos/memory.md` (the authoritative summary), cut at this many characters. */
+export const OVERVIEW_CHARS = 1500;
+const REASONS = ['budget', 'superseded', 'out-of-scope', 'no-match', 'covered'] as const;
 type OmitReason = typeof REASONS[number];
 
 export const estimateTokens = (text: string) => Math.ceil(text.length / 4);
@@ -31,7 +33,7 @@ export interface ContextBundle {
   scope: { repos: string[]; read: string[]; edit: string[] };
   budget: { limit: number; estimate: number; overhead: number; label: string };
   included: ContextItem[];
-  omitted: Array<{ id: string; kind: string; reason: OmitReason }>;
+  omitted: Array<{ id: string; kind: string; reason: OmitReason; via?: string }>;
   conflicts: Array<{ subject: string; ids: string[] }>;
   missing: string[];
   warnings: string[];
@@ -61,6 +63,8 @@ export interface ContextInput {
   brain?: Array<{ id: string; kind: string; status: string; scope: string; title: string; path: string; changed: boolean; location?: 'workspace' | 'vault' }>;
   /** Known-unreadable inputs (e.g. `vault unavailable: <dir>`); listed under Missing, so the bundle never reads as complete. */
   missing?: string[];
+  /** Diagnostics that do not make the bundle incomplete (e.g. an optional Obsidian viewer that is off or gone). */
+  warnings?: string[];
 }
 
 interface Candidate {
@@ -101,7 +105,7 @@ export async function buildContextBundle(input: ContextInput): Promise<ContextBu
   const overhead = ENGINE_OVERHEAD[engine] ?? GENERIC_OVERHEAD;
   const task = input.task?.trim() || null;
   const missing: string[] = [...(input.missing ?? [])];
-  const warnings: string[] = [];
+  const warnings: string[] = [...(input.warnings ?? [])];
 
   // --- role ---------------------------------------------------------------------------------------
   if (input.role && !input.enabledAgents.includes(input.role)) {
@@ -140,8 +144,9 @@ export async function buildContextBundle(input: ContextInput): Promise<ContextBu
     read = ['.'];
     edit = [];
     scopeSource = '(default: no task_scope declared)';
-    warnings.push('No task_scope declared: read scope is the whole workspace and edit scope is empty until project.yaml task_scope or --scope declares it.');
+    warnings.push('No task_scope declared: read scope is the whole workspace; edit scope is not set until the owner declares project.yaml task_scope.');
   }
+
   // The task decides the scope; the role manifest can only narrow it (src/agents.ts).
   const narrowed = effectiveEditScope(edit, card?.manifest ?? null, covers);
   edit = narrowed.edit;
@@ -165,7 +170,7 @@ export async function buildContextBundle(input: ContextInput): Promise<ContextBu
   // --- sources ------------------------------------------------------------------------------------
   const files: Record<string, string> = {};
   const mtimes: Record<string, number> = {};
-  for (const name of ['handoff.md', 'tasks.md', 'decisions.md', 'skills.md', 'knowledge.md']) {
+  for (const name of ['memory.md', 'handoff.md', 'tasks.md', 'decisions.md', 'skills.md', 'knowledge.md']) {
     const path = join(root, '.agentos', name);
     files[name] = await readText(path);
     mtimes[name] = files[name] ? (await stat(path)).mtimeMs : 0;
@@ -181,6 +186,10 @@ export async function buildContextBundle(input: ContextInput): Promise<ContextBu
   const add = (candidate: Omit<Candidate, 'fresh'> & { fresh?: number }) => candidates.push({ fresh: 0, ...candidate });
   const handoffSource = (heading: string) => `.agentos/handoff.md#${heading}`;
 
+  // F6: a bounded overview first (memory.md minus its frontmatter and title); detailed records stay selective below.
+  const overview = files['memory.md'].replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '').replace(/^\s*#[^\n]*\n/, '').trim();
+  if (overview) add({ id: 'overview', kind: 'overview', title: 'Project overview', source: '.agentos/memory.md', mandatory: true,
+    text: overview.length > OVERVIEW_CHARS ? `${overview.slice(0, OVERVIEW_CHARS)}…\n(cut at ${OVERVIEW_CHARS} of ${overview.length} chars; read .agentos/memory.md for the rest)` : overview });
   add({ id: 'objective', kind: 'objective', title: 'Objective', source: handoffSource(objective.selected.heading), text: objective.selected.text, mandatory: true });
   const protectedSection = section(files['handoff.md'], roles('Protected files / do not touch', 'Protected paths and constraints', 'Protected paths', 'Protected files', 'Do not touch', 'Constraints'));
   add({
@@ -193,7 +202,9 @@ export async function buildContextBundle(input: ContextInput): Promise<ContextBu
     text: [
       `Repos (inventory, not permission): ${scope.repos.join('; ') || '(none)'}`,
       `Read scope: ${read.join(', ') || '(none)'}`,
-      `Edit scope: ${edit.join(', ') || '(none; read-only task)'}. Do not edit anything outside it.`,
+      // D5: unset is not "read-only": say so and what to do. No default edit scope is invented.
+      projectScope ? `Edit scope: ${edit.join(', ') || '(none; read-only task)'}. Do not edit anything outside it.`
+        : "Edit scope: not set (no task_scope in .agentos/project.yaml). Edit only the files the owner's task names; ask the owner to set task_scope.",
     ].join('\n'),
   });
   if (role) {
@@ -293,7 +304,7 @@ export async function buildContextBundle(input: ContextInput): Promise<ContextBu
     return finish({
       ok: false, engine, task, role, scope, budget: { limit, estimate: needed, overhead, label: TOKEN_LABEL }, included: [], omitted: [], conflicts: [], missing, warnings,
       overflow: { needed, budget: limit, mandatory: mandatory.map((candidate) => ({ id: candidate.id, kind: candidate.kind, tokens: estimateTokens(renderSection(candidate)) })) },
-      text: `AgentOS context: OVERFLOW\nMandatory context (objective, constraints, scope, role) needs ${needed} tokens, ${TOKEN_LABEL}, but the budget is ${limit}. Nothing was truncated and no context was rendered; raise --budget or shorten the mandatory sources.`,
+      text: `AgentOS context: OVERFLOW\nMandatory context (overview, objective, constraints, scope, role) needs ${needed} tokens, ${TOKEN_LABEL}, but the budget is ${limit}. Nothing was truncated and no context was rendered; raise --budget or shorten the mandatory sources.`,
     });
   }
   const selected = [...mandatory];
@@ -305,9 +316,18 @@ export async function buildContextBundle(input: ContextInput): Promise<ContextBu
     running += cost;
     selected.push(candidate);
   }
+  // D7: a Brain record that matched nothing but whose file is already shown section by section (e.g. brain:decisions vs the
+  // decision:* sections of .agentos/decisions.md) is reported as covered by that section, not as no-match.
+  const brainSource = new Map(candidates.filter((candidate) => candidate.kind === 'brain').map((candidate) => [candidate.id, candidate.source]));
+  const relabel = () => omitted.map((item) => {
+    const source = item.reason === 'no-match' ? brainSource.get(item.id) : undefined;
+    const via = source && selected.find((candidate) => candidate.source.startsWith(`${source}#`))?.id;
+    return via ? { ...item, reason: 'covered' as const, via } : item;
+  });
   for (;;) {
     const conflicts = findConflicts(selected);
-    const text = render(input, task, role, selected, omitted, conflicts, missing);
+    const shown = relabel();
+    const text = render(input, task, role, selected, shown, conflicts, missing);
     const estimate = overhead + estimateTokens(text);
     const last = selected.at(-1);
     if (estimate <= limit || last.mandatory) {
@@ -315,7 +335,7 @@ export async function buildContextBundle(input: ContextInput): Promise<ContextBu
       return finish({
         ok: true, engine, task, role, scope, budget: { limit, estimate, overhead, label: TOKEN_LABEL },
         included: selected.map((candidate) => ({ id: candidate.id, kind: candidate.kind, source: candidate.source, reason: candidate.mandatory ? 'mandatory' : candidate.reason, tokens: estimateTokens(renderSection(candidate)) })),
-        omitted, conflicts, missing, warnings, text,
+        omitted: shown, conflicts, missing, warnings, text,
       });
     }
     selected.pop(); // the trailer (omitted/conflicts/missing) pushed the total over the limit
@@ -344,7 +364,7 @@ function renderSection(candidate: Candidate) {
 
 function render(input: ContextInput, task: string | null, role: string | null, selected: Candidate[], omitted: ContextBundle['omitted'], conflicts: ContextBundle['conflicts'], missing: string[]) {
   const parts = [headerLines(input, task, role).join('\n'), ...selected.map(renderSection)];
-  if (omitted.length) parts.push(`## Omitted (${omitted.length})\n${omitted.map((item) => `- ${item.id} (${item.kind}): ${item.reason}`).join('\n')}`);
+  if (omitted.length) parts.push(`## Omitted (${omitted.length})\n${omitted.map((item) => `- ${item.id} (${item.kind}): ${item.via ? `covered by ${item.via} (same file, shown above)` : item.reason}`).join('\n')}`);
   if (conflicts.length) parts.push(`## Conflicts\n${conflicts.map((item) => `- ${item.subject}: ${item.ids.join(' vs ')}`).join('\n')}`);
   if (missing.length) parts.push(`## Missing\n${missing.map((item) => `- ${item}`).join('\n')}`);
   return parts.join('\n\n');

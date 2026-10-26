@@ -13,6 +13,9 @@ function run(command, args, options = {}) {
     cwd: options.cwd ?? root,
     encoding: 'utf8',
     stdio: options.stdio ?? 'pipe',
+    // Windows: npm is npm.cmd, which Node only spawns through a shell.
+    // ponytail: args are not shell-quoted; fine while the temp dir has no spaces (CI runners), quote them if that changes.
+    shell: process.platform === 'win32',
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {
@@ -45,7 +48,9 @@ test('package metadata is ready for public npm publishing', async () => {
 test('packed npm tarball contains only publishable runtime files', async () => {
   const packDir = await mkdtemp(join(tmpdir(), 'agentos-metadata-pack-'));
   const json = run('npm', ['pack', '--json', '--pack-destination', packDir]);
-  const [packed] = JSON.parse(json);
+  // npm ≤ 11 prints an array; npm 12 prints an object keyed by package name.
+  const parsed = JSON.parse(json);
+  const [packed] = Array.isArray(parsed) ? parsed : Object.values(parsed);
   const files = packed.files.map((file) => file.path).sort();
 
   assert.ok(files.includes('package.json'));

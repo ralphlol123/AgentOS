@@ -40,6 +40,8 @@ agentos status
 agentos doctor
 ```
 
+`init` also sets up the Project Brain: it creates the missing starting records under `.agentos/brain/` with unknowns marked `(unknown — fill in)`, adopts `.agentos/decisions.md` and `.agentos/architecture.md` in place, and names any covering doc (`ARCHITECTURE.md`, `docs/conventions.md`, …) with its `agentos brain register` command instead of duplicating it. Re-running `init` changes nothing that exists. See [brain.md](brain.md#setup-agentos-init).
+
 ## Existing project or workspace
 
 For a single repo:
@@ -170,21 +172,30 @@ Write only after reviewing findings:
 agentos templates import ./external-skill.md --type skill --name external-skill --yes
 ```
 
-## Link Obsidian safely
+## Start a session (any engine)
 
-Interactive:
-
-```bash
-agentos link-obsidian
-```
-
-Non-interactive:
+Every root bootloader (`CLAUDE.md`, `AGENTS.md`, `.hermes.md`) names the same loop with its own engine id:
 
 ```bash
-agentos link-obsidian --vault /path/to/vault --dest "Projects/MyProduct/AgentOS" --create
+agentos status
+agentos context claude-code --task <id>     # codex | opencode | hermes
+# ... work ...
+agentos checkpoint --task <id> --progress "<done>" --next "<remaining>"
+agentos resume --task <id>                  # next session or another engine; same <id>
 ```
 
-AgentOS links specific notes only. It does not bulk-load a vault.
+`context` opens with a bounded overview from `.agentos/memory.md`. A task without a checkpoint starts clean: `resume` reports a clean start (exit 0) and invents no prior work. The full command map is `.agentos/guide.md` in every workspace (also shipped in the package, with this file, under `node_modules/agentos-for-projects/docs/`).
+
+## Obsidian (optional)
+
+Nothing needs Obsidian. Two setups ([obsidian.md](obsidian.md)):
+
+```bash
+agentos obsidian init                                                        # knowledge/ folder: open it as its own vault
+agentos obsidian link --vault /path/to/vault --dest "Projects/MyProduct" --create   # one navigation note in an existing vault
+```
+
+The vault path of `obsidian link` is machine-local: it goes to `.agentos/local.yaml` (git-ignored), not to the shared `project.yaml`. Off switch: `knowledge.obsidian.enabled: false`. AgentOS links notes; it never bulk-loads a vault. The older `agentos link-obsidian` (exact-note link-only mode) still works.
 
 ## Generate an engine prompt
 

@@ -71,7 +71,7 @@ A repo whose path is missing, or is not inside any git work tree, is `available:
 | `not-run` | a declared build/test/check/lint command of an in-scope repo that no `--check` ran (or any check under `--dry-run`) |
 | `unavailable` | the check could not start (binary missing, not executable, `--cwd` missing) |
 
-`--check` runs without a shell (`execFile`, quotes are honoured; no pipes, `&&`, globs or `$VARS`; wrap those in a script), in `--cwd` (workspace-relative) or the workspace root. `state_tested` is the workspace `state` measured right before the check ran (for claims: at record time; `null` for `not-run`). `evidence` is the relative path of the saved output log.
+`--check` runs without a shell (`execFile`, quotes are honoured; no pipes, `&&`, globs or `$VARS`; wrap those in a script), in `--cwd` or the workspace root. `--cwd` is relative to the workspace root, never to the directory you run `agentos` from: from any subdirectory, no `--cwd` and `--cwd .` both mean the root, and `--cwd web` means `<root>/web`. An absolute `--cwd` inside the workspace is accepted and recorded workspace-relative (`--cwd "$PWD"` from `<root>/web` records `cwd: web`); one outside the workspace, or a relative one with `..`, is refused before anything runs, including with `--dry-run`. `state_tested` is the workspace `state` measured right before the check ran (for claims: at record time; `null` for `not-run`). `evidence` is the relative path of the saved output log.
 
 ## Writing and atomicity
 
@@ -110,12 +110,13 @@ The block is replaced in place on every checkpoint (inserted once at the end of 
 - **Next**: `agentos context <engine> --task <id>`.
 - `incomplete` (exit 1): `current.json` missing while files exist, unreadable, pointing at a missing record, or a record that fails `assertCheckpoint`. The output lists the files present with sizes and the parse/contract error. Nothing is skipped silently.
 - `recovered` (exit 0): no checkpoint yet, but `.agentos/runs/` has notes or a repo has changed files. The view is built from git evidence alone (`recovered: true`, progress `(unknown: engine stopped without a summary)`, next `(unknown)`, no receipts) and is not written; persist it with `agentos checkpoint --recover`.
-- `none` (exit 1): no checkpoint and no evidence of work.
+- `none` (exit 0): no checkpoint and no evidence of work — a clean start (`Status: clean start — no checkpoint for task <id> …`). No prior work is invented; the output names the `context` command to start with.
 
 `--json` prints the structured result only.
 
 ## Integrations
 
+- Every non-recovered checkpoint output ends with the knowledge-review instruction (`Knowledge: did this work change durable project knowledge …? If yes, stage one focused proposal: \`agentos brain propose <record-id> --from <file> --task <id>\` … Progress only: stage nothing. Never run \`agentos brain apply\`: the owner applies with \`--by <owner>\`.`). It is an instruction the engine follows or not (an engine can still run `brain apply --by <name>`; the applier is then recorded in the record's `history`, see [`docs/brain.md`](brain.md)); the checkpoint itself never stages a proposal. Staging, evidence and dedupe: [`docs/brain.md`](brain.md#knowledge-upkeep-at-completion).
 - `agentos context` adds the current checkpoint for its task (`--task`, else the objective slug) as an `always` record, source `.agentos/checkpoints/<task>/current.json`.
 - `agentos doctor` reports a `current.json` that points at a missing or invalid record as a problem (exit 1).
 

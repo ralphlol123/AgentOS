@@ -596,7 +596,7 @@ test('doctor --json CLI prints parseable JSON only', async () => {
   const parsed = JSON.parse(result.stdout);
   assert.equal(parsed.ok, true);
   assert.equal(parsed.status, 'OK');
-  assert.equal(parsed.root, await realpath(root));
+  assert.equal(await realpath(parsed.root), await realpath(root)); // same directory: macOS /var → /private/var, Windows 8.3 RUNNER~1 → runneradmin
   assert.ok(Array.isArray(parsed.problems));
   assert.ok(Array.isArray(parsed.warnings));
   assert.ok(Array.isArray(parsed.diagnostics));
@@ -739,7 +739,8 @@ test('obsidian link-workspace records a folder boundary without note creation he
   const knowledge = await readFile(join(root, '.agentos/knowledge.md'), 'utf8');
   const project = await readFile(join(root, '.agentos/project.yaml'), 'utf8');
   assert.match(knowledge, /Mode: `workspace-folder`/);
-  assert.match(knowledge, /Workspace folder: `.*\/Projects\/KargaX\/AgentOS`/);
+  assert.match(knowledge, /Workspace folder: `Projects\/KargaX\/AgentOS` inside that vault/);
+  assert.ok(!knowledge.includes(vault), 'no host path in the shared knowledge.md');
   assert.match(knowledge, /Agents may read\/write only inside this folder/);
   assert.match(knowledge, /Do not bulk-load the Obsidian vault/);
   assert.match(project, /mode: workspace-folder/);
@@ -771,7 +772,7 @@ test('prompt includes Obsidian workspace boundary when configured', async () => 
 
   assert.equal(prompt.ok, true);
   assert.match(prompt.text, /Obsidian workspace:/);
-  assert.match(prompt.text, /Projects\/KargaX\/AgentOS/);
+  assert.ok(prompt.text.includes(join('Projects', 'KargaX', 'AgentOS')), 'the vault folder path, in native separators');
   assert.match(prompt.text, /read\/write only inside that folder/i);
   assert.match(prompt.text, /Do not bulk-load the Obsidian vault/);
 });
@@ -850,6 +851,7 @@ test('migrate claude --preserve disables active .claude files and patches CLAUDE
 
   const result = await migrateClaudeAgentOS({ cwd: root, preserve: true });
   assert.equal(result.ok, true);
+  assert.match(result.text, /^Moved: \.claude\/agents -> \.claude\/agents\.agentos-legacy-\S+$/m, 'workspace-relative, `/`-separated on every platform (A14)');
   assert.equal(await exists(join(root, '.claude/agents')), false);
   assert.equal(await exists(join(root, '.claude/settings.local.json')), false);
   assert.equal(await exists(join(root, '.claude/README.agentos.md')), true);

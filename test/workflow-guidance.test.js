@@ -14,7 +14,7 @@ const CLI = resolve('dist/cli.js');
 const GUIDE = '.agentos/guide.md';
 const START = '<!-- agentos:managed:start -->';
 const END = '<!-- agentos:managed:end -->';
-const BUDGET_BYTES = 4608; // ~4.5 KB: the guide is loaded on demand
+const BUDGET_BYTES = 5376; // ~5.25 KB: the guide is loaded on demand (4.5 KB until the Project Brain setup section)
 
 async function workspace(t) {
   const root = await mkdtemp(join(tmpdir(), 'agentos-guidance-'));
@@ -58,6 +58,9 @@ test('the guide names the everyday loop: context, checkpoint/resume, brain, agen
     [/`agentos agents sync <engine> --role/, 'agents sync'],
     [/Synced config: STALE/, 'the doctor STALE warning'],
     [/`agentos run handoff/, 'run handoff and how it differs'],
+    [/`<command> --help`/, 'per-command --help (D1)'],
+    [/`--cwd <dir>`[^.\n]*root-relative[^.\n]*absolute inside the workspace/, 'checkpoint --cwd semantics (D2)'],
+    [/`Edit scope: not set`/, 'the unset edit scope line (D5)'],
   ]) assert.match(guide, pattern, `guide must cover: ${label}`);
   // Engines propose; the owner applies. Engines never edit project.yaml themselves.
   assert.match(guide, /owner[^.\n]*task_scope|task_scope[^.\n]*owner/i);

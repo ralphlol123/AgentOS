@@ -124,7 +124,7 @@ test('record carries ids, objective, scope, per-repo branch/HEAD/fingerprint, kn
   assert.equal(record.task.id, 'ship-the-token-rotation-feature');
   assert.equal(record.task.source, 'objective');
   assert.match(record.objective.text, /Ship the token rotation feature/);
-  assert.equal(record.project.root, await realpath(root)); // canonical root (macOS /private/var)
+  assert.equal(await realpath(record.project.root), await realpath(root)); // same directory (macOS /private/var, Windows 8.3 short names)
   assert.equal(record.role, 'developer');
   assert.deepEqual(record.scope.read, ['.']);
   const web = record.repos.find((repo) => repo.name === 'web');
@@ -365,11 +365,11 @@ async function assertNoCheckpoints(root) {
   await assert.rejects(lstat(join(root, '.agentos/checkpoints')), /ENOENT/);
 }
 
-test('resume with no record and no evidence of work exits 1 with a clear message', async (t) => {
+test('resume with no record and no evidence of work is a clean start: exit 0 with a clear message', async (t) => {
   const { root } = await multi(t);
   const r = cli(['resume', '--task', TASK], root);
-  assert.equal(r.status, 1);
-  assert.match(r.stdout, /No checkpoint for task token-rotation/);
+  assert.equal(r.status, 0);
+  assert.match(r.stdout, /clean start — no checkpoint for task token-rotation/);
 });
 
 // --- runtime contract, context, doctor -------------------------------------------------------------

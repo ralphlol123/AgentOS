@@ -1,20 +1,15 @@
 # Tasks
 
-Active scope: AgentOS 1.1 — dependable everyday development (three sequential slices, then a Claude + Codex validation run). Earlier task lists: `.agentos/runs/2026-10-26-1.1-slice2-handoff.md`, `.agentos/runs/2026-10-26-v1-release-state.md`.
-
-## Done
-
-- [x] AgentOS 1.0.0 released (`main` = `99553dc`, npm latest 1.0.0; PRs #46–#54 merged).
-- [x] 1.1 slices 1–2: sync freshness (`4faca16`) and safe re-sync (`973029f`), accepted.
-- [x] 1.1 slice 3 on `feat/1.1-workflow-guidance`: generated guide names the v1 loop (local commit, not pushed).
+Active scope: Project Brain goal (`feat/project-brain`, PR #57) — complete, pending owner review. Finished tasks are in `.agentos/runs/2026-10-26-project-brain-card8-state.md` and the other notes under `.agentos/runs/`.
 
 ## Now
 
-- [ ] Phynceon: review 1.1 slice 3 (`feat/1.1-workflow-guidance`); push/PR on approval.
+- [ ] Phynceon: review the final head; mark PR #57 ready.
+- [ ] Owner: release version (D6 is breaking for scripts calling `brain apply` without `--by`), D6 policy (instruction + audit enough?), merge decision.
 
 ## Next
 
-- [ ] Claude + Codex validation run (Phynceon).
+- [ ] Owner: publish after merge.
 
 ## Later
 

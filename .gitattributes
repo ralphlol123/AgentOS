@@ -1,0 +1,4 @@
+# Every text file is LF in the working tree on every platform (Windows core.autocrlf=true would check out CRLF).
+# Templates and fixtures are package data copied byte-for-byte into workspaces and compared byte-for-byte in tests;
+# user-supplied CRLF input stays supported by the product (see the CRLF tests in test/).
+* text=auto eol=lf
