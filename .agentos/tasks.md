@@ -1,20 +1,17 @@
 # Tasks
 
-Active scope: AgentOS 1.1 — dependable everyday development (three sequential slices, then a Claude + Codex validation run). Earlier task lists: `.agentos/runs/2026-10-26-1.1-slice2-handoff.md`, `.agentos/runs/2026-10-26-v1-release-state.md`.
-
-## Done
-
-- [x] AgentOS 1.0.0 released (`main` = `99553dc`, npm latest 1.0.0; PRs #46–#54 merged).
-- [x] 1.1 slices 1–2: sync freshness (`4faca16`) and safe re-sync (`973029f`), accepted.
-- [x] 1.1 slice 3 on `feat/1.1-workflow-guidance`: generated guide names the v1 loop (local commit, not pushed).
+Active scope: Project Brain goal (`feat/project-brain`, PR #57). Earlier task lists are in `.agentos/runs/2026-10-26-1.1-slice3-handoff.md` and the other notes under `.agentos/runs/`.
 
 ## Now
 
-- [ ] Phynceon: review 1.1 slice 3 (`feat/1.1-workflow-guidance`); push/PR on approval.
+- [ ] Owner: push the CI workflow commit with a `workflow`-scoped token; check that the Windows job is green (A14).
+- [ ] Owner: Obsidian GUI round trip, `C:\_\agentos-trial\OWNER-STEPS.md` (A15, A17).
+- [ ] Phynceon: Codex and Hermes legs of the continuity trial (A16). Re-run the Claude Code / A18 trial on the final SHA.
 
 ## Next
 
-- [ ] Claude + Codex validation run (Phynceon).
+- [ ] Phynceon: final gate re-run on the pushed head, review, then mark PR #57 ready. The owner merges.
+- [ ] Owner: release version and publish after merge.
 
 ## Later
 

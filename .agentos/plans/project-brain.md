@@ -2,6 +2,8 @@
 
 Goal: `briefs/AgentOS-Project-Brain-Goal-2026-10-26.md` (Ralph, approved 2026-10-26). Branch `feat/project-brain` from `origin/main` = `7bcca0e` (1.1.0). One branch, small commits, one PR to main at the end; no merge, publish or version bump. Baseline evidence: `docs/evidence/project-brain-baseline.md`. Matrix: `docs/project-brain-acceptance.md`.
 
+**Status (2026-10-26, card 6):** Implementation complete. Slices 1–6 are built, trial defects D1–D5 are fixed, and the migration guide, CHANGELOG and final checks are recorded. Validation still open: A14 (Windows CI; needs a `workflow`-scoped push), A15/A17 (owner Obsidian GUI), A16 (Codex/Hermes legs) and the A18 re-run on the final SHA. The matrix lists these under "Owner actions remaining".
+
 | Order | Slice | Findings | Acceptance rows | Done when |
 |---|---|---|---|---|
 | 1 | Brain independent of Obsidian | F1–F4 | A01–A04 | Local brain/context/checkpoint/resume work with the integration absent, disabled, invalid or gone; required missing records stay Missing; corrupt core YAML fails; `knowledge.obsidian.enabled: false` documented |
