@@ -675,7 +675,7 @@ export function policyBrain(ctx: BrainCtx, options: { json?: boolean }) {
   const { policy } = parsed;
   const autonomous = policy.mode === 'autonomous' && !parsed.errors.length;
   const scope = `${policy.records.join(', ') || 'every workspace record'}${policy.exclude.length ? ` except ${policy.exclude.join(', ')}` : ''}`;
-  return out(options.json, !parsed.errors.length, { policy, policy_hash: parsed.errors.length ? null : parsed.hash, errors: parsed.errors,
+  return out(options.json, !parsed.errors.length, { policy, policy_hash: parsed.errors.length ? null : parsed.hash, errors: parsed.errors, warnings: parsed.warnings,
     limits: { append_bytes: AUTO_APPEND_BYTES, record_bytes: AUTO_RECORD_BYTES, autonomous_record_bytes: AUTONOMOUS_RECORD_BYTES },
     ...(autonomous ? { scope } : {}), revert: REVERT_HINT, authentication: false }, [
     `AgentOS Brain approval: ${parsed.errors.length ? 'INVALID (automatic application disabled)' : policy.mode}`,
@@ -683,7 +683,7 @@ export function policyBrain(ctx: BrainCtx, options: { json?: boolean }) {
     ...(autonomous ? [`Scope: ${scope} (workspace-canonical only; vault records need owner review)`,
       `Autonomous: an allowed agent applies its own proposal for any record kind (replace, append, supersession) with \`agentos brain apply <proposal> --auto --by <self>\`. Refused and left pending: validation rejections or conflicts, a checkpoint with an observed-fail check, bodies over ${AUTONOMOUS_RECORD_BYTES} bytes.`]
       : [`Records: ${policy.records.join(', ') || '(none)'}`]),
-    ...parsed.errors, `Every apply snapshots the previous version. Roll back: \`${REVERT_HINT}\`; history: \`agentos brain log [<id>]\`.`, 'Only the owner configures knowledge.brain.approval in project.yaml. Names are supplied labels, not authenticated identities.',
+    ...parsed.errors, ...parsed.warnings.map((w) => `Warning: ${w}`), `Every apply snapshots the previous version. Roll back: \`${REVERT_HINT}\`; history: \`agentos brain log [<id>]\`.`, 'Only the owner configures knowledge.brain.approval in project.yaml. Names are supplied labels, not authenticated identities.',
     'Agents apply only with --auto --by <self>; refusals remain pending for owner review. This policy is not a sandbox.',
   ]);
 }
@@ -862,7 +862,8 @@ export async function previewBrain(ctx: BrainCtx, ref: string | undefined, optio
   const records = await loadBrain(ctx.root, ctx.repos, ctx.vault);
   const result = validateProposal(ctx, records, proposal);
   const approval = options.auto ? await autoReview(ctx, proposal, records, result, options.by) : null;
-  return out(options.json, !approval || approval.eligible, { path: proposal.rel, target: result.target?.id ?? null, rejections: result.rejections, flags: result.flags, supersedes: result.supersede.map((record) => record.id), new_body: result.newBody, ...(approval ? { approval } : {}) },
+  // Exit status matches `brain validate` (which preview replaces): a rejected proposal fails.
+  return out(options.json, result.rejections.length === 0 && (!approval || approval.eligible), { path: proposal.rel, target: result.target?.id ?? null, rejections: result.rejections, flags: result.flags, supersedes: result.supersede.map((record) => record.id), new_body: result.newBody, ...(approval ? { approval } : {}) },
     [`AgentOS brain preview: ${proposal.rel} (read-only)`, ...planLines(proposal, result), 'Validation:', ...validationLines(result), ...approvalLines(approval)]);
 }
 

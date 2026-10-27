@@ -17,9 +17,9 @@ export interface ApprovalDecision {
   policy_hash: string | null; reasons: string[];
 }
 
-export function parseApprovalPolicy(value: unknown): { policy: ApprovalPolicy; errors: string[]; hash: string } {
+export function parseApprovalPolicy(value: unknown): { policy: ApprovalPolicy; errors: string[]; warnings: string[]; hash: string } {
   const policy: ApprovalPolicy = { mode: 'manual', actors: [], records: [], exclude: [] };
-  const errors: string[] = [];
+  const errors: string[] = [], warnings: string[] = [];
   const at = 'knowledge.brain.approval';
   if (value !== undefined) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) errors.push(`${at} must be a mapping`);
@@ -29,6 +29,8 @@ export function parseApprovalPolicy(value: unknown): { policy: ApprovalPolicy; e
       if (!['manual', 'auto-append', 'autonomous'].includes(String(data.mode))) errors.push(`${at}.mode must be manual, auto-append or autonomous`);
       else policy.mode = data.mode as ApprovalMode;
       for (const key of ['actors', 'records', 'exclude'] as const) {
+        // A leftover `exclude` (say, after switching back from autonomous) is ignored, not fatal: the policy stays valid.
+        if (key === 'exclude' && data.exclude !== undefined && data.mode !== 'autonomous') { warnings.push(`${at}.exclude is ignored: it applies only to mode autonomous`); continue; }
         const list = data[key] ?? [];
         const pattern = key === 'actors' ? /^[a-z0-9][a-z0-9._-]{0,63}$/ : /^brain:[a-z0-9][a-z0-9-]{0,127}$/;
         if (!Array.isArray(list) || list.length > 50 || list.some((entry) => typeof entry !== 'string' || !pattern.test(entry))) {
@@ -37,12 +39,11 @@ export function parseApprovalPolicy(value: unknown): { policy: ApprovalPolicy; e
       }
       if (policy.mode === 'auto-append' && (!policy.actors.length || !policy.records.length)) errors.push(`${at}: auto-append needs nonempty actors and records lists`);
       if (policy.mode === 'autonomous' && !policy.actors.length) errors.push(`${at}: autonomous needs a nonempty actors list`);
-      if (policy.mode !== 'autonomous' && policy.exclude.length) errors.push(`${at}.exclude applies only to mode autonomous`);
     }
   }
   // `exclude` joins the hash only when set, so policies written before autonomous mode keep their hash.
   const { exclude, ...hashed } = policy;
-  return { policy, errors, hash: hash(JSON.stringify(exclude.length ? policy : hashed)) };
+  return { policy, errors, warnings, hash: hash(JSON.stringify(exclude.length ? policy : hashed)) };
 }
 
 /** True only for a valid autonomous policy: generated agent instructions switch on this. */

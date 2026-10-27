@@ -140,13 +140,31 @@ test('autonomous: invalid policies fail closed to manual; owner apply still work
   const fx = await workspace(t);
   checkpoint(fx.root);
   const proposal = await stage(fx, 'brain:architecture', '# Architecture\n\nInvalid policy case.\n');
-  for (const policy of [{ mode: 'autonomous' }, { mode: 'autonomous', actors: [] }, { ...AUTO, exclude: 'brain:decisions' }, { ...AUTO, exclude: ['*'] }, { mode: 'auto-append', actors: ['codex'], records: ['brain:glossary'], exclude: ['brain:decisions'] }]) {
+  for (const policy of [{ mode: 'autonomous' }, { mode: 'autonomous', actors: [] }, { ...AUTO, exclude: 'brain:decisions' }, { ...AUTO, exclude: ['*'] }]) {
     await configure(fx.root, policy);
     assert.equal(cli(fx.root, 'brain', 'policy').status, 1, JSON.stringify(policy));
     await refused(fx.root, proposal, /knowledge\.brain\.approval/);
   }
   ok(cli(fx.root, 'brain', 'apply', proposal, '--by', 'ralph'));
   assert.match(await read(fx.root, ARCH), /by ralph \(proposed by claude-code\).*approval manual/);
+});
+
+test('2.1: an exclude list under manual or auto-append is ignored with a warning; the policy stays valid and keeps its hash', async (t) => {
+  const fx = await workspace(t);
+  const appendPolicy = { mode: 'auto-append', actors: ['codex'], records: ['brain:glossary'] };
+  for (const policy of [{ mode: 'manual' }, appendPolicy]) {
+    await configure(fx.root, policy);
+    const plain = json(fx.root, 'brain', 'policy');
+    ok(plain.r);
+    await configure(fx.root, { ...policy, exclude: ['brain:decisions'] });
+    const withExclude = json(fx.root, 'brain', 'policy');
+    ok(withExclude.r);
+    assert.deepEqual(withExclude.data.errors, []);
+    assert.deepEqual(withExclude.data.warnings, ['knowledge.brain.approval.exclude is ignored: it applies only to mode autonomous']);
+    assert.deepEqual(withExclude.data.policy, plain.data.policy, 'exclude is dropped from the effective policy');
+    assert.equal(withExclude.data.policy_hash, plain.data.policy_hash, 'hash of the effective policy is unchanged');
+    assert.match(cli(fx.root, 'brain', 'policy').stdout, /Warning: knowledge\.brain\.approval\.exclude is ignored/);
+  }
 });
 
 test('autonomous: vault-canonical records need owner review', async (t) => {

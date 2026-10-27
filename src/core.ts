@@ -5338,17 +5338,18 @@ export async function brainAgentOS(options: any = {}) {
 }
 
 export const BRAIN_USAGE = [
-  'Usage: agentos brain init [--location workspace|vault] [--dry-run]   (vault: only with knowledge.obsidian.canonical: vault)',
-  '       agentos brain register <path> [--kind architecture|decision|adr|convention|feature|note] [--scope <repo-id|.>] [--status proposed|accepted] [--by <name>] [--dry-run]',
+  'Usage: agentos brain register <path> [--kind architecture|decision|adr|convention|feature|note] [--scope <repo-id|.>] [--status proposed|accepted] [--by <name>] [--dry-run]',
   '       agentos brain list [--status <s>] [--kind <k>] | show <id-or-path> | search <terms…> | check   (read-only; all take --json)',
   '       agentos brain propose <id-or-path> --from <file|-> [--summary "<text>"] [--supersedes <id>[,<id>]] [--append] [--by <name>] [--task <id>] [--dry-run]   (--task: tie to that task\'s checkpoint; same event stages once)',
   '       agentos brain policy [--json]   (read owner-configured knowledge.brain.approval; default manual)',
-  '       agentos brain preview <proposal> | validate <proposal> [--auto --by <actor>]   (read-only)',
+  '       agentos brain preview <proposal> [--auto --by <actor>] [--json]   (read-only: diff plus validation; exits 1 when rejected)',
   '       agentos brain apply <proposal> --by <actor> [--auto] [--dry-run]   (manual owner review by default; agents must use --auto)',
   '       agentos brain revert <id-or-path> --last|--to <hash> --by <name> [--auto] [--force] [--dry-run]   (restore a snapshot saved by apply; --force over an unverified edit)',
   '       agentos brain log [<id-or-path>] [--json]   (recent applies and reverts: actor, approval mode, hashes)',
-  '       agentos brain verify <id-or-path> [--by <name>] [--dry-run]',
+  '       agentos brain verify <id-or-path> [--by <name>] [--dry-run]   (optional human sign-off; nothing depends on it)',
   '       agentos brain index [--adopt] [--dry-run]   (recreate/refresh the derived index.json and Obsidian index note; --adopt an older unmarked note)',
+  '       agentos brain init --location vault [--dry-run]   (only with knowledge.obsidian.canonical: vault; `agentos init` sets up the workspace Brain)',
+  'Deprecated (removed in 3.0.0): agentos brain validate -> agentos brain preview; agentos brain init (workspace) -> agentos init',
 ].join('\n');
 
 /** `agentos resume`: read-only. */
