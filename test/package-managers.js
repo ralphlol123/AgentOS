@@ -95,7 +95,7 @@ for (const manager of managers) {
   assert.equal(approval.policy.mode, 'manual', `${manager.name}: packed CLI defaults to manual Brain approval`);
   assert.equal(approval.authentication, false);
   invoke(['skills', 'add', 'core-pack,frontend-pack,backend-pack,fullstack-pack,github-pack']);
-  invoke(['templates', 'copy', 'skill:core/code-review', '--replace']);
+  invoke(['skills', 'add', 'code-review', '--replace']);
   // Packed/installed CLI must drive the ordinary default workflow itself, not only the alias.
   await writeFile(join(cwd, '.agentos/handoff.md'), ['# Handoff', '', '## Scope', '', '- Workspace kind: single-repo', '',
     '## Current objective — 2026-09-15 (latest): packaged check', '', 'Do the work.', '',
@@ -126,12 +126,11 @@ for (const manager of managers) {
   if (!/No safe reduction found; files unchanged\./.test(repeat)) throw new Error(`${manager.name}: repeat default compact was not a no-safe-reduction result\n${repeat}`);
   assert.deepEqual(await snapshot(cwd), afterApply, `${manager.name}: repeat default compact wrote to disk`);
 
-  // Compatibility alias is the same planner, exercised separately after adding fresh history.
-  await writeFile(join(cwd, '.agentos/handoff.md'), `${rewritten}\n\n## Previous objective — alias exercise\n\n${'Alias-only history. '.repeat(100)}\n`);
-  invoke(['compact', '--rewrite']);
-  if ((await readFile(join(cwd, '.agentos/handoff.md'), 'utf8')).includes('Alias-only history.')) {
-    throw new Error(`${manager.name}: --rewrite compatibility alias did not compact fresh history`);
-  }
+  // The removed --rewrite alias refuses and writes nothing (3.0.0).
+  const removedBefore = await snapshot(cwd);
+  const removed = spawnSync(installedBin, ['compact', '--rewrite'], { cwd, encoding: 'utf8' });
+  if (removed.status !== 1 || !/removed in 3\.0\.0/.test(removed.stderr)) throw new Error(`${manager.name}: compact --rewrite did not refuse as removed`);
+  assert.deepEqual(await snapshot(cwd), removedBefore, `${manager.name}: removed compact --rewrite wrote to disk`);
   let references = 0, cards = 0;
   const packageRoot = join(cwd, 'node_modules/agentos-for-projects');
   assert.match(await readFile(join(packageRoot, 'docs/brain.md'), 'utf8'), /Optional automatic application/);
@@ -155,13 +154,13 @@ for (const manager of managers) {
   assert.equal(references, 9);
   invoke(['skills', 'remove', 'code-review']);
   await assert.rejects(() => lstat(join(cwd, '.agentos/skills/core/code-review')), { code: 'ENOENT' });
-  invoke(['templates', 'copy', 'agent:planner']);
-  invoke(['run', 'handoff', '--reason', 'packaged-smoke']);
-  const checkpoint = invoke(['compact', '--checkpoint']);
-  if (!/Mode: archival checkpoint/.test(checkpoint)) throw new Error(`${manager.name}: --checkpoint did not select checkpoint mode`);
+  invoke(['agents', 'add', 'planner']);
+  invoke(['checkpoint', '--task', 'packaged-smoke', '--progress', 'packaged smoke', '--next', 'none']);
+  if (!invoke(['resume', '--task', 'packaged-smoke']).includes('packaged smoke')) throw new Error(`${manager.name}: resume did not return the packaged checkpoint`);
+  const checkpoint = invoke(['compact', '--archive-only']);
+  if (!/Mode: archival checkpoint/.test(checkpoint)) throw new Error(`${manager.name}: --archive-only did not select archival mode`);
   invoke(['doctor']);
   const handoff = await readFile(join(cwd, '.agentos/handoff.md'), 'utf8');
-  if (!handoff.includes('packaged-smoke')) throw new Error('Packaged handoff did not retain its pause record.');
 
   // Ambiguity refuses through the plain default command and leaves the whole tree byte-identical.
   await writeFile(join(cwd, '.agentos/handoff.md'), `${handoff}\n\n## Current objective — ambiguous second candidate\n\nDo something else.\n`);
@@ -171,5 +170,5 @@ for (const manager of managers) {
     throw new Error(`${manager.name}: ambiguous plain compact did not refuse with candidates\n${ambiguous.stdout}\n${ambiguous.stderr}`);
   }
   assert.deepEqual(await snapshot(cwd), beforeAmbiguous, `${manager.name}: ambiguous default compact wrote to disk`);
-  console.log(`PASS ${manager.name}: installed 3.0.0 bin; init; default preview/apply/status/doctor/no-op; alias; checkpoint; ambiguity refusal; 15 cards/9 references`);
+  console.log(`PASS ${manager.name}: installed 3.0.0 bin; init; default preview/apply/status/doctor/no-op; removed-alias refusal; checkpoint; ambiguity refusal; 15 cards/9 references`);
 }
