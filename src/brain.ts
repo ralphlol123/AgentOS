@@ -862,21 +862,9 @@ export async function previewBrain(ctx: BrainCtx, ref: string | undefined, optio
   const records = await loadBrain(ctx.root, ctx.repos, ctx.vault);
   const result = validateProposal(ctx, records, proposal);
   const approval = options.auto ? await autoReview(ctx, proposal, records, result, options.by) : null;
-  // Exit status matches `brain validate` (which preview replaces): a rejected proposal fails.
+  // A rejected proposal fails (exit 1), as `brain validate` did before 3.0.0.
   return out(options.json, result.rejections.length === 0 && (!approval || approval.eligible), { path: proposal.rel, target: result.target?.id ?? null, rejections: result.rejections, flags: result.flags, supersedes: result.supersede.map((record) => record.id), new_body: result.newBody, ...(approval ? { approval } : {}) },
     [`AgentOS brain preview: ${proposal.rel} (read-only)`, ...planLines(proposal, result), 'Validation:', ...validationLines(result), ...approvalLines(approval)]);
-}
-
-export async function validateBrain(ctx: BrainCtx, ref: string | undefined, options: { json?: boolean; auto?: boolean; by?: string }) {
-  if (!ref) throw new Error('Usage: agentos brain validate <proposal> [--json]');
-  const proposal = await loadProposal(ctx, ref);
-  if (proposal.applied) return out(options.json, true, { applied: true, path: proposal.rel, rejections: [], flags: [] }, [`${proposal.rel}: already applied.`]);
-  const records = await loadBrain(ctx.root, ctx.repos, ctx.vault);
-  const result = validateProposal(ctx, records, proposal);
-  const approval = options.auto ? await autoReview(ctx, proposal, records, result, options.by) : null;
-  const ok = result.rejections.length === 0 && (!approval || approval.eligible);
-  return out(options.json, ok, { path: proposal.rel, target: result.target?.id ?? null, rejections: result.rejections, flags: result.flags, ...(approval ? { approval } : {}) },
-    [`AgentOS brain validate: ${proposal.rel}: ${ok ? 'OK' : 'REJECTED'}`, ...validationLines(result), ...approvalLines(approval)]);
 }
 
 /** Manual application remains the owner workflow; --auto adds a policy check, never authentication. */

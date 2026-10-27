@@ -27,7 +27,7 @@ async function workspace(t) {
   await mkdir(root);
   await initAgentOS({ cwd: root, mode: 'existing', yes: true, agents: 'minimal' });
   await writeFile(join(root, '.agentos/handoff.md'), '# Handoff\n\n## Current objective\n\nShip the demo.\n');
-  ok(cli(['brain', 'init'], root));
+  ok(cli(['init', '--existing', '--yes'], root)); // `brain init` (workspace) was removed in 3.0.0; init runs the same Brain setup
   return { base, root };
 }
 

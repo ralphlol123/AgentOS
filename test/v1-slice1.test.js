@@ -37,7 +37,7 @@ test('prompt prints the objective from a dated "Current objective — <date> (la
   const root = await single(t);
   await writeFile(join(root, '.agentos/tasks.md'), TASKS);
   await writeFile(join(root, '.agentos/handoff.md'), '# Handoff\n\n## Current objective — 2026-09-15 (latest): ship the parser\n\nMerge the AUM work.\n\n## Next exact action\n\nRun the gates.\n');
-  const r = cli(['prompt', 'claude'], root);
+  const r = cli(['context', 'claude', '--brief'], root);
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /^Current objective: 2026-09-15 \(latest\): ship the parser Merge the AUM work\.$/m);
   assert.doesNotMatch(r.stdout, /Current objective: \(none\)/);
@@ -56,12 +56,12 @@ for (const scenario of BROKEN) {
     const root = await single(t);
     await writeFile(join(root, '.agentos/tasks.md'), TASKS);
     await writeFile(join(root, '.agentos/handoff.md'), scenario.handoff);
-    for (const args of [['prompt', 'claude'], ['status'], ['doctor']]) {
+    for (const args of [['context', 'claude', '--brief'], ['status'], ['doctor']]) {
       const r = cli(args, root);
       assert.equal(r.status, 1, `${args[0]}: ${r.stdout}${r.stderr}`);
       assert.match(r.stdout, scenario.diagnostic, args[0]);
     }
-    const prompt = cli(['prompt', 'claude'], root);
+    const prompt = cli(['context', 'claude', '--brief'], root);
     assert.doesNotMatch(prompt.stdout, /Follow AgentOS for Projects/, 'no paste-ready prompt on broken state');
     assert.equal(await readFile(join(root, '.agentos/handoff.md'), 'utf8'), scenario.handoff, 'read-only');
   });
@@ -93,7 +93,7 @@ test('prompt lets a frontend task read a backend contract without granting backe
   const root = await multi(t);
   const path = join(root, '.agentos/project.yaml');
   await writeFile(path, `${await readFile(path, 'utf8')}task_scope:\n  read: [api/contracts/openapi.yaml]\n  edit: [web]\n`);
-  const r = cli(['prompt', 'claude'], root);
+  const r = cli(['context', 'claude', '--brief'], root);
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /^Repos \(inventory, not permission\): .*api=\.\/api/m);
   assert.match(r.stdout, /^Read scope: web, api\/contracts\/openapi\.yaml$/m);
@@ -104,7 +104,7 @@ test('an invalid task_scope fails prompt and doctor instead of producing a promp
   const root = await multi(t);
   const path = join(root, '.agentos/project.yaml');
   await writeFile(path, `${await readFile(path, 'utf8')}task_scope:\n  edit: [../escape]\n`);
-  for (const args of [['prompt', 'claude'], ['doctor']]) {
+  for (const args of [['context', 'claude', '--brief'], ['doctor']]) {
     const r = cli(args, root);
     assert.equal(r.status, 1, `${args[0]}: ${r.stdout}`);
     assert.match(r.stdout, /task_scope.*workspace-relative/, args[0]);
@@ -113,21 +113,21 @@ test('an invalid task_scope fails prompt and doctor instead of producing a promp
 
 test('a workspace without task_scope gets no scope lines in its prompt', async (t) => {
   const root = await multi(t);
-  const r = cli(['prompt', 'claude'], root);
+  const r = cli(['context', 'claude', '--brief'], root);
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.doesNotMatch(r.stdout, /Read scope:|Edit scope:/);
 });
 
 // --- 6. built-in alias pairs are equivalents ------------------------------------------------------
 
-test('agent profiles minimal and detected enable the same team; only the recorded profile label differs', async (t) => {
+test('agent profile minimal enables the default team (--agents detected, removed in 3.0.0, was the same); only the profile label differs', async (t) => {
   const yaml = async (agents) => {
     const root = await mkdtemp(join(tmpdir(), 'agentos-v1s1-prof-'));
     t.after(() => rm(root, { recursive: true, force: true }));
     await initAgentOS({ cwd: root, mode: 'new', yes: true, agents });
     return (await readFile(join(root, '.agentos/project.yaml'), 'utf8')).replace(/^name: .*$/m, 'name: x');
   };
-  assert.equal((await yaml('minimal')).replace('profile: minimal', 'profile: detected'), await yaml('detected'));
+  assert.equal((await yaml('minimal')).replace('profile: minimal', 'profile: detected'), await yaml(undefined));
 });
 
 // --- 7. docs truth: derived facts are checked against their source --------------------------------

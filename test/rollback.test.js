@@ -6,9 +6,7 @@ import { test } from 'node:test';
 import {
   initAgentOS,
   compactAgentOS,
-  runHandoffAgentOS,
   agentsAgentOS,
-  templatesAgentOS,
   skillsAgentOS,
   linkObsidianAgentOS,
   obsidianAgentOS,
@@ -59,7 +57,7 @@ test('compact rolls back handoff/tasks rewrite and archive creation when the las
   __setAtomicWriteFaultForTests(tasksPath, 'before-rename');
   t.after(__clearAtomicWriteFaultForTests);
 
-  await assert.rejects(() => compactAgentOS({ cwd: root, checkpoint: true }), /Injected atomic-write test fault/);
+  await assert.rejects(() => compactAgentOS({ cwd: root, archiveOnly: true }), /Injected atomic-write test fault/);
 
   assert.equal(await readFile(handoffPath, 'utf8'), beforeHandoff, 'handoff.md must be restored to its pre-compact bytes');
   assert.equal(await readFile(tasksPath, 'utf8'), beforeTasks, 'tasks.md must be unchanged (it was the failing write)');
@@ -210,7 +208,7 @@ test('obsidian link-workspace rolls back knowledge.md when the project.yaml patc
   assert.deepEqual(leftoverTmp, [], 'no atomic-write temp artifacts should remain in .agentos/');
 });
 
-test('templates import (skill) rolls back the imported skill file when the skills.md index write fails', async (t) => {
+test('skills add <file> (import) rolls back the imported skill file when the skills.md index write fails', async (t) => {
   const root = await tempProject();
   await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
   const source = join(root, 'safe-skill.md');
@@ -223,7 +221,7 @@ test('templates import (skill) rolls back the imported skill file when the skill
   t.after(__clearAtomicWriteFaultForTests);
 
   await assert.rejects(
-    () => templatesAgentOS({ cwd: root, command: 'import', source, type: 'skill', name: 'safe-skill', yes: true }),
+    () => skillsAgentOS({ cwd: root, add: source, name: 'safe-skill', yes: true }),
     /Injected atomic-write test fault/,
   );
 
@@ -235,7 +233,7 @@ test('templates import (skill) rolls back the imported skill file when the skill
   assert.deepEqual(leftoverTmp, [], 'no atomic-write temp artifacts should remain in .agentos/');
 });
 
-test('templates copy (agent) rolls back the copied agent file when the project.yaml registration write fails', async (t) => {
+test('agents add rolls back the new agent card when the project.yaml registration write fails', async (t) => {
   const root = await tempProject();
   await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
   const projectPath = join(root, '.agentos/project.yaml');
@@ -246,32 +244,10 @@ test('templates copy (agent) rolls back the copied agent file when the project.y
   __setAtomicWriteFaultForTests(projectPath, 'before-rename');
   t.after(__clearAtomicWriteFaultForTests);
 
-  await assert.rejects(() => templatesAgentOS({ cwd: root, command: 'copy', id: 'agent:security-reviewer' }), /Injected atomic-write test fault/);
+  await assert.rejects(() => agentsAgentOS({ cwd: root, add: 'security-reviewer' }), /Injected atomic-write test fault/);
 
   assert.equal(await readFile(projectPath, 'utf8'), beforeProject, 'project.yaml must be unchanged (it was the failing write)');
   assert.equal(await exists(agentPath), false, 'the copied agent file must not be left behind when project.yaml registration fails');
-
-  const leftoverTmp = (await readdir(join(root, '.agentos'))).filter((name) => name.includes('.agentos-tmp-'));
-  assert.deepEqual(leftoverTmp, [], 'no atomic-write temp artifacts should remain in .agentos/');
-});
-
-test('run handoff rolls back the run note and tasks.md rewrite when the final handoff.md write fails', async (t) => {
-  const root = await tempProject();
-  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
-  const handoffPath = join(root, '.agentos/handoff.md');
-  const tasksPath = join(root, '.agentos/tasks.md');
-  const beforeHandoff = await readFile(handoffPath, 'utf8');
-  const beforeTasks = await readFile(tasksPath, 'utf8');
-  const runsBefore = await exists(join(root, '.agentos/runs')) ? await readdir(join(root, '.agentos/runs')) : [];
-
-  __setAtomicWriteFaultForTests(handoffPath, 'before-rename');
-  t.after(__clearAtomicWriteFaultForTests);
-
-  await assert.rejects(() => runHandoffAgentOS({ cwd: root, engine: 'claude-code', reason: 'test-fault' }), /Injected atomic-write test fault/);
-
-  assert.equal(await readFile(handoffPath, 'utf8'), beforeHandoff, 'handoff.md must be unchanged (it was the failing write)');
-  assert.equal(await readFile(tasksPath, 'utf8'), beforeTasks, 'tasks.md must be restored to its pre-run-handoff bytes');
-  assert.deepEqual(await readdir(join(root, '.agentos/runs')), runsBefore, 'no new run handoff note should be left behind');
 
   const leftoverTmp = (await readdir(join(root, '.agentos'))).filter((name) => name.includes('.agentos-tmp-'));
   assert.deepEqual(leftoverTmp, [], 'no atomic-write temp artifacts should remain in .agentos/');
@@ -319,12 +295,11 @@ test('successful multi-file commands leave no atomic-write temp artifacts behind
   const root = await tempProject();
   await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
 
-  await compactAgentOS({ cwd: root, checkpoint: true });
-  await runHandoffAgentOS({ cwd: root, engine: 'claude-code', reason: 'manual-pause' });
+  await compactAgentOS({ cwd: root, archiveOnly: true });
   await agentsAgentOS({ cwd: root, add: 'planner' });
   await skillsAgentOS({ cwd: root, add: 'test-driven-development' });
   await skillsAgentOS({ cwd: root, remove: 'test-driven-development' });
-  await templatesAgentOS({ cwd: root, command: 'copy', id: 'agent:security-reviewer' });
+  await agentsAgentOS({ cwd: root, add: 'security-reviewer' });
   const vault = join(root, 'vault');
   await mkdir(vault, { recursive: true });
   await linkObsidianAgentOS({ cwd: root, vault, dest: 'Projects/Demo', create: true });

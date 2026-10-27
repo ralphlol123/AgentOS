@@ -64,7 +64,7 @@ test('blocked rewrite --diff keeps concise candidates and writes nothing', async
   const { parent, root } = await fixture(t, { handoff, tasks });
   const before = await snapshotTree(parent);
 
-  const preview = cli(root, ['compact', '--rewrite', '--dry-run', '--diff']);
+  const preview = cli(root, ['compact', '--dry-run', '--diff']);
 
   assert.equal(preview.status, 1, preview.stdout + preview.stderr);
   assert.match(preview.stdout, /2 current-objective headings/);
@@ -81,11 +81,11 @@ test('blocked rewrite --diff keeps concise candidates and writes nothing', async
 
 test('rewrite --diff reports unchanged proposals without empty patch headers or writes', async (t) => {
   const { parent, root } = await fixture(t, { handoff: rewriteHandoff(100), tasks: rewriteTasks(100) });
-  const apply = cli(root, ['compact', '--rewrite']);
+  const apply = cli(root, ['compact']);
   assert.equal(apply.status, 0, apply.stdout + apply.stderr);
   const before = await snapshotTree(parent);
 
-  const preview = cli(root, ['compact', '--rewrite', '--dry-run', '--diff']);
+  const preview = cli(root, ['compact', '--dry-run', '--diff']);
 
   assert.equal(preview.status, 0, preview.stdout + preview.stderr);
   assert.match(preview.stdout, /No differences: proposed live files are unchanged\./);
@@ -98,7 +98,7 @@ test('rewrite --diff shows the intended removals and additions without writing',
   const { parent, root } = await fixture(t, { handoff: rewriteHandoff(2), tasks: rewriteTasks(2) });
   const before = await snapshotTree(parent);
 
-  const preview = cli(root, ['compact', '--rewrite', '--dry-run', '--diff']);
+  const preview = cli(root, ['compact', '--dry-run', '--diff']);
 
   assert.equal(preview.status, 0, preview.stdout + preview.stderr);
   assert.match(preview.stdout, /^--- a\/\.agentos\/handoff\.md$/m);
@@ -167,8 +167,8 @@ test('checkpoint dry-run is concise and independent of live body size', async (t
   const beforeSmall = await snapshotTree(small.parent);
   const beforeLarge = await snapshotTree(large.parent);
 
-  const smallPreview = cli(small.root, ['compact', '--checkpoint', '--dry-run']);
-  const largePreview = cli(large.root, ['compact', '--checkpoint', '--dry-run']);
+  const smallPreview = cli(small.root, ['compact', '--archive-only', '--dry-run']);
+  const largePreview = cli(large.root, ['compact', '--archive-only', '--dry-run']);
 
   for (const preview of [smallPreview, largePreview]) {
     assert.equal(preview.status, 0, preview.stdout + preview.stderr);
@@ -193,8 +193,8 @@ test('rewrite dry-run is concise and independent of live body size', async (t) =
   const beforeSmall = await snapshotTree(small.parent);
   const beforeLarge = await snapshotTree(large.parent);
 
-  const smallPreview = cli(small.root, ['compact', '--rewrite', '--dry-run']);
-  const largePreview = cli(large.root, ['compact', '--rewrite', '--dry-run']);
+  const smallPreview = cli(small.root, ['compact', '--dry-run']);
+  const largePreview = cli(large.root, ['compact', '--dry-run']);
 
   for (const preview of [smallPreview, largePreview]) {
     assert.equal(preview.status, 0, preview.stdout + preview.stderr);

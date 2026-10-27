@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile, mkdir, readdir } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { initAgentOS, skillsAgentOS, templatesAgentOS, agentsAgentOS, doctorAgentOS } from '../dist/core.js';
+import { initAgentOS, skillsAgentOS, agentsAgentOS, doctorAgentOS } from '../dist/core.js';
 
 async function workspace(t, agents = 'minimal') {
   const root = await mkdtemp(join(tmpdir(), 'agentos-aliases-'));
@@ -36,12 +36,6 @@ Mandate: Verify changed behavior with real commands and browser checks when UI i
 ## Skills
 
 Use .agentos/skills.md as an on-demand index. Load only skills relevant to this role and task.
-`;
-
-const MVP_CODE_REVIEWER_CARD = `# Code Reviewer
-
-Mandate: Review diffs for correctness, security, scope, and project consistency.
-Rules: read project/handoff/tasks first; work only in declared scope; update handoff before stopping; escalate destructive/prod/credential/cross-scope actions.
 `;
 
 test('init --agents resolves retired agent IDs and friendly shorthands without dropping roles', async t => {
@@ -106,14 +100,14 @@ test('skills add dedupes multiple retired IDs that merge to one canonical skill'
   assert.deepEqual(entries, ['frontend-design']);
 });
 
-test('templates copy resolves retired skill and agent IDs with a notice', async t => {
+test('skills add / agents add resolve retired skill and agent IDs with a notice', async t => {
   const root = await workspace(t);
-  const skill = await templatesAgentOS({ cwd: root, command: 'copy', id: 'systematic-debugging' });
+  const skill = await skillsAgentOS({ cwd: root, add: 'systematic-debugging' });
   assert.equal(skill.ok, true);
   assert.match(skill.text, /Deprecated skill 'systematic-debugging' -> 'debugging'/);
   assert.equal(await exists(join(root, '.agentos/skills/core/debugging/SKILL.md')), true);
 
-  const agent = await templatesAgentOS({ cwd: root, command: 'copy', id: 'qa' });
+  const agent = await agentsAgentOS({ cwd: root, add: 'qa' });
   assert.equal(agent.ok, true);
   assert.match(agent.text, /Deprecated agent alias 'qa' -> 'tester'/);
   assert.equal(await exists(join(root, '.agentos/agents/tester.md')), true);
@@ -141,14 +135,10 @@ test('doctor detects legacy agent cards, retired enabled/capabilities, and stale
   assert.match(doctor.text, /\.agentos\/skills\.md still lists retired skill 'systematic-debugging' -> 'debugging'/);
 });
 
-test('doctor --fix migrates clearly-generated retired cards and remaps project.yaml, preserving customized cards and native copies', async t => {
+test('doctor --fix remaps retired IDs in project.yaml but leaves retired cards for manual review (card migration removed in 3.0.0)', async t => {
   const root = await workspace(t);
-  // Clearly-generated retired cards (historical shapes).
   await writeFile(join(root, '.agentos/agents/qa.md'), PHASE1_QA_CARD);
-  await writeFile(join(root, '.agentos/agents/code-reviewer.md'), MVP_CODE_REVIEWER_CARD);
-  // A customized retired card that must be preserved.
   await writeFile(join(root, '.agentos/agents/frontend-engineer.md'), '# Custom Frontend Engineer\n\nOwner-specific instructions.\n');
-  // A native engine copy that must be preserved.
   await mkdir(join(root, '.claude/agents'), { recursive: true });
   await writeFile(join(root, '.claude/agents/qa.md'), 'Native engine qa content.\n');
 
@@ -159,39 +149,25 @@ test('doctor --fix migrates clearly-generated retired cards and remaps project.y
   projectYaml = projectYaml.replace(/capabilities:\n((?:    .+\n)+)/, (m, list) => `capabilities:\n    implementation: implementation\n    qa: qa\n    review: code-reviewer\n    release: release-manager\n`);
   await writeFile(projectPath, projectYaml);
 
-  const beforeFix = await doctorAgentOS({ cwd: root });
-  assert.match(beforeFix.text, /retired agent/);
-
   const fixed = await doctorAgentOS({ cwd: root, fix: true });
 
-  // Clearly-generated retired cards were migrated to canonical cards.
-  assert.equal(await exists(join(root, '.agentos/agents/qa.md')), false);
-  assert.equal(await exists(join(root, '.agentos/agents/tester.md')), true);
-  assert.equal(await exists(join(root, '.agentos/agents/code-reviewer.md')), false);
-  assert.equal(await exists(join(root, '.agentos/agents/reviewer.md')), true);
-
-  // Customized retired card and native engine copy are untouched.
+  // Retired cards and the native engine copy are untouched; the canonical cards exist.
+  assert.equal(await readFile(join(root, '.agentos/agents/qa.md'), 'utf8'), PHASE1_QA_CARD);
   assert.equal(await readFile(join(root, '.agentos/agents/frontend-engineer.md'), 'utf8'), '# Custom Frontend Engineer\n\nOwner-specific instructions.\n');
   assert.equal(await readFile(join(root, '.claude/agents/qa.md'), 'utf8'), 'Native engine qa content.\n');
+  assert.equal(await exists(join(root, '.agentos/agents/tester.md')), true);
+  assert.equal(await exists(join(root, '.agentos/agents/reviewer.md')), true);
 
-  // project.yaml enabled/capabilities remapped to canonical IDs.
+  // Retired IDs in project.yaml still resolve to the canonical IDs (alias resolution is kept).
   const updated = await readFile(projectPath, 'utf8');
   assert.doesNotMatch(updated, /- implementation/);
   assert.doesNotMatch(updated, /- qa\b/);
-  assert.doesNotMatch(updated, /- code-reviewer/);
   assert.match(updated, /- developer/);
   assert.match(updated, /- tester/);
   assert.match(updated, /- reviewer/);
-  assert.match(updated, /implementation: developer/);
   assert.match(updated, /qa: tester/);
-  assert.match(updated, /review: reviewer/);
 
-  // The customized retired card is still surfaced as a warning for manual review.
+  // Each retired card is a warning naming the manual step and the 2.x command.
+  assert.match(fixed.text, /\.agentos\/agents\/qa\.md is a retired agent card -> 'tester'; replace it with `agentos agents add tester` and delete this card, or run `npx agentos-for-projects@2 doctor --fix` once/);
   assert.match(fixed.text, /\.agentos\/agents\/frontend-engineer\.md is a retired agent card -> 'developer'/);
-
-  // A second fix is idempotent (the customized card remains the only legacy item).
-  const again = await doctorAgentOS({ cwd: root, fix: true });
-  assert.equal(await exists(join(root, '.agentos/agents/frontend-engineer.md')), true);
-  assert.equal(await readFile(join(root, '.claude/agents/qa.md'), 'utf8'), 'Native engine qa content.\n');
-  assert.match(again.text, /retired agent card/);
 });

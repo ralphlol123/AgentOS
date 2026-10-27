@@ -471,7 +471,7 @@ test('init preflights every root/child adapter before its first filesystem mutat
 
 // --- Finding 3: strict exact-shape legacy recognition ----------------------
 
-test('one heading plus a known legacy phrase plus appended custom prose is never migrated silently: it is adopted only with the explicit opt-in (whole-file shape)', async () => {
+test('one heading plus a known legacy phrase plus appended custom prose is never migrated silently: doctor --fix refuses it (adoption removed in 3.0.0; whole-file shape)', async () => {
   const root = await tempProject();
   await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
   const withCustomTail = '# AGENTS.md\n\nAgentOS for Projects bootloader.\n\nWorkspace: single-repo\nRepos: none\n\nRead first: `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`.\n\nP.S. our team added this paragraph below the AgentOS section and it must never be discarded.\n';
@@ -488,13 +488,8 @@ test('one heading plus a known legacy phrase plus appended custom prose is never
   assert.equal(await readFile(join(root, 'AGENTS.md'), 'utf8'), withCustomTail, 'without the opt-in the file must be byte-identical');
   assert.equal(await exists(join(root, 'AGENTS.md.agentos.bak')), false, 'an un-opted-in file must not be backed up or converted');
 
-  // With the opt-in, only the legacy span is replaced and the appended prose survives verbatim.
-  const adopted = await doctorAgentOS({ cwd: root, fix: true, adoptCustomAdapters: true });
-  assert.equal(adopted.ok, true, adopted.text);
-  const migrated = await readFile(join(root, 'AGENTS.md'), 'utf8');
-  assert.ok(migrated.endsWith('P.S. our team added this paragraph below the AgentOS section and it must never be discarded.\n'), 'appended custom prose must survive adoption byte-for-byte');
-  assert.doesNotMatch(migrated, /Repos: none/, 'the stale legacy body is the only thing replaced');
-  assert.equal(await readFile(join(root, 'AGENTS.md.agentos.bak'), 'utf8'), withCustomTail, 'the backup holds the pre-adoption bytes');
+  // Adoption was removed in 3.0.0: the refusal names the 2.x command that still adopts it.
+  assert.ok(fixed.problems.some((problem) => /npx agentos-for-projects@2 doctor --fix --adopt-custom-adapters/.test(problem)), fixed.text);
 });
 
 test('one heading plus a known legacy phrase plus appended custom prose is a conflict after the old "---" separator too', async () => {

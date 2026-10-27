@@ -80,7 +80,7 @@ test('autonomous: an allowed actor applies replace and append to every record ki
   for (const id of ['brain:architecture', 'brain:conventions', 'brain:decisions', 'brain:glossary', 'brain:feature']) {
     const before = await read(fx.root, PATHS[id]);
     const proposal = await stage(fx, id, `# ${id} replaced\n\nFacts about ${id} from src/value.js.\n`);
-    for (const command of ['preview', 'validate']) { const res = json(fx.root, 'brain', command, proposal, '--auto', '--by', 'claude-code'); ok(res.r); assert.equal(res.data.approval.eligible, true); assert.equal(res.data.approval.mode, 'autonomous'); }
+    for (const command of ['preview']) { const res = json(fx.root, 'brain', command, proposal, '--auto', '--by', 'claude-code'); ok(res.r); assert.equal(res.data.approval.eligible, true); assert.equal(res.data.approval.mode, 'autonomous'); }
     const dry = json(fx.root, 'brain', 'apply', proposal, '--auto', '--by', 'claude-code', '--dry-run'); ok(dry.r);
     assert.equal(await read(fx.root, PATHS[id]), before, 'dry run writes nothing');
     const applied = applyAuto(fx.root, proposal);

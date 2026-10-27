@@ -3,7 +3,7 @@
  * `.agentos/agents/<id>.md` stays the readable instruction card. Its YAML frontmatter, when present, is the
  * validated manifest (same pattern as Brain records: one file, the frontmatter is authoritative). A card without
  * frontmatter is `legacy`: it keeps working exactly as before; only `doctor --fix` rewrites one, and only when its
- * bytes match the catalog card (the same rule as `agents manifest <id> --from-catalog`).
+ * bytes match the catalog card.
  *
  * `source_hash` = sha256 of the body (every byte after the frontmatter). A manifest card whose body no longer
  * hashes to it was edited after install (`modified`); `custom: true` marks a card the owner owns. Neither is ever
@@ -259,20 +259,12 @@ export async function removeAgent(ctx: AgentsCtx, rawId: string | undefined, opt
 }
 
 /** Add a manifest to a legacy card. Provenance is never inferred for a card that does not byte-match its source. */
-export async function manifestAgent(ctx: AgentsCtx, rawId: string | undefined, options: { fromCatalog?: boolean; custom?: boolean; dryRun?: boolean; json?: boolean }) {
-  const id = requireId(rawId, 'Usage: agentos agents manifest <id> --from-catalog|--custom [--dry-run]');
-  if (Boolean(options.fromCatalog) === Boolean(options.custom)) throw new Error('agentos agents manifest needs exactly one of --from-catalog or --custom.');
+export async function manifestAgent(ctx: AgentsCtx, rawId: string | undefined, options: { custom?: boolean; dryRun?: boolean; json?: boolean }) {
+  const id = requireId(rawId, 'Usage: agentos agents manifest <id> --custom [--dry-run]');
+  if (!options.custom) throw new Error('agentos agents manifest needs --custom (a card that matches the catalog gets its manifest from `agentos doctor --fix`).');
   const { text, card } = await loadCard(ctx, id);
   if (card.state !== 'legacy') return out(options.json, card.state === 'manifest', { id, state: card.state, changed: false }, [`AgentOS agents manifest`, card.state === 'manifest' ? `${card.path} already has a manifest; nothing to do.` : `${card.path} has an invalid manifest; fix it by hand:`, ...card.problems.map((p) => `- ${p}`)]);
-  let manifest: AgentManifest;
-  if (options.fromCatalog) {
-    const source = ctx.catalog[id];
-    if (!source) return out(options.json, false, { id, changed: false }, [`AgentOS agents manifest: REFUSED`, `${id} is not a catalog agent. Use \`agentos agents manifest ${id} --custom\`.`, 'Nothing was written.']);
-    if (source.content !== text) return out(options.json, false, { id, changed: false }, [`AgentOS agents manifest: REFUSED`, `${card.path} differs from catalog:${id}, so its provenance cannot be inferred.`, `Mark it as yours with \`agentos agents manifest ${id} --custom\` (provenance: unknown), or replace it with \`agentos agents add ${id} --replace\`.`, 'Nothing was written.']);
-    manifest = catalogManifest(id, text);
-  } else {
-    manifest = manifestFor(id, text, 'unknown', { custom: true });
-  }
+  const manifest = manifestFor(id, text, 'unknown', { custom: true });
   const content = renderCard(manifest, text);
   if (!options.dryRun) await withMutationTransaction(async () => { await writeFileAtomic(join(ctx.root, card.path), content); });
   return out(options.json, true, { id, changed: true, dryRun: Boolean(options.dryRun), manifest }, [`AgentOS agents manifest${options.dryRun ? ' dry run' : ''}`, `${options.dryRun ? 'Would add' : 'Added'} manifest frontmatter to ${card.path} (body byte-identical)`, ...stringifyYaml(manifest, { lineWidth: 0 }).trimEnd().split('\n').map((line) => `  ${line}`)]);
@@ -281,7 +273,7 @@ export async function manifestAgent(ctx: AgentsCtx, rawId: string | undefined, o
 const catalogManifest = (id: string, text: string) => manifestFor(id, text, provenanceFor(`catalog:${id}`, text), { catalog: true });
 
 /** `doctor --fix`: add the catalog manifest to every legacy card that byte-matches its catalog source (the
- *  `agents manifest <id> --from-catalog` rule; anything else is left alone). Runs inside doctor's transaction. */
+ *  rule `agents manifest --from-catalog` had before 3.0.0; anything else is left alone). Runs inside doctor's transaction. */
 export async function upgradeLegacyCatalogCards(root: string, catalog: Record<string, { content: string }>) {
   const notes: string[] = [];
   const files = (await readdir(join(root, '.agentos/agents')).catch(() => [] as string[])).filter((name) => name.endsWith('.md')).sort();

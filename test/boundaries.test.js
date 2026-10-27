@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, readFile, writeFile, readdir, lstat, symlink, rm, readlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { initAgentOS, brainAgentOS, checkpointAgentOS, doctorAgentOS, linkObsidianAgentOS, obsidianAgentOS, skillsAgentOS, templatesAgentOS, compactAgentOS, agentsAgentOS, migrateClaudeAgentOS, normalizeRepoIdsAgentOS } from '../dist/core.js';
+import { initAgentOS, brainAgentOS, checkpointAgentOS, doctorAgentOS, linkObsidianAgentOS, obsidianAgentOS, skillsAgentOS, compactAgentOS, agentsAgentOS } from '../dist/core.js';
 
 async function snapshot(dir) {
   const result = {};
@@ -40,11 +40,10 @@ test('boundary: symlinked managed targets fail before writes or deletions', asyn
     ['.agentos/skills', root => skillsAgentOS({ cwd: root, add: 'core-pack' })],
     ['.agentos/agents', root => agentsAgentOS({ cwd: root, add: 'planner' })],
     ['.agentos/runs', root => agentsAgentOS({ cwd: root, command: 'remove', id: 'reviewer' })],
-    ['.agentos/agents', root => agentsAgentOS({ cwd: root, command: 'manifest', id: 'developer', fromCatalog: true })],
-    ['.agentos/skills.md', root => templatesAgentOS({ cwd: root, command: 'copy', id: 'skill:core/debugging', replace: true })],
-    ['.agentos/runs', root => compactAgentOS({ cwd: root, checkpoint: true })],
-    ['.agentos/runs', root => compactAgentOS({ cwd: root, rewrite: true })],
-    ['.agentos/repos', root => normalizeRepoIdsAgentOS({ cwd: root })],
+    ['.agentos/agents', root => agentsAgentOS({ cwd: root, command: 'manifest', id: 'developer', custom: true })],
+    ['.agentos/skills.md', root => skillsAgentOS({ cwd: root, add: 'debugging', replace: true })],
+    ['.agentos/runs', root => compactAgentOS({ cwd: root, archiveOnly: true })],
+    ['.agentos/runs', root => compactAgentOS({ cwd: root })],
     ['.agentos/checkpoints', root => checkpointAgentOS({ cwd: root, task: 'boundary', progress: 'p' })],
     ['.agentos/brain', root => brainAgentOS({ cwd: root, subcommand: 'init' })],
     ['.agentos/brain', root => brainAgentOS({ cwd: root, subcommand: 'register', args: ['.agentos/decisions.md'] })],
@@ -77,16 +76,11 @@ test('boundary: Obsidian rejects raw escapes and symlink destinations without pa
   }
 });
 
-test('boundary: init and migration reject symlink targets before creating files', async t => {
-  for (const mode of ['init', 'migrate']) {
-    const { base, root, outside } = await fixture(t);
-    const target = mode === 'init' ? '.agentos' : '.claude';
-    await rm(join(root, target), { recursive: true, force: true });
-    await symlink(outside, join(root, target));
-    await rejectedWithoutChanges(base, () => mode === 'init'
-      ? initAgentOS({ cwd: root, mode: 'new', yes: true })
-      : migrateClaudeAgentOS({ cwd: root, preserve: true }));
-  }
+test('boundary: init rejects symlink targets before creating files', async t => {
+  const { base, root, outside } = await fixture(t);
+  await rm(join(root, '.agentos'), { recursive: true, force: true });
+  await symlink(outside, join(root, '.agentos'));
+  await rejectedWithoutChanges(base, () => initAgentOS({ cwd: root, mode: 'new', yes: true }));
 });
 
 test('boundary: dangling links, nested repository links, and backup links are rejected', async t => {
@@ -109,7 +103,7 @@ test('boundary: imports and skill removal reject linked storage with no changes'
     await rm(join(root, target), { recursive: true, force: true });
     await symlink(outside, join(root, target));
     await rejectedWithoutChanges(base, () => mode === 'import'
-      ? templatesAgentOS({ cwd: root, command: 'import', source, type: 'skill', name: 'example', yes: true })
+      ? skillsAgentOS({ cwd: root, add: source, name: 'example', yes: true })
       : skillsAgentOS({ cwd: root, remove: 'debugging' }));
   }
 });
@@ -141,15 +135,6 @@ test('boundary: quoted absolute Obsidian tokens are rejected rather than repaire
   const { base, root } = await fixture(t);
   const vault = join(base, 'vault'); await mkdir(vault);
   await rejectedWithoutChanges(base, () => obsidianAgentOS({ cwd: root, command: 'link-workspace', vault, dest: '"/absolute"', create: true }));
-});
-
-test('boundary: migration preserves unrelated native skill links', async t => {
-  const { root, outside } = await fixture(t);
-  await mkdir(join(root, '.claude/skills'), { recursive: true });
-  await symlink(outside, join(root, '.claude/skills/example'));
-  const result = await migrateClaudeAgentOS({ cwd: root, preserve: true });
-  assert.equal(result.ok, true);
-  assert.equal(await readlink(join(root, '.claude/skills/example')), outside);
 });
 
 test('boundary: doctor rejects escaping repository paths before any repair', async t => {

@@ -11,7 +11,7 @@ import { initAgentOS, doctorAgentOS, adaptersAgentOS } from '../dist/core.js';
 // `doctor` (and `doctor --json`) must report what a workspace needs to migrate
 // — custom-content adapters, unsafe repository IDs, retired agent/skill cards —
 // without writing anything, so an owner can see the whole upgrade surface
-// before approving a fix. `agentos adapters explain <file>` gives the same
+// before approving a fix. `agentos doctor --explain <file>` gives the same
 // classification for exactly one adapter path.
 //
 // Every test here is read-only by construction: the read-only test snapshots
@@ -158,7 +158,7 @@ test('doctor --json reports a normalizable repo ID as a fixable problem and keep
   assert.equal(collision.migration.adapters.length, 0, 'an invalid config still skips adapter diagnostics');
 });
 
-test('doctor --json classifies retired cards by eligibility and ignores live cards', async t => {
+test('doctor --json lists retired cards for manual review and ignores live cards', async t => {
   const root = await workspace(t);
   await writeFile(join(root, '.agentos/agents/qa.md'), PHASE1_QA_CARD);
   await writeFile(join(root, '.agentos/agents/implementation.md'), '# Implementation\n\nHand-written card: keep my wording.\n');
@@ -172,9 +172,11 @@ test('doctor --json classifies retired cards by eligibility and ignores live car
   const byId = new Map(cards.map((card) => [`${card.kind}:${card.id}`, card]));
 
   assert.equal(byId.get('agent:qa').canonical, 'tester');
-  assert.equal(byId.get('agent:qa').eligibility, 'already-canonical', 'tester.md is installed, so the stale qa card is redundant');
+  assert.equal(byId.get('agent:qa').eligibility, 'manual-review', '3.0.0 no longer migrates retired cards');
+  assert.equal(byId.get('agent:qa').canonicalInstalled, true, 'tester.md is installed');
+  assert.match(byId.get('agent:qa').next, /npx agentos-for-projects@2 doctor --fix/);
   assert.equal(byId.get('agent:implementation').canonical, 'developer');
-  assert.equal(byId.get('agent:implementation').eligibility, 'customized', 'hand-written cards must never be prunable');
+  assert.equal(byId.get('agent:implementation').eligibility, 'manual-review');
   assert.equal(byId.get('skill:systematic-debugging').canonical, 'debugging');
   assert.equal(byId.get('skill:systematic-debugging').eligibility, 'manual-review');
   assert.equal(byId.get('skill:grounded-codebase-docs').eligibility, 'index-only');
@@ -184,7 +186,7 @@ test('doctor --json classifies retired cards by eligibility and ignores live car
   assert.equal(byId.has('agent:tester'), false);
 });
 
-test('the migration inventory and adapters explain are strictly read-only', async t => {
+test('the migration inventory and doctor --explain are strictly read-only', async t => {
   const root = await workspace(t);
   await writeFile(join(root, 'AGENTS.md'), INTERLEAVED_ADAPTER);
   await writeFile(join(root, '.agentos/agents/qa.md'), PHASE1_QA_CARD);
@@ -201,7 +203,7 @@ test('the migration inventory and adapters explain are strictly read-only', asyn
   assert.equal(await exists(join(root, 'AGENTS.md.agentos.bak')), false, 'no backup may be written by a read-only command');
 });
 
-test('agentos adapters explain classifies one adapter file without writing', async t => {
+test('agentos doctor --explain classifies one adapter file without writing', async t => {
   const root = await workspace(t);
 
   const clean = await adaptersAgentOS({ cwd: root, explain: 'AGENTS.md' });
@@ -225,7 +227,7 @@ test('agentos adapters explain classifies one adapter file without writing', asy
   assert.match(escaping.text, /inside the workspace root/i);
 });
 
-test('adapters explain reports structural detail for a workspace whose project.yaml is invalid', async t => {
+test('doctor --explain reports structural detail for a workspace whose project.yaml is invalid', async t => {
   const root = await workspace(t);
   await writeFile(join(root, 'AGENTS.md'), INTERLEAVED_ADAPTER);
   const projectPath = join(root, '.agentos/project.yaml');
@@ -259,16 +261,16 @@ test('migration inventory adapter entries cover child repo pointers', async t =>
 
 // --- review follow-ups (MF-1 and the fallback-classification findings) ------
 
-test('adapters explain usage text does not advertise an unsupported flag', async t => {
+test('doctor --explain usage text does not advertise an unsupported flag', async t => {
   const root = await workspace(t);
   const usage = await adaptersAgentOS({ cwd: root });
 
   assert.equal(usage.ok, false);
-  assert.equal(usage.text, 'Usage: agentos adapters explain <file>');
+  assert.equal(usage.text, 'Usage: agentos doctor --explain <file>');
   assert.doesNotMatch(usage.text, /--json/, 'the CLI allowlist rejects --json for this command');
 });
 
-test('adapters explain classifies an empty adapter as create, not migrate', async t => {
+test('doctor --explain classifies an empty adapter as create, not migrate', async t => {
   const root = await workspace(t);
   await writeFile(join(root, 'AGENTS.md'), '');
   // An invalid config forces the structural fallback, where an empty file must
@@ -281,7 +283,7 @@ test('adapters explain classifies an empty adapter as create, not migrate', asyn
   assert.doesNotMatch(explained.text, /Classification: migrate/);
 });
 
-test('adapters explain rejects a directory argument instead of claiming it is missing', async t => {
+test('doctor --explain rejects a directory argument instead of claiming it is missing', async t => {
   const root = await workspace(t);
   // Invalid config skips adapter-target lookup, so the path reaches the
   // filesystem checks directly (the reviewer's original repro).

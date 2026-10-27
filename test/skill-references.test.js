@@ -5,14 +5,13 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { initAgentOS, skillsAgentOS, templatesAgentOS, __setAtomicWriteFaultForTests, __clearAtomicWriteFaultForTests } from '../dist/core.js';
+import { initAgentOS, skillsAgentOS, __setAtomicWriteFaultForTests, __clearAtomicWriteFaultForTests } from '../dist/core.js';
 import { withWorkspaceWriter } from '../dist/workspace-lock.js';
 
 const dir = '.agentos/skills/core/code-review';
 const ref = `${dir}/references/security-review.md`;
-const install = (root, via, options = {}) => via === 'add'
-  ? skillsAgentOS({ cwd: root, add: 'debugging,code-review', ...options })
-  : templatesAgentOS({ cwd: root, command: 'copy', id: 'skill:core/code-review', ...options });
+// `via` names the install path; `templates copy` (the second path) was removed in 3.0.0.
+const install = (root, via, options = {}) => skillsAgentOS({ cwd: root, add: 'debugging,code-review', ...options });
 async function fixture(t) {
   const parent = await mkdtemp(join(tmpdir(), 'agentos-refs-'));
   t.after(() => rm(parent, { recursive: true, force: true }));
@@ -46,7 +45,7 @@ test('installed inventory does not call missing or customized references source-
   assert.equal(await state(), 'custom-or-imported');
 });
 
-for (const via of ['add', 'copy']) {
+for (const via of ['add']) {
   test(`${via}: preview includes references and writes nothing`, async t => {
     const { parent, root } = await fixture(t);
     const before = await snapshot(parent);
@@ -110,7 +109,7 @@ for (const via of ['add', 'copy']) {
     const { root } = await fixture(t);
     await withWorkspaceWriter(root, async () => {
       const before = await snapshot(root);
-      const args = via === 'add' ? ['skills', 'add', 'code-review'] : ['templates', 'copy', 'skill:core/code-review'];
+      const args = ['skills', 'add', 'code-review'];
       const result = spawnSync(process.execPath, [fileURLToPath(new URL('../dist/cli.js', import.meta.url)), ...args], { cwd: root, encoding: 'utf8' });
       assert.ifError(result.error);
       assert.equal(result.status, 1);

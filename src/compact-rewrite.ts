@@ -1,4 +1,4 @@
-/** Pure planner for `agentos compact --rewrite`.
+/** Pure planner for `agentos compact`.
  *
  * Compaction must not treat "archived" as "safe to forget". This module
  * classifies live state into three decisions — `live`, `preserved`, `archived`
@@ -909,8 +909,8 @@ export function planCompactRewrite(input: CompactRewriteInput): CompactRewritePl
   const archiveRelPath = input.archiveRelPath ?? '';
   const blocked: string[] = [];
 
-  if (hasUnclosedFence(handoffText)) blocked.push('.agentos/handoff.md has an unclosed Markdown fence; --rewrite cannot classify sections reliably. Repair the fence first.');
-  if (hasUnclosedFence(tasksText)) blocked.push('.agentos/tasks.md has an unclosed Markdown fence; --rewrite cannot classify sections reliably. Repair the fence first.');
+  if (hasUnclosedFence(handoffText)) blocked.push('.agentos/handoff.md has an unclosed Markdown fence; compact cannot classify sections reliably. Repair the fence first.');
+  if (hasUnclosedFence(tasksText)) blocked.push('.agentos/tasks.md has an unclosed Markdown fence; compact cannot classify sections reliably. Repair the fence first.');
   if (!handoffText.trim()) blocked.push('.agentos/handoff.md is empty; there is no live context to rewrite.');
   if (!tasksText.trim()) blocked.push('.agentos/tasks.md is empty; there is no live task state to rewrite.');
 

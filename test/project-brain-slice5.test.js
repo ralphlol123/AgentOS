@@ -95,7 +95,7 @@ test('A18: the checkpoint output and the generated loop ask for the knowledge re
   ok(preview);
   assert.match(preview.stdout, new RegExp(`Checkpoint: ${current.id} \\(task ${TASK}\\)`));
   assert.match(preview.stdout, /Evidence: changed: src\/db\.js/);
-  ok(cli(['brain', 'validate', out.path], root));
+  ok(cli(['brain', 'preview', out.path], root));
 });
 
 // --- A19: no-op, progress-only and repeated events ----------------------------------------------------

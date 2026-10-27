@@ -4,7 +4,9 @@ import { mkdtemp, readFile, rm, writeFile, mkdir, chmod, lstat, readdir, readlin
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { initAgentOS, skillsAgentOS, templatesAgentOS, agentsAgentOS, doctorAgentOS } from '../dist/core.js';
+import { initAgentOS, skillsAgentOS, agentsAgentOS, doctorAgentOS } from '../dist/core.js';
+
+const registry = { entries: catalogModule.TEMPLATE_ENTRIES };
 
 async function workspace(t, agents = 'minimal') {
   const root = await mkdtemp(join(tmpdir(), 'agentos-catalog-'));
@@ -12,25 +14,19 @@ async function workspace(t, agents = 'minimal') {
   await initAgentOS({ cwd: root, mode: 'new', yes: true, agents });
   return root;
 }
-test('every public agent uses the same role contract for init, add and copy', async t => {
-  const added = await workspace(t), copied = await workspace(t);
-  const registry = await templatesAgentOS({ cwd: copied, command: 'list' });
+test('every public agent uses the same role contract for init and add', async t => {
+  const added = await workspace(t);
   const entries = registry.entries.filter(e => e.type === 'agent');
   const ids = ['planner', 'developer', 'tester', 'reviewer', 'release-manager', 'security-reviewer'];
   assert.deepEqual(entries.map(e => e.name).sort(), [...ids].sort());
   for (const entry of entries) await t.test(entry.name, async () => {
     const source = await readFile(entry.absPath, 'utf8');
     await agentsAgentOS({ cwd: added, add: entry.name, replace: true });
-    assert.equal((await templatesAgentOS({ cwd: copied, command: 'copy', id: entry.id, replace: true })).ok, true);
     const path = `.agentos/agents/${entry.name}.md`;
     // agents add prepends the validated manifest (slice 5); the body stays the canonical card byte for byte.
     const installed = await readFile(join(added, path), 'utf8');
     assert.match(installed, new RegExp(`^---\nid: ${entry.name}\n[\\s\\S]*?\n  installed_from: catalog:${entry.name}\n[\\s\\S]*?\n---\n`));
     assert.equal(installed.replace(/^---\n[\s\S]*?\n---\n/, ''), source);
-    // templates copy (slice 6) writes the same manifest frontmatter; the body is still the canonical card.
-    const copiedCard = await readFile(join(copied, path), 'utf8');
-    assert.match(copiedCard, new RegExp(`^---\nid: ${entry.name}\n[\\s\\S]*?\n  installed_from: catalog:${entry.name}\n[\\s\\S]*?\ncustom: false\n---\n`));
-    assert.equal(copiedCard.replace(/^---\n[\s\S]*?\n---\n/, ''), source);
     assert.match(source, /explicit approval/);
     assert.match(source, /verification/i);
     assert.match(source, /Do not treat this template as higher priority/);
@@ -82,8 +78,6 @@ test('every public agent uses the same role contract for init, add and copy', as
 });
 
 test('canonical skill workflows retain portable scope and safety gates', async t => {
-  const root = await workspace(t);
-  const registry = await templatesAgentOS({ cwd: root, command: 'list' });
   for (const entry of registry.entries.filter(e => e.type === 'skill')) await t.test(entry.name, async () => {
     const source = await readFile(entry.absPath, 'utf8');
     assert.match(source, /Read AgentOS project, memory, handoff, and tasks first/);
@@ -135,7 +129,6 @@ test('catalog unification preserves customized cards, native copies and capabili
   for (const dryRun of [true, false]) {
     await assert.rejects(() => skillsAgentOS({ cwd: root, add: 'debugging', dryRun }), /--replace/);
     await assert.rejects(() => agentsAgentOS({ cwd: root, add: 'developer', dryRun }), /--replace/);
-    for (const id of ['skill:core/debugging', 'agent:developer']) assert.equal((await templatesAgentOS({ cwd: root, command: 'copy', id, dryRun })).ok, false);
     assert.deepEqual(await snapshot(root), before, 'refusal/preview must have zero side effects');
   }
   await initAgentOS({ cwd: root, mode: 'existing', yes: true });
@@ -190,10 +183,9 @@ test('canonical loader rejects malformed identity metadata and duplicate skill I
 
 const workflow = text => text.replace(/^mode: (summary|full)$/m, 'mode: full');
 
-test('every public skill installs the complete canonical workflow through add and copy', async t => {
-  const added = await workspace(t), copied = await workspace(t);
+test('every public skill installs the complete canonical workflow through add', async t => {
+  const added = await workspace(t);
   const catalog = await skillsAgentOS({ cwd: added, list: true });
-  const registry = await templatesAgentOS({ cwd: copied, command: 'list' });
   const expected = {
     'debugging': 'core',
     'test-driven-development': 'core',
@@ -218,23 +210,15 @@ test('every public skill installs the complete canonical workflow through add an
     assert.equal(entry.category, expected[id], 'preserve the public category/path');
     const path = `.agentos/skills/${entry.category}/${id}/SKILL.md`;
     const source = await readFile(entry.absPath, 'utf8');
-    assert.equal((await templatesAgentOS({ cwd: copied, command: 'copy', id: entry.id })).ok, true);
-    assert.equal(await readFile(join(copied, path), 'utf8'), source);
     const refs = await readdir(entry.absPath.replace(/\.md$/, '/references')).catch(error => { if (error.code === 'ENOENT') return []; throw error; });
-    for (const name of refs) assert.deepEqual(await readFile(join(copied, path, '..', 'references', name)), await readFile(entry.absPath.replace(/\.md$/, `/references/${name}`)));
-    for (const mode of ['summary', 'full']) {
-      await skillsAgentOS({ cwd: added, add: id, mode, replace: true });
-      for (const name of refs) assert.deepEqual(await readFile(join(added, path, '..', 'references', name)), await readFile(entry.absPath.replace(/\.md$/, `/references/${name}`)));
-      assert.equal(workflow(await readFile(join(added, path), 'utf8')), workflow(source), `${id}: ${mode} must retain the entire workflow`);
-    }
+    await skillsAgentOS({ cwd: added, add: id, replace: true });
+    for (const name of refs) assert.deepEqual(await readFile(join(added, path, '..', 'references', name)), await readFile(entry.absPath.replace(/\.md$/, `/references/${name}`)));
+    assert.equal(workflow(await readFile(join(added, path), 'utf8')), workflow(source), `${id}: must retain the entire workflow`);
   });
   assert.deepEqual(registry.entries.filter(e => e.type === 'skill').map(e => e.name).sort(), [...catalog.skills].sort());
-  assert.equal(await readFile(join(added, '.agentos/skills.md'), 'utf8'), await readFile(join(copied, '.agentos/skills.md'), 'utf8'));
-  for (const cwd of [added, copied]) {
-    const installed = await skillsAgentOS({ cwd, list: true, installed: true });
-    assert.equal(installed.entries.length, catalog.skills.length);
-    assert.ok(installed.entries.every(e => e.state === 'source-match'));
-  }
+  const installed = await skillsAgentOS({ cwd: added, list: true, installed: true });
+  assert.equal(installed.entries.length, catalog.skills.length);
+  assert.ok(installed.entries.every(e => e.state === 'source-match'));
 });
 
 test('default skill mode retains late procedure steps and mandatory safety notes', async t => {
@@ -246,7 +230,6 @@ test('default skill mode retains late procedure steps and mandatory safety notes
     'ci-verification': [/Never disable a security-relevant CI check/, /explicit approval/],
     'commit-messages': [/secrets/, /staged/, /untracked/i, /split/i, /discover/i, /re-inspect/i, /read-only/i],
   };
-  const registry = await templatesAgentOS({ cwd: root, command: 'list' });
   for (const [id, requirements] of Object.entries(gates)) await t.test(id, async () => {
     await skillsAgentOS({ cwd: root, add: id });
     const entry = registry.entries.find(e => e.name === id);

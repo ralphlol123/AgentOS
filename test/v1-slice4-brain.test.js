@@ -123,10 +123,10 @@ test('init: creates templates with unknown markers, registers the existing decis
   const { root } = await workspace(t); // `agentos init` already set the Brain up (Project Brain F5)
   const decisionsBefore = '# Decisions\n\nDurable decisions go here with date, reason, alternatives, and status.\n';
   const before = await snapshot(root);
-  ok(cli(['brain', 'init', '--dry-run'], root));
+  ok(cli(['init', '--existing', '--yes', '--dry-run'], root));
   assert.deepEqual(await snapshot(root), before);
 
-  ok(cli(['brain', 'init'], root));
+  ok(cli(['init', '--existing', '--yes'], root)); // `brain init` (workspace) was removed in 3.0.0; init runs the same Brain setup
   assert.deepEqual(await snapshot(root), before, 'an already set-up Brain: brain init writes nothing');
   for (const name of ['architecture', 'conventions', 'glossary']) {
     const text = await read(root, `.agentos/brain/${name}.md`);
@@ -141,9 +141,8 @@ test('init: creates templates with unknown markers, registers the existing decis
 
   await writeFile(join(root, '.agentos/brain/glossary.md'), 'my own glossary\n');
   const after = await snapshot(root);
-  const again = cli(['brain', 'init'], root);
-  fails(again);
-  assert.match(again.stdout, /glossary\.md.*exists/i);
+  const again = cli(['init', '--existing', '--yes'], root);
+  assert.match(again.stdout + again.stderr, /glossary\.md.*exists/i);
   assert.deepEqual(await snapshot(root), after, 'refusal writes nothing');
 });
 
@@ -151,7 +150,7 @@ test('init: creates templates with unknown markers, registers the existing decis
 
 const NEW_BODY = '# ADR 0003: Use Postgres for storage\n\nWe store tenant data in Postgres 16 with row-level security.\n';
 
-test('lifecycle: propose -> preview (no writes) -> validate -> apply updates target and index; apply twice is a no-op', async (t) => {
+test('lifecycle: propose -> preview (no writes) -> apply updates target and index; apply twice is a no-op', async (t) => {
   const { root } = await registered(t);
   const hash0 = (await read(root, 'docs/adr/0003-use-postgres.md')).match(/source_hash: (\w+)/)[1];
   let snap = await snapshot(root);
@@ -176,7 +175,7 @@ test('lifecycle: propose -> preview (no writes) -> validate -> apply updates tar
   assert.match(preview.stdout, /docs\/adr\/0003-use-postgres\.md/);
   assert.match(preview.stdout, /replace body/i);
   assert.match(preview.stdout, /\+We store tenant data in Postgres 16/);
-  ok(cli(['brain', 'validate', proposal], root));
+  ok(cli(['brain', 'preview', proposal], root)); // `brain validate` was removed in 3.0.0
   ok(cli(['brain', 'apply', proposal, '--dry-run'], root));
   assert.deepEqual(await snapshot(root), snap, 'preview/validate/apply --dry-run write nothing');
 
@@ -221,7 +220,7 @@ test('stale write: a second proposal on the old base_hash is rejected after the 
   const current = (await read(root, 'docs/adr/0003-use-postgres.md')).match(/source_hash: (\w+)/)[1];
   const base = (await read(root, second)).match(/base_hash: (\w+)/)[1];
   const snap = await snapshot(root);
-  const { r, out } = json(['brain', 'validate', second], root);
+  const { r, out } = json(['brain', 'preview', second], root);
   fails(r);
   const stale = out.rejections.find((item) => item.check === 'stale');
   assert.ok(stale, JSON.stringify(out));
@@ -241,7 +240,7 @@ test('stale write: a human body edit after the proposal also rejects the apply (
   const path = join(root, 'docs/adr/0003-use-postgres.md');
   await writeFile(path, `${await readFile(path, 'utf8')}\nHuman note.\n`);
   const snap = await snapshot(root);
-  const { r, out } = json(['brain', 'validate', proposal], root);
+  const { r, out } = json(['brain', 'preview', proposal], root);
   fails(r);
   const stale = out.rejections.find((item) => item.check === 'stale');
   assert.ok(stale, JSON.stringify(out));
@@ -379,9 +378,9 @@ test('check: invalid frontmatter is reported with file:line, listed as invalid, 
 
 // --- read-only commands ---------------------------------------------------------------------------
 
-test('read-only: list/show/search/check/preview/validate leave the tree unchanged; search reuses context term matching', async (t) => {
+test('read-only: list/show/search/check/preview leave the tree unchanged; search reuses context term matching', async (t) => {
   const { root } = await registered(t);
-  ok(cli(['brain', 'init'], root));
+  ok(cli(['init', '--existing', '--yes'], root)); // `brain init` (workspace) was removed in 3.0.0; init runs the same Brain setup
   const proposal = (await propose(root, 'brain:0003-use-postgres', NEW_BODY)).out.path;
   const snap = await snapshot(root);
   const search = json(['brain', 'search', 'postgres', 'storages'], root);
@@ -395,16 +394,16 @@ test('read-only: list/show/search/check/preview/validate leave the tree unchange
   fails(cli(['brain', 'show', 'brain:nope'], root));
   ok(cli(['brain', 'check'], root));
   ok(cli(['brain', 'preview', proposal], root));
-  ok(cli(['brain', 'validate', proposal], root));
+  ok(cli(['brain', 'preview', proposal], root)); // `brain validate` was removed in 3.0.0
   assert.deepEqual(await snapshot(root), snap);
 });
 
-test('validate flags (but does not reject) an ambiguous conflict with another accepted record of the same subject', async (t) => {
+test('preview flags (but does not reject) an ambiguous conflict with another accepted record of the same subject', async (t) => {
   const { root } = await registered(t);
   await writeFile(join(root, 'docs/adr/0004-storage.md'), '# 2026-10-01 — ADR 0003: Use Postgres for storage\n\nDuplicate subject, different text.\n');
   ok(cli(['brain', 'register', 'docs/adr/0004-storage.md', '--kind', 'adr'], root));
   const proposal = (await propose(root, 'brain:0003-use-postgres', NEW_BODY)).out.path;
-  const { r, out } = json(['brain', 'validate', proposal], root);
+  const { r, out } = json(['brain', 'preview', proposal], root);
   ok(r);
   assert.ok(out.flags.some((item) => item.check === 'conflict' && item.ids.includes('brain:0004-storage')), JSON.stringify(out));
 });

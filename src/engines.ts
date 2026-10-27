@@ -1,4 +1,4 @@
-/** Engine adapter contract and capability matrix (`agentos engines`, `agentos context <engine>`,
+/** Engine adapter contract and capability matrix (`agentos doctor --engines`, `agentos context <engine>`,
  *  `agentos agents sync <engine>`). See docs/engines.md.
  *
  * Every row is a claim about what AgentOS can make the engine do, with its evidence. `verified` means observed in a
