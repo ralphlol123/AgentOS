@@ -283,10 +283,11 @@ test('combined reduction may apply when one file grows and reports both deltas h
   assert.equal((await rewriteBundles(root)).length, 1);
 });
 
-test('compact help advertises structural default, checkpoint, alias and normal selectors', () => {
+test('compact help advertises the structural default and --archive-only; --checkpoint is listed as deprecated, the --rewrite alias is silent (2.1)', () => {
   const result = spawnSync(process.execPath, [CLI, 'help'], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /agentos compact \[--objective <id>\] \[--expect-state <sha256>\]/);
-  assert.match(result.stdout, /--checkpoint/);
-  assert.match(result.stdout, /--rewrite.*compatibility alias/i);
+  assert.match(result.stdout, /agentos compact --archive-only \[--dry-run\]/);
+  assert.match(result.stdout, /agentos compact --checkpoint \[--dry-run\]\s+->\s+agentos compact --archive-only/);
+  assert.doesNotMatch(result.stdout, /--rewrite/);
 });

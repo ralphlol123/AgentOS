@@ -286,9 +286,12 @@ test('prompt output on the slice-1 fixtures is byte-identical to slice 1 (78638c
     await setup(root);
     const real = await realpath(root); // macOS: /var/... is reported as /private/var/...
     for (const engine of ['claude', 'codex', 'opencode', 'hermes', 'generic']) {
-      const r = cli(['prompt', engine], root);
-      const stdout = r.stdout.split(real).join('<ROOT>').split(root).join('<ROOT>').replace(/^Project: [^;]+;/m, 'Project: <NAME>;');
-      assert.deepEqual({ status: r.status, stdout }, golden[`${name}/${engine}`], `${name}/${engine}`);
+      // 2.1: `context <engine> --brief` replaces `prompt <engine>`; both must still match the pinned bytes.
+      for (const args of [['prompt', engine], ['context', engine, '--brief']]) {
+        const r = cli(args, root);
+        const stdout = r.stdout.split(real).join('<ROOT>').split(root).join('<ROOT>').replace(/^Project: [^;]+;/m, 'Project: <NAME>;');
+        assert.deepEqual({ status: r.status, stdout }, golden[`${name}/${engine}`], `${args.join(' ')} (${name})`);
+      }
     }
   }
 });

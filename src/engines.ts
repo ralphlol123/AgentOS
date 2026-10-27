@@ -35,7 +35,7 @@ export interface EngineAdapter {
   syncNote?: string;
 }
 
-const NO_LAUNCH = 'AgentOS does not start engines (there is no `agentos run`); the user launches the engine.';
+const NO_LAUNCH = 'AgentOS never launches an engine process; the user starts the engine.';
 const NO_RESUME = 'AgentOS resume is engine-neutral checkpoint text (`agentos resume`); it does not drive the engine\'s own session resume.';
 const row = (status: CapabilityStatus, evidence: string) => ({ status, evidence });
 
@@ -168,7 +168,7 @@ const ADAPTERS: EngineAdapter[] = [
   },
 ];
 export const ENGINE_ADAPTERS: Record<string, EngineAdapter> = Object.fromEntries(ADAPTERS.map((adapter) => [adapter.id, adapter]));
-/** Unknown engine names get the generic adapter (same as `agentos prompt`), labelled with the requested name. */
+/** Unknown engine names get the generic adapter (same as `agentos context --brief`), labelled with the requested name. */
 export const engineAdapter = (engine: string): EngineAdapter => ENGINE_ADAPTERS[engine] ?? { ...ENGINE_ADAPTERS.generic, id: engine };
 
 export function enginesReport(options: { json?: boolean } = {}) {

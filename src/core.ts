@@ -1033,7 +1033,7 @@ async function childRepoStatusSection(root: string, cwd: string, project: string
     `Verify this repo: ${shown.length ? shown.join('; ') : 'no commands recorded in .agentos/project.yaml'}`,
     open.length ? 'Open tasks (Now):' : 'Open tasks (Now): none',
     ...open,
-    'More: `agentos handoff` (full handoff).',
+    'More: `agentos status --full` (full handoff).',
   ].join('\n');
 }
 
@@ -1515,9 +1515,10 @@ async function obsidianAgentOSUnlocked(options: any = {}) {
 
 const OBSIDIAN_USAGE = [
   'Usage: agentos obsidian init [--dir <path>] [--dry-run]',
-  '       agentos obsidian link --vault <abs-path> --dest <sub/folder> [--canonical workspace|vault] [--create] [--dry-run]',
-  '       agentos obsidian link-workspace --vault <path> --dest <folder> [--create] [--dry-run]   (boundary only, no index note)',
+  '       agentos obsidian link --vault <abs-path> --dest <sub/folder> [--canonical workspace|vault] [--no-index] [--create] [--dry-run]   (--no-index: boundary only, no index note)',
+  '       agentos obsidian link --note <path> [--vault <path> --dest <folder> --create] [--dry-run]   (link one exact note, link-only)',
   '       agentos obsidian status',
+  'Deprecated (removed in 3.0.0): agentos obsidian link-workspace -> agentos obsidian link --no-index',
 ].join('\n');
 
 const isInside = isWithin;
@@ -1664,7 +1665,7 @@ async function obsidianStatusAgentOS(options: any = {}) {
   if (!root) return { ok: false, text: 'AgentOS Obsidian: NOT FOUND\nNo .agentos directory found.' };
   const project = await safeRead(join(root, '.agentos/project.yaml'));
   const config = obsidianConfigFromProject(project, root);
-  if (!config) return { ok: false, text: 'AgentOS Obsidian: NOT CONFIGURED\nRun `agentos obsidian link-workspace --vault <path> --dest <folder>`.' };
+  if (!config) return { ok: false, text: 'AgentOS Obsidian: NOT CONFIGURED\nRun `agentos obsidian link --vault <path> --dest <folder>`.' };
   if (config.enabled === false) return { ok: true, text: 'AgentOS Obsidian: DISABLED (knowledge.obsidian.enabled: false)\nProject knowledge is unaffected: Brain, context, checkpoint and resume work without Obsidian. Remove the key or set it to true to re-enable.' };
   // A relative vault (`obsidian init`) is relative to the workspace root, never to the cwd (F8).
   const vault = config.vault ? resolve(root, config.vault) : '';
@@ -4481,7 +4482,7 @@ const startupLoop = (engine: string, autonomous = false) => `Startup loop: \`age
 // tool call ends the turn, so a "fall back if refused" instruction placed after the file list is never read.
 const CHILD_CLI_FIRST_LINES = [
   'First step from this repo: run `agentos status`. It works from this directory and prints what you need, so do this before reading any other file under `..`.',
-  'Some engines refuse file reads outside the directory they started in, and a refused read can end the session on the spot. If that applies to you, rely on `agentos status` and `agentos handoff` instead of the file list below.',
+  'Some engines refuse file reads outside the directory they started in, and a refused read can end the session on the spot. If that applies to you, rely on `agentos status` and `agentos status --full` instead of the file list below.',
 ];
 
 // The single engine-agnostic operating guide. Every command named in backticks here must exist in
@@ -4512,13 +4513,12 @@ function guideMd(autonomous = false) {
     '- This directory is one repo of a larger workspace. The AgentOS root is the nearest parent that has `.agentos/`.',
     '- Run `agentos status`. It works from any subdirectory and needs no file reads.',
     '- In some engines a refused read outside the start directory ends the session. Use the CLI first; read parent files only if reads work.',
-    '- `agentos handoff` prints the full handoff and the reading list when you need more than the status summary.',
+    '- `agentos status --full` adds the full handoff and the reading list when you need more than the status summary.',
     '',
     '## Stopping, switching engines, decisions',
     '',
     '- Before stopping or switching engines: `agentos checkpoint --task <id> --progress "<done>" --next "<remaining>" --check "<cmd>"`. Each `--check` runs as a receipt, from the workspace root or the `--cwd <dir>` after it (root-relative, or absolute inside the workspace); `--claim "<text>"` records what AgentOS did not observe.',
     '- Next engine: `agentos resume --task <id>`, then `context`. No checkpoint was written: `agentos checkpoint --recover --task <id>`.',
-    '- Prefer these to `agentos run handoff`: it writes only a prose note, no receipts for `resume` to reconcile.',
     autonomous
       ? '- Durable changes (Brain policy: autonomous): stage one focused proposal, `agentos brain propose <id-or-path> --from <file|-> --task <id> --summary "<why>"`, then `agentos brain apply <proposal> --auto --by <self>`; progress only: nothing. Cite only facts from files you read; leave unknowns unknown. Refusals stay pending; never drop --auto or change policy. Undo: `agentos brain revert <id> --last --auto --by <self>`.'
       : '- Durable changes: `agentos brain propose <id-or-path> --from <file|-> --task <id> --summary "<why>"`; progress only: nothing. Review: `agentos brain preview <proposal>`. Manual default: owner runs `agentos brain apply <proposal> --by <owner>`. With owner-enabled `agentos brain policy`, agents may use `agentos brain apply <proposal> --auto --by <self>`. Refusals stay pending; never drop --auto, impersonate the owner or change policy.',
@@ -4528,9 +4528,9 @@ function guideMd(autonomous = false) {
     '',
     '- Health check: `agentos doctor` (read-only). To repair, preview with `agentos doctor --fix --dry-run`, then run `agentos doctor --fix`.',
     '- Handoff or tasks too long: `agentos compact --dry-run`, review the report, then `agentos compact`. It archives recognised history byte-for-byte and refuses ambiguous state. If it reports nothing to archive, rewrite the file as the rule below says instead of leaving it to grow.',
-    '- Add a workflow: `agentos skills list` shows the catalog, `agentos skills list --installed` shows what is installed, `agentos templates show <id>` reads one first, then `agentos skills add <skill-id> --dry-run` and `agentos skills add <skill-id>`.',
+    '- Add a workflow: `agentos skills list` shows the catalog, `agentos skills list --installed` shows what is installed, `agentos skills show <id>` reads one first, then `agentos skills add <skill-id> --dry-run` and `agentos skills add <skill-id>`.',
     '- Roles: `agentos agents list`, `agentos agents list --installed`, `agentos agents add <agent-id> --dry-run`.',
-    '- Is this adapter file current? `agentos adapters explain <file>`.',
+    '- Is this adapter file current? `agentos doctor --explain <file>`.',
     '',
     '## Rules',
     '',
@@ -4789,7 +4789,7 @@ export async function contextAgentOS(options: any = {}) {
   const gateLines = [synced?.line, enforced?.line].filter(Boolean).join('\n');
   if (enforced || (synced && synced.status !== 'ok')) {
     if (options.json) return { ok: false, text: JSON.stringify({ ok: false, rendered: false, ...gate }, null, 2) };
-    return { ok: false, text: `AgentOS context: FAIL\n${gateLines}\nNo context was rendered. Without the flags, the edit scope is delivered with the ADVISORY lines (see \`agentos engines\`).` };
+    return { ok: false, text: `AgentOS context: FAIL\n${gateLines}\nNo context was rendered. Without the flags, the edit scope is delivered with the ADVISORY lines (see \`agentos doctor --engines\`).` };
   }
   const input = await contextInputFor(root, engine, options);
   const objective = resolveObjective(await safeRead(join(root, '.agentos/handoff.md')));
@@ -5270,6 +5270,7 @@ export async function compactAgentOS(options: any = {}) {
   const compactMode = resolveCompactMode({
     rewrite: options.rewrite,
     checkpoint: options.checkpoint,
+    archiveOnly: options.archiveOnly,
     objective: options.objective,
     expectState: options.expectState,
     diff: options.diff,

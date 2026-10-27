@@ -77,7 +77,7 @@ test('the guide tells an engine which command to run for which job, with the saf
     ['skill install', /agentos skills add/],
     ['skill listing', /agentos skills list/],
     ['agent listing', /agentos agents list/],
-    ['template inspection', /agentos templates (show|list)/],
+    ['template inspection', /agentos skills show/],
     ['dry-run-first rule', /--dry-run/],
     ['never hand-edit generated state rule', /(do not|never) (hand-)?edit/i],
     ['no commit or push unless asked', /(commit|push)/i],
@@ -261,7 +261,7 @@ test('child pointers put the CLI before any path under `..` and explain why', as
     const firstParentPath = text.indexOf('`../');
     assert.ok(status >= 0, `${file} must name \`agentos status\``);
     assert.ok(status < firstParentPath, `${file}: \`agentos status\` must come before the first ../ path`);
-    assert.match(text, /agentos handoff/, `${file} must name \`agentos handoff\` for the full handoff`);
+    assert.match(text, /agentos status --full/, `${file} must name \`agentos status --full\` for the full handoff`);
     assert.match(text, /(refused|denied).{0,80}(end|stop|abort).{0,40}(session|turn|run)|(end|stop|abort).{0,40}(session|turn|run).{0,80}(refused|denied)/is, `${file} must say a refused read can end the session`);
   }
 });

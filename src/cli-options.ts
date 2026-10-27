@@ -1,6 +1,6 @@
 export type FlagValue = string | boolean;
-const booleans = new Set(['new', 'existing', 'dry-run', 'yes', 'y', 'detected', 'replace', 'preserve', 'fix', 'json', 'create', 'refresh', 'installed', 'normalize-repo-ids', 'adopt-custom-adapters', 'prune-retired', 'rewrite', 'checkpoint', 'diff', 'include-superseded', 'recover', 'append', 'from-catalog', 'custom', 'require-enforcement', 'require-synced-config', 'require-complete', 'adopt', 'auto', 'last', 'force']);
-const values = new Set(['agents', 'engine', 'role', 'repo', 'worktree', 'phase', 'reason', 'vault', 'dest', 'link', 'mode', 'name', 'type', 'expected-sha256', 'objective', 'expect-state', 'task', 'scope', 'budget', 'progress', 'blocker', 'next', 'check', 'cwd', 'claim', 'kind', 'status', 'by', 'from', 'summary', 'supersedes', 'canonical', 'dir', 'location', 'to']);
+const booleans = new Set(['new', 'existing', 'dry-run', 'yes', 'y', 'detected', 'replace', 'preserve', 'fix', 'json', 'create', 'refresh', 'installed', 'normalize-repo-ids', 'adopt-custom-adapters', 'prune-retired', 'rewrite', 'checkpoint', 'diff', 'include-superseded', 'recover', 'append', 'from-catalog', 'custom', 'require-enforcement', 'require-synced-config', 'require-complete', 'adopt', 'auto', 'last', 'force', 'full', 'brief', 'strict', 'engines', 'no-index', 'archive-only']);
+const values = new Set(['agents', 'engine', 'role', 'repo', 'worktree', 'phase', 'reason', 'vault', 'dest', 'link', 'mode', 'name', 'type', 'expected-sha256', 'objective', 'expect-state', 'task', 'scope', 'budget', 'progress', 'blocker', 'next', 'check', 'cwd', 'claim', 'kind', 'status', 'by', 'from', 'summary', 'supersedes', 'canonical', 'dir', 'location', 'to', 'explain', 'note']);
 /** `--check` and `--claim` repeat; each `--cwd` belongs to the `--check` right before it. */
 export function parseFlagsAndPositionals(args: string[]): { flags: Record<string, FlagValue>; positionals: string[]; checks: Array<{ command: string; cwd?: string }>; claims: string[] } {
   const flags: Record<string, FlagValue> = {}, positionals: string[] = [], checks: Array<{ command: string; cwd?: string }> = [], claims: string[] = [];
@@ -30,14 +30,14 @@ export function parseFlagsAndPositionals(args: string[]): { flags: Record<string
 }
 export function validateCommandFlags(command: string, flags: Record<string, FlagValue>): void {
   const allowed: Record<string, string[]> = {
-    init: ['new', 'existing', 'agents', 'dry-run', 'yes', 'y', 'refresh'], status: [], handoff: [], prompt: [],
-    context: ['task', 'role', 'scope', 'budget', 'json', 'include-superseded', 'require-enforcement', 'require-synced-config', 'require-complete'], engines: ['json'],
+    init: ['new', 'existing', 'agents', 'dry-run', 'yes', 'y', 'refresh'], status: ['full'], handoff: [], prompt: [],
+    context: ['task', 'role', 'scope', 'budget', 'json', 'brief', 'strict', 'include-superseded', 'require-enforcement', 'require-synced-config', 'require-complete'], engines: ['json'],
     checkpoint: ['task', 'engine', 'role', 'progress', 'blocker', 'next', 'check', 'cwd', 'claim', 'json', 'dry-run', 'recover'],
     resume: ['task', 'engine', 'json'],
     brain: ['kind', 'scope', 'status', 'by', 'from', 'summary', 'supersedes', 'append', 'task', 'json', 'dry-run', 'location', 'adopt', 'auto', 'to', 'last', 'force'],
-    run: ['engine', 'role', 'repo', 'worktree', 'phase', 'reason', 'dry-run'], doctor: ['fix', 'json', 'normalize-repo-ids', 'adopt-custom-adapters', 'prune-retired', 'dry-run'], compact: ['dry-run', 'rewrite', 'checkpoint', 'objective', 'expect-state', 'diff'],
-    'link-obsidian': ['vault', 'dest', 'link', 'create', 'dry-run'], obsidian: ['vault', 'dest', 'create', 'dry-run', 'canonical', 'dir'], adapters: [],
-    skills: ['detected', 'mode', 'dry-run', 'replace', 'installed'], agents: ['name', 'dry-run', 'replace', 'installed', 'json', 'from-catalog', 'custom', 'role', 'scope'],
+    run: ['engine', 'role', 'repo', 'worktree', 'phase', 'reason', 'dry-run'], doctor: ['fix', 'json', 'normalize-repo-ids', 'adopt-custom-adapters', 'prune-retired', 'dry-run', 'explain', 'engines'], compact: ['dry-run', 'rewrite', 'checkpoint', 'archive-only', 'objective', 'expect-state', 'diff'],
+    'link-obsidian': ['vault', 'dest', 'link', 'create', 'dry-run'], obsidian: ['vault', 'dest', 'create', 'dry-run', 'canonical', 'dir', 'note', 'no-index'], adapters: [],
+    skills: ['detected', 'mode', 'dry-run', 'replace', 'installed', 'name', 'yes', 'expected-sha256'], agents: ['name', 'dry-run', 'replace', 'installed', 'json', 'from-catalog', 'custom', 'role', 'scope', 'yes', 'expected-sha256'],
     templates: ['type', 'name', 'mode', 'dry-run', 'yes', 'replace', 'expected-sha256'], migrate: ['preserve', 'dry-run'],
   };
   for (const key of Object.keys(flags)) if (allowed[command] && !allowed[command].includes(key)) throw new Error(`--${key} is not supported by ${command}.`);
@@ -59,14 +59,18 @@ export function resolveCompactMode(options: Record<string, any>): CompactMode {
     }
   }
   const dryRun = options['dry-run'] ?? options.dryRun;
-  if (options.checkpoint === true) {
+  const archiveOnly = options['archive-only'] ?? options.archiveOnly;
+  if (archiveOnly !== undefined && typeof archiveOnly !== 'boolean') throw new Error('--archive-only requires true or false.');
+  if (options.checkpoint === true || archiveOnly === true) {
+    const flag = archiveOnly === true ? '--archive-only' : '--checkpoint';
     const conflicts = [
       options.rewrite === true ? '--rewrite' : null,
+      options.checkpoint === true && archiveOnly === true ? '--checkpoint' : null,
       options.objective !== undefined ? '--objective' : null,
       options['expect-state'] !== undefined || options.expectState !== undefined ? '--expect-state' : null,
       options.diff === true ? '--diff' : null,
     ].filter(Boolean);
-    if (conflicts.length) throw new Error(`Cannot combine --checkpoint with ${conflicts.join(', ')}.`);
+    if (conflicts.length) throw new Error(`Cannot combine ${flag} with ${conflicts.join(', ')}.`);
     return 'checkpoint';
   }
   if (options.diff === true && dryRun !== true) throw new Error('--diff requires --dry-run.');
