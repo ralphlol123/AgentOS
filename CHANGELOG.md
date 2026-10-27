@@ -4,6 +4,8 @@ All notable changes to AgentOS for Projects are documented here.
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-10-27
+
 ### Breaking changes / Removed
 
 3.0.0 removes every form deprecated in 2.1 and the legacy upgrade paths deprecated since 0.9.0. A removed form exits 1 with one stderr line, `agentos <x> was removed in 3.0.0; use <new>`, and writes nothing (also with `--help`). Table: `docs/migration-3.0-cli.md`. **Older workspaces that still need a legacy migration: run `npx agentos-for-projects@2 doctor --fix` once first** (the 2.x line keeps every legacy migration), then upgrade.
