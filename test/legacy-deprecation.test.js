@@ -7,15 +7,15 @@ import { test } from 'node:test';
 import { promisify } from 'node:util';
 import { initAgentOS, doctorAgentOS, normalizeRepoIdsAgentOS, migrateClaudeAgentOS } from '../dist/core.js';
 
-// 0.9.0 deprecates the legacy upgrade paths (removal planned for 2.0.0). Nothing is removed and no
+// 0.9.0 deprecates the legacy upgrade paths; 2.1.0 moves their removal to 3.0.0. Nothing is removed and no
 // behavior changes: a notice appears only when a legacy path actually triggers, or when a deprecated
 // flag/command is used. A clean workspace's output must stay byte-for-byte what it was.
 
 const execFileAsync = promisify(execFile);
 const CLI = resolve('dist/cli.js');
-const NOTICE = /will be removed in 2\.0\.0/;
-const LINE_NOTICE = /^Deprecated: .* will be removed in 2\.0\.0/m;
-const LAST = 'npx agentos-for-projects@1';
+const NOTICE = /will be removed in 3\.0\.0/;
+const LINE_NOTICE = /^Deprecated: .* will be removed in 3\.0\.0/m;
+const LAST = 'npx agentos-for-projects@2';
 
 const LEGACY_AGENTS_BODY = [
   '# AGENTS.md', '', 'AgentOS for Projects bootloader.', '', 'Workspace: single-repo', 'Repos: demo=. (app/unknown/unknown)', '',
@@ -69,12 +69,12 @@ test('doctor reports a legacy adapter, an old retired card and an unsafe repo ID
   const result = await doctorAgentOS({ cwd: root, json: true });
   assert.deepEqual(areas(result), ['adapters', 'repo-ids', 'retired-cards']);
   const human = await doctorAgentOS({ cwd: root });
-  assert.equal(human.text.match(/will be removed in 2\.0\.0/g).length, 3);
+  assert.equal(human.text.match(/will be removed in 3\.0\.0/g).length, 3);
   assert.doesNotMatch(human.text, /- Deprecated:/, 'the section heading already says it');
   assert.ok(human.text.includes(LAST), 'names the release that can still do the migration');
   for (const d of result.migration.deprecations) {
-    assert.equal(d.removed_in, '2.0.0');
-    assert.equal(d.last_supporting, '1');
+    assert.equal(d.removed_in, '3.0.0');
+    assert.equal(d.last_supporting, '2');
     assert.match(d.message, NOTICE);
   }
 });
@@ -166,5 +166,7 @@ test('help text marks the deprecated flags and command', async (t) => {
     const line = help.stdout.split('\n').find((l) => l.includes(flag));
     assert.ok(line, `help mentions ${flag}`);
   }
-  assert.match(help.stdout, /deprecated, removed in 2\.0\.0/i);
+  assert.match(help.stdout, /Deprecated \(removed in 3\.0\.0/);
+  assert.doesNotMatch(help.stdout, /removed in 2\.0\.0/i, 'the false "removed in 2.0.0" label is gone');
+  for (const flag of ['--adopt-custom-adapters', '--normalize-repo-ids', 'migrate claude']) assert.match(help.stdout.split('\n').find((l) => l.includes(flag)), /legacy migration/);
 });
