@@ -51,13 +51,13 @@ async function workspace(t, edit = 'web/src') {
   return root;
 }
 
-const rules = (path, tools = ['Edit', 'Write', 'NotebookEdit']) => tools.map((tool) => `${tool}(/${path})`);
+const rules = (path, tools = ['Edit']) => tools.map((tool) => `${tool}(/${path})`);
 const EXPECTED_DENY = [
   ...rules('.agentos/agents/**'),
   ...rules('.agentos/project.yaml'),
   ...rules('.claude/**'),
-  ...rules('.claude/settings.json', ['Edit', 'Write']),
-  ...rules('.claude/settings.local.json', ['Edit', 'Write']),
+  ...rules('.claude/settings.json'),
+  ...rules('.claude/settings.local.json'),
   ...rules('.env.example'),
   ...rules('.hermes.md'),
   ...rules('AGENTS.md'),
@@ -97,7 +97,7 @@ test('sibling enumeration: read-only role keeps deny-all with no allow', async (
   const root = await workspace(t);
   ok(cli(['agents', 'add', 'reviewer', '--replace'], root));
   ok(cli(['agents', 'sync', 'claude-code', '--role', 'reviewer'], root));
-  assert.deepEqual(JSON.parse(await read(root, '.claude/settings.local.json')), { permissions: { deny: ['Edit(/**)', 'Write(/**)', 'NotebookEdit(/**)'] } });
+  assert.deepEqual(JSON.parse(await read(root, '.claude/settings.local.json')), { permissions: { deny: ['Edit(/**)'] } });
 });
 
 test('sibling enumeration: an existing different deny list refuses with zero writes', async (t) => {

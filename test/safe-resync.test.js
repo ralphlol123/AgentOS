@@ -6,6 +6,7 @@ import { lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, symlink, writeF
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { __clearAtomicWriteFaultForTests, __setAtomicWriteFaultForTests, agentsAgentOS, initAgentOS } from '../dist/core.js';
 
@@ -78,13 +79,40 @@ test('re-sync after a tree change: OK, doctor silent; owner allow/deny entries s
   assert.match(r.stdout, /^Unchanged: \.claude\/agents\/developer\.md$/m);
   const text = await read(root, SETTINGS);
   const recorded = JSON.parse(await read(root, RECORD)).files.find((f) => f.path === SETTINGS).entries['permissions.deny'];
-  for (const rule of ['Edit(/newdir/**)', 'Write(/newdir/**)', 'NotebookEdit(/newdir/**)']) assert.ok(recorded.includes(rule) && !first.permissions.deny.includes(rule), rule);
+  for (const rule of ['Edit(/newdir/**)']) assert.ok(recorded.includes(rule) && !first.permissions.deny.includes(rule), rule);
   const expected = { model: 'opus', env: { FOO: '1' }, permissions: { ask: ['Bash'], allow: ['Bash(npm test:*)', 'Edit(/web/src/**)'], deny: ['Bash(rm:*)', ...recorded, 'Read(/secrets/**)'] } };
   assert.equal(text, JSON.stringify(expected, null, 4), 'owner entries in place, other keys kept, 4-space indent, no trailing newline');
   ok(strict(root));
   assert.match(syncedLine(strict(root)), /^Synced config: OK \(claude-code, role developer, sha256 [0-9a-f]{8}; user entries: 3\)$/);
   assert.deepEqual(syncedWarnings(root), [], 'doctor silent after re-sync');
   assert.deepEqual(await backups(root), [], 'no --replace, no backup');
+});
+
+test('settings synced by 1.1-3.1.0 (Edit, Write and NotebookEdit rules): doctor says STALE; plain re-sync drops only the recorded Write/NotebookEdit rules', async (t) => {
+  const root = await workspace(t);
+  ok(sync(root));
+  const now = JSON.parse(await read(root, SETTINGS)).permissions;
+  assert.ok(now.deny.length && now.deny.every((rule) => rule.startsWith('Edit(')), now.deny.join(' '));
+  // What 1.1-3.1.0 wrote and recorded: every deny path three times. The owner added rules of all three kinds.
+  const old = now.deny.flatMap((rule) => ['Edit', 'Write', 'NotebookEdit'].map((tool) => rule.replace(/^Edit/, tool)));
+  const fragment = `${JSON.stringify({ permissions: { allow: now.allow, deny: old } }, null, 2)}\n`;
+  const owner = ['Write(/mine/**)', 'NotebookEdit(/nb/**)', 'Bash(rm:*)'];
+  await writeFile(join(root, SETTINGS), `${JSON.stringify({ permissions: { allow: now.allow, deny: [...old, ...owner] } }, null, 2)}\n`);
+  const record = JSON.parse(await read(root, RECORD));
+  const file = record.files.find((f) => f.path === SETTINGS);
+  file.entries['permissions.deny'] = old;
+  file.sha256 = createHash('sha256').update(fragment).digest('hex');
+  record.agentos_version = '1.1.0';
+  await writeFile(join(root, RECORD), `${JSON.stringify(record, null, 2)}\n`);
+
+  assert.deepEqual(syncedWarnings(root), ['Synced config: STALE — re-run agentos agents sync claude-code --role developer (.claude/settings.local.json: Write/NotebookEdit rules Claude Code no longer matches)']);
+  const r = sync(root);
+  ok(r);
+  assert.match(r.stdout, /^Updated: \.claude\/settings\.local\.json$/m);
+  assert.deepEqual(JSON.parse(await read(root, SETTINGS)).permissions, { allow: now.allow, deny: [...now.deny, ...owner] }, 'recorded Write/NotebookEdit gone, owner rules kept');
+  assert.deepEqual(JSON.parse(await read(root, RECORD)).files.find((f) => f.path === SETTINGS).entries['permissions.deny'], now.deny);
+  ok(strict(root));
+  assert.deepEqual(syncedWarnings(root), []);
 });
 
 test('re-sync after a task_scope change updates the settings; after a manifest tools_requested change updates .claude/agents/<id>.md', async (t) => {
@@ -109,14 +137,14 @@ test('re-sync after a task_scope change updates the settings; after a manifest t
 test('hand-edited generated entry: refused with zero writes naming the entries; --replace succeeds and keeps owner entries', async (t) => {
   const root = await workspace(t);
   ok(sync(root));
-  await edit(root, SETTINGS, (text) => { const json = JSON.parse(text); json.permissions.deny = json.permissions.deny.filter((r) => r !== 'Write(/api/**)').map((r) => r === 'Edit(/api/**)' ? 'Edit(/apx/**)' : r); json.permissions.deny.push('Bash(rm:*)'); return `${JSON.stringify(json, null, 2)}\n`; });
+  await edit(root, SETTINGS, (text) => { const json = JSON.parse(text); json.permissions.deny = json.permissions.deny.map((r) => r === 'Edit(/api/**)' ? 'Edit(/apx/**)' : r); json.permissions.deny.push('Bash(rm:*)'); return `${JSON.stringify(json, null, 2)}\n`; });
   const stale = syncedWarnings(root)[0];
   assert.ok(stale.startsWith('Synced config: STALE — re-run agentos agents sync claude-code --role developer --replace (.claude/settings.local.json: generated entry edited)'), stale);
 
   const before = await snapshot(root);
   const refused = sync(root);
   fails(refused);
-  assert.match(refused.stdout, /^- \.claude\/settings\.local\.json: generated entry edited \(permissions\.deny: Edit\(\/api\/\*\*\), permissions\.deny: Write\(\/api\/\*\*\)\)$/m);
+  assert.match(refused.stdout, /^- \.claude\/settings\.local\.json: generated entry edited \(permissions\.deny: Edit\(\/api\/\*\*\)\)$/m);
   assert.match(refused.stdout, /--replace/);
   assert.match(refused.stdout, /^Nothing was written\.$/m);
   assert.deepEqual(await snapshot(root), before, 'zero writes');
@@ -124,7 +152,7 @@ test('hand-edited generated entry: refused with zero writes naming the entries; 
   const r = sync(root, '--replace');
   ok(r);
   const deny = JSON.parse(await read(root, SETTINGS)).permissions.deny;
-  for (const rule of ['Edit(/api/**)', 'Write(/api/**)', 'Bash(rm:*)', 'Edit(/apx/**)']) assert.ok(deny.includes(rule), rule);
+  for (const rule of ['Edit(/api/**)', 'Bash(rm:*)', 'Edit(/apx/**)']) assert.ok(deny.includes(rule), rule);
   assert.equal(deny.at(-1), 'Bash(rm:*)', 'owner entry kept in place');
   assert.equal((await backups(root)).length, 1, 'one backup of the overwritten file');
   ok(strict(root));

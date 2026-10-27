@@ -22,8 +22,8 @@ export interface NativeConfigInput {
   edit: Array<{ path: string; dir: boolean }>;
   /** Workspace-relative directory whose AGENTS.md carries the role block (codex). */
   repoDir: string;
-  /** Everything outside the edit scope (claude-code deny rules); `tools` defaults to Edit, Write, NotebookEdit. */
-  outside?: Array<{ path: string; dir: boolean; tools?: string[] }>;
+  /** Everything outside the edit scope (claude-code deny rules). */
+  outside?: Array<{ path: string; dir: boolean }>;
 }
 export interface NativeFile { path: string; content: string; merge: 'whole-file' | 'json-add-keys' | 'managed-block'; warnings?: string[] }
 export interface EngineAdapter {
@@ -77,15 +77,15 @@ function claudeAgentFile(input: NativeConfigInput): NativeFile {
   };
 }
 
-const WRITE_TOOLS = ['Edit', 'Write', 'NotebookEdit'];
 const claudePath = ({ path, dir }: { path: string; dir: boolean }) => path === '.' ? '/**' : `/${path}${dir ? '/**' : ''}`;
 /** Permission fragment. Allow rules alone do not restrict Claude Code and the file is ignored until the workspace is
  *  trusted (trial T3a); deny rules in a trusted workspace do (T3b), and deny wins over allow. `/path` is relative to
- *  the settings source. `outside` = every entry outside the edit scope (sync enumerates siblings), each with its
- *  tools (default Edit, Write, NotebookEdit). */
+ *  the settings source. `outside` = every entry outside the edit scope (sync enumerates siblings). Rules are `Edit(...)`
+ *  only: Claude Code applies Edit rules to every file-editing tool, and 2.1.311 warns that `Write(...)`/`NotebookEdit(...)`
+ *  path rules never match (1.1-3.1.0 wrote all three; re-sync removes the recorded Write/NotebookEdit entries). */
 export function claudeSettingsFragment(edit: NativeConfigInput['edit'], outside: NativeConfigInput['outside'] = []) {
-  if (!edit.length) return { permissions: { deny: WRITE_TOOLS.map((tool) => `${tool}(/**)`) } };
-  const deny = outside.flatMap((entry) => (entry.tools ?? WRITE_TOOLS).map((tool) => `${tool}(${claudePath(entry)})`));
+  if (!edit.length) return { permissions: { deny: ['Edit(/**)'] } };
+  const deny = outside.map((entry) => `Edit(${claudePath(entry)})`);
   return { permissions: { allow: edit.map((entry) => `Edit(${claudePath(entry)})`), ...(deny.length ? { deny } : {}) } };
 }
 /** Writes the synced deny rules do not cover even in a trusted workspace (closure re-trials T6c/T6e). */
@@ -124,7 +124,7 @@ const ADAPTERS: EngineAdapter[] = [
       native_agent_config: row('verified', `Verified for discovery, invocation and instruction-following: after \`agentos agents sync claude-code\`, Claude Code 2.1.310 listed the synced agent from .claude/agents/<id>.md in a trusted workspace (${REPORT}#T5, n=1); a Task-invoked subagent used a marker present only in its card, named its role and refused out-of-scope edits by instruction (${CLOSURE}#T8, n=1). tools: consumption VERIFIED afterwards (closure T9: the subagent reported exactly the rendered list and had no Bash).`),
       tool_restrictions: row('verified', `Verified (launch-time --allowedTools; see T1/T2): \`claude -p --allowedTools Read,Edit,Write,Bash(node:*),Bash(cd:*)\` blocked Bash git in Claude Code 2.1.310 (${REPORT}#T1, n=1). AgentOS passes no launch flags. Manifest tools_requested -> .claude/agents/<id>.md tools: (read-only roles default to Read, Grep, Glob): VERIFIED for the Task-invoked subagent, which reported exactly Read, Grep, Glob, Edit and had no Bash tool (${CLOSURE}#T9, n=1); it does not restrict the top-level session.`),
       permission_enforcement: {
-        ...row('verified', `Verified in a trusted workspace (Claude Code 2.1.310, n=1 per probe): listed-path deny rules refused an edit under api/ and allowed web/ (${REPORT}#T3, T3b) and, as sync wrote them, refused api/package.json (${REPORT}#T5); the sibling denies from \`agentos agents sync claude-code\` refused Edit in web/tests, web/package.json, api/contracts, docs/adr, .env.example, .agentos/project.yaml and .claude/settings.local.json and a Bash redirect into api/package.json, while Edit, Write and a Bash redirect in web/src stayed allowed (${CLOSURE}#T6c); a read-only role (deny Edit/Write/NotebookEdit(/**)) refused Edit, Write and a Bash redirect and allowed Read (${CLOSURE}#T6d). Allow-only rules or an untrusted workspace do not restrict (T3a). Residual, advisory: root files/dirs created after sync (uncovered until re-sync; --require-synced-config reports STALE), .agentos/ state files (writable by design), shell writes Claude Code does not recognise as a write to a denied path.`),
+        ...row('verified', `Verified in a trusted workspace (Claude Code 2.1.310, n=1 per probe): listed-path deny rules refused an edit under api/ and allowed web/ (${REPORT}#T3, T3b) and, as sync wrote them, refused api/package.json (${REPORT}#T5); the sibling denies from \`agentos agents sync claude-code\` refused Edit in web/tests, web/package.json, api/contracts, docs/adr, .env.example, .agentos/project.yaml and .claude/settings.local.json and a Bash redirect into api/package.json, while Edit, Write and a Bash redirect in web/src stayed allowed (${CLOSURE}#T6c); a read-only role (deny Edit/Write/NotebookEdit(/**)) refused Edit, Write and a Bash redirect and allowed Read (${CLOSURE}#T6d). Those trials ran Edit, Write and NotebookEdit rules; since 3.1.1 sync writes Edit rules only, because Claude Code 2.1.311 warns that Write/NotebookEdit path rules never match and Edit rules cover every file-editing tool (its own warning; not re-trialed). Allow-only rules or an untrusted workspace do not restrict (T3a). Residual, advisory: root files/dirs created after sync (uncovered until re-sync; --require-synced-config reports STALE), .agentos/ state files (writable by design), shell writes Claude Code does not recognise as a write to a denied path.`),
         edit_scope: `enforced for claude-code only by the deny rules from \`agentos agents sync claude-code\` in a trusted workspace (listed paths, siblings, Bash redirects to denied paths and read-only deny-all verified), otherwise instruction-only; residual writable paths: ${CLAUDE_RESIDUAL}`,
       },
       launch: row('unsupported', NO_LAUNCH),

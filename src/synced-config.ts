@@ -121,7 +121,8 @@ export function syncFreshness(record: SyncRecord, installed: Record<string, Inst
     // (b) record vs what sync would generate now
     if (!drift) {
       const generated = now.files.find((f) => f.path === file.path);
-      if (!generated || generatedSha(generated) !== file.sha256) drift = scopeChanged ? 'scope changed' : file.entries ? 'tree changed' : 'manifest changed';
+      const deadRules = Object.values(file.entries ?? {}).flat().some((entry) => /^(Write|NotebookEdit)\(/.test(entry));
+      if (!generated || generatedSha(generated) !== file.sha256) drift = scopeChanged ? 'scope changed' : deadRules ? 'Write/NotebookEdit rules Claude Code no longer matches' : file.entries ? 'tree changed' : 'manifest changed';
     }
     if (drift) reasons.push(`${file.path}: ${drift}`);
   }

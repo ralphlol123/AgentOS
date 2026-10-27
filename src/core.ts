@@ -1928,7 +1928,7 @@ async function agentsAgentOSUnlocked(options: any = {}) {
   return { ok: true, root, id, dryRun, action: install.action, text: lines.join('\n') };
 }
 
-type DenyTarget = { path: string; dir: boolean; tools?: string[] };
+type DenyTarget = { path: string; dir: boolean };
 
 /** Claude Code deny targets for an edit scope: everything outside it. Deny wins over allow, so "deny /** + allow a
  *  subset" cannot work; instead, for each edit path, every entry at each ancestor level that is not on the way to an
@@ -1957,7 +1957,7 @@ async function claudeDenyTargets(root: string, edit: Array<{ path: string; dir: 
     }
   }
   if (!kept('.claude')) add({ path: '.claude', dir: true }); // sync itself creates .claude/: deny it whether or not it exists yet
-  for (const path of ['.claude/settings.json', '.claude/settings.local.json']) add({ path, dir: false, tools: ['Edit', 'Write'] });
+  for (const path of ['.claude/settings.json', '.claude/settings.local.json']) add({ path, dir: false });
   add({ path: '.agentos/project.yaml', dir: false });
   add({ path: '.agentos/agents', dir: true });
   listed.forEach(add);

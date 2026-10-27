@@ -358,8 +358,8 @@ test('agents sync claude-code: dry run writes nothing; sync writes the subagent 
   assert.match(agent, /^---\nname: developer\ndescription: "Implement scoped changes/);
   assert.ok(agent.includes(bodyOf(await read(root, '.agentos/agents/developer.md')).replace(/^\n+/, '')), 'agent file carries the card body');
   const settings = JSON.parse(await read(root, '.claude/settings.local.json'));
-  const rules = (path, tools = ['Edit', 'Write', 'NotebookEdit']) => tools.map((tool) => `${tool}(/${path})`);
-  const deny = [...rules('.agentos/agents/**'), ...rules('.agentos/project.yaml'), ...rules('.claude/**'), ...rules('.claude/settings.json', ['Edit', 'Write']), ...rules('.claude/settings.local.json', ['Edit', 'Write']), ...rules('.hermes.md'), ...rules('AGENTS.md'), ...rules('CLAUDE.md'), ...rules('backend/**')];
+  const rules = (path, tools = ['Edit']) => tools.map((tool) => `${tool}(/${path})`);
+  const deny = [...rules('.agentos/agents/**'), ...rules('.agentos/project.yaml'), ...rules('.claude/**'), ...rules('.claude/settings.json'), ...rules('.claude/settings.local.json'), ...rules('.hermes.md'), ...rules('AGENTS.md'), ...rules('CLAUDE.md'), ...rules('backend/**')];
   assert.deepEqual(settings, { model: 'opus', permissions: { ask: ['Bash'], allow: ['Edit(/web/**)'], deny } }, 'existing keys kept, only new keys added');
   const synced = await snapshot(root);
   ok(cli(['agents', 'sync', 'claude-code'], root));
@@ -379,7 +379,7 @@ test('agents sync claude-code: dry run writes nothing; sync writes the subagent 
   await rm(join(root, '.claude'), { recursive: true });
   ok(cli(['agents', 'add', 'reviewer', '--replace'], root));
   ok(cli(['agents', 'sync', 'claude-code', '--role', 'reviewer'], root));
-  assert.deepEqual(JSON.parse(await read(root, '.claude/settings.local.json')), { permissions: { deny: ['Edit(/**)', 'Write(/**)', 'NotebookEdit(/**)'] } });
+  assert.deepEqual(JSON.parse(await read(root, '.claude/settings.local.json')), { permissions: { deny: ['Edit(/**)'] } });
 });
 
 test('agents sync codex writes a managed role block into the in-scope repo AGENTS.md; bytes outside it and doctor stay intact', async (t) => {
