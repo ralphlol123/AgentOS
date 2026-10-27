@@ -89,7 +89,7 @@ for (const manager of managers) {
   if (!/AgentOS dry run/.test(output)) throw new Error(`${manager.name} did not execute agentos dry-run`);
   const installedBin = join(cwd, 'node_modules/.bin/agentos');
   const invoke = args => run(installedBin, args, { cwd });
-  assert.equal(invoke(['--version']), '2.0.0', `${manager.name}: packed installed CLI version`);
+  assert.equal(invoke(['--version']), '3.0.0', `${manager.name}: packed installed CLI version`);
   invoke(['init', '--new']);
   const approval = JSON.parse(invoke(['brain', 'policy', '--json']));
   assert.equal(approval.policy.mode, 'manual', `${manager.name}: packed CLI defaults to manual Brain approval`);
@@ -171,5 +171,5 @@ for (const manager of managers) {
     throw new Error(`${manager.name}: ambiguous plain compact did not refuse with candidates\n${ambiguous.stdout}\n${ambiguous.stderr}`);
   }
   assert.deepEqual(await snapshot(cwd), beforeAmbiguous, `${manager.name}: ambiguous default compact wrote to disk`);
-  console.log(`PASS ${manager.name}: installed 2.0.0 bin; init; default preview/apply/status/doctor/no-op; alias; checkpoint; ambiguity refusal; 15 cards/9 references`);
+  console.log(`PASS ${manager.name}: installed 3.0.0 bin; init; default preview/apply/status/doctor/no-op; alias; checkpoint; ambiguity refusal; 15 cards/9 references`);
 }
