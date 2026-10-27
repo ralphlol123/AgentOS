@@ -2,7 +2,7 @@ export type FlagValue = string | boolean;
 const booleans = new Set(['new', 'existing', 'dry-run', 'yes', 'y', 'detected', 'replace', 'fix', 'json', 'create', 'refresh', 'installed', 'diff', 'include-superseded', 'recover', 'append', 'custom', 'require-enforcement', 'require-synced-config', 'require-complete', 'adopt', 'auto', 'last', 'force', 'full', 'brief', 'strict', 'engines', 'no-index', 'archive-only']);
 const values = new Set(['agents', 'engine', 'role', 'vault', 'dest', 'name', 'expected-sha256', 'objective', 'expect-state', 'task', 'scope', 'budget', 'progress', 'blocker', 'next', 'check', 'cwd', 'claim', 'kind', 'status', 'by', 'from', 'summary', 'supersedes', 'canonical', 'dir', 'location', 'to', 'explain', 'note']);
 /** `--check` and `--claim` repeat; each `--cwd` belongs to the `--check` right before it. */
-export function parseFlagsAndPositionals(args: string[]): { flags: Record<string, FlagValue>; positionals: string[]; checks: Array<{ command: string; cwd?: string }>; claims: string[] } {
+export function parseFlagsAndPositionals(args: string[], extraBooleans: string[] = []): { flags: Record<string, FlagValue>; positionals: string[]; checks: Array<{ command: string; cwd?: string }>; claims: string[] } {
   const flags: Record<string, FlagValue> = {}, positionals: string[] = [], checks: Array<{ command: string; cwd?: string }> = [], claims: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -10,7 +10,7 @@ export function parseFlagsAndPositionals(args: string[]): { flags: Record<string
     if (!arg.startsWith('-')) { positionals.push(arg); continue; }
     const token = arg.replace(/^--?/, ''), equals = token.indexOf('=');
     const key = equals < 0 ? token : token.slice(0, equals), explicit = equals < 0 ? undefined : token.slice(equals + 1);
-    if (booleans.has(key)) {
+    if (booleans.has(key) || extraBooleans.includes(key)) {
       if (explicit !== undefined && !['true', 'false'].includes(explicit)) throw new Error(`--${key} requires true or false.`);
       flags[key] = explicit === undefined || explicit === 'true';
     } else if (values.has(key)) {
@@ -35,7 +35,7 @@ export function validateCommandFlags(command: string, flags: Record<string, Flag
     checkpoint: ['task', 'engine', 'role', 'progress', 'blocker', 'next', 'check', 'cwd', 'claim', 'json', 'dry-run', 'recover'],
     resume: ['task', 'engine', 'json'],
     brain: ['kind', 'scope', 'status', 'by', 'from', 'summary', 'supersedes', 'append', 'task', 'json', 'dry-run', 'location', 'adopt', 'auto', 'to', 'last', 'force'],
-    doctor: ['fix', 'json', 'dry-run', 'explain', 'engines'], compact: ['dry-run', 'archive-only', 'objective', 'expect-state', 'diff'],
+    doctor: ['fix', 'json', 'dry-run', 'explain', 'engines'], upgrade: ['check', 'to', 'dry-run', 'yes', 'y', 'json'], compact: ['dry-run', 'archive-only', 'objective', 'expect-state', 'diff'],
     obsidian: ['vault', 'dest', 'create', 'dry-run', 'canonical', 'dir', 'note', 'no-index'],
     skills: ['detected', 'dry-run', 'replace', 'installed', 'name', 'yes', 'expected-sha256'], agents: ['name', 'dry-run', 'replace', 'installed', 'json', 'custom', 'role', 'scope', 'yes', 'expected-sha256'],
   };

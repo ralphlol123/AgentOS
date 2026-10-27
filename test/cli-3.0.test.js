@@ -352,14 +352,14 @@ test('doctor --json keeps the read-only migration inventory; legacy findings nam
 
 // --- help ----------------------------------------------------------------------------------------
 
-test('help: only the 11 commands in five groups, then one removal note', async (t) => {
+test('help: only the 12 commands in five groups, then one removal note', async (t) => {
   const { root } = await workspace(t);
   const help = run(['--help'], root).stdout;
   const groups = ['Setup & health', 'Work loop (agents run these)', 'Knowledge', 'Team', 'Optional & maintenance'];
   const at = groups.map((g) => help.split('\n').indexOf(g));
   assert.ok(at.every((i, n) => i > 0 && (n === 0 || i > at[n - 1])), `groups in order: ${at}`);
   const commands = [...new Set([...help.matchAll(/^ {2}agentos ([a-z-]+)/gm)].map((m) => m[1]))];
-  assert.deepEqual(commands, ['init', 'status', 'doctor', 'context', 'checkpoint', 'resume', 'brain', 'agents', 'skills', 'obsidian', 'compact']);
+  assert.deepEqual(commands, ['init', 'status', 'doctor', 'upgrade', 'context', 'checkpoint', 'resume', 'brain', 'agents', 'skills', 'obsidian', 'compact']);
   assert.match(help, /agentos init .*--yes/, 'init --yes is documented');
   assert.doesNotMatch(help, /--agents [^\n]*detected|--mode|--rewrite|--checkpoint|--from-catalog|--adopt-custom|--prune-retired|--normalize-repo-ids|Deprecated/);
   assert.match(help, /^Removed in 3\.0\.0: .*docs\/migration-3\.0-cli\.md/m);

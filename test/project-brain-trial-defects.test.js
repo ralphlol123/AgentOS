@@ -28,8 +28,8 @@ async function project(t) {
 
 // --- D1: `<command> --help` --------------------------------------------------------------------------
 
-// The 11 commands of 3.0.0 (the removed ones print their removal line instead; see cli-removal-3.0.test.js).
-const COMMANDS = ['init', 'status', 'doctor', 'compact', 'obsidian', 'skills', 'agents', 'context', 'checkpoint', 'resume', 'brain'];
+// The 12 commands (3.0.0's 11 plus upgrade; the removed ones print their removal line instead; see cli-removal-3.0.test.js).
+const COMMANDS = ['init', 'status', 'doctor', 'upgrade', 'compact', 'obsidian', 'skills', 'agents', 'context', 'checkpoint', 'resume', 'brain'];
 
 test('D1: --help and -h on every command (and on a subcommand) print that command\'s usage, exit 0, and run nothing', async (t) => {
   const dir = await base(t);

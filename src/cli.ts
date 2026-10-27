@@ -4,6 +4,8 @@ import { stdin as input, stdout as output } from 'node:process';
 import { parseFlagsAndPositionals, validateCommandFlags } from './cli-options.js';
 import { createRequire } from 'node:module';
 import { enginesReport } from './engines.js';
+import { upgradeAgentOS } from './upgrade.js';
+import { fileURLToPath } from 'node:url';
 import { adaptersAgentOS, agentsAgentOS, BRAIN_USAGE, brainAgentOS, checkpointAgentOS, compactAgentOS, contextAgentOS, doctorAgentOS, handoffAgentOS, initAgentOS, linkObsidianAgentOS, obsidianAgentOS, promptAgentOS, resumeAgentOS, skillsAgentOS, statusAgentOS } from './core.js';
 
 const require = createRequire(import.meta.url);
@@ -22,7 +24,8 @@ async function main() {
       else { console.error(`Unknown command: ${command}`); printHelp(); process.exitCode = 1; }
       return;
     }
-    const { flags } = parseFlagsAndPositionals(args);
+    // `upgrade --check` is a switch; elsewhere `--check` takes a command (checkpoint).
+    const { flags, positionals: commandArgs } = parseFlagsAndPositionals(args, command === 'upgrade' ? ['check'] : []);
     validateCommandFlags(command, flags);
     if (command === 'help' || command === '--help' || command === '-h') {
       printHelp();
@@ -207,6 +210,13 @@ async function main() {
       process.exitCode = result.ok ? 0 : 1;
       return;
     }
+    if (command === 'upgrade') {
+      if (commandArgs.length) throw new Error(`upgrade takes no arguments (got ${commandArgs[0]}); pin a version with --to <version>.`);
+      const result = await upgradeAgentOS({ cliPath: fileURLToPath(import.meta.url), current: VERSION, cwd: process.cwd(), check: flags.check as boolean, to: flags.to as string, dryRun: flags['dry-run'] as boolean, yes: Boolean(flags.yes || flags.y), json: flags.json as boolean });
+      if (result.text) console.log(result.text);
+      process.exitCode = result.exitCode;
+      return;
+    }
     if (command === 'resume') {
       const result = await resumeAgentOS({ cwd: process.cwd(), task: flags.task, engine: flags.engine, json: flags.json });
       console.log(result.text);
@@ -332,6 +342,7 @@ const HELP = [
   '  agentos doctor [--fix] [--dry-run] [--json]',
   '  agentos doctor --explain <file>',
   '  agentos doctor --engines [--json]',
+  '  agentos upgrade [--check] [--to <version>] [--dry-run] [--yes] [--json]',
   '',
   'Work loop (agents run these)',
   '  agentos context [claude|codex|opencode|hermes] [--task "<text>"] [--role <agent-id>] [--scope <repo-or-path>,...] [--budget <tokens>] [--json] [--strict] [--include-superseded]',

@@ -176,6 +176,19 @@ agentos --version
 agentos init --existing --dry-run
 ```
 
+## Upgrade
+
+One command updates the CLI with the package manager that installed it (Bun, npm or pnpm global) and then refreshes the current workspace with the new binary's `doctor --fix`:
+
+```bash
+agentos upgrade --check     # read-only: current vs latest, install method, the command; exit 0 up to date, 10 update available
+agentos upgrade --dry-run   # the plan, installs nothing
+agentos upgrade             # asks first on a terminal; --yes for scripts and for a major version
+agentos upgrade --to 3.1.0  # pin a version
+```
+
+It refuses a project-local install (prints the command to run in that project), stops if the installer fails or if `agentos --version` on PATH is not the new version afterwards, and outside a workspace reminds you to run `agentos doctor --fix` in each one. `--json` prints the plan/result as JSON. `AGENTOS_REGISTRY_URL` points it at a mirror.
+
 ## Quickstart
 
 New project:
@@ -257,7 +270,7 @@ What is enforced and what is only instruction, per engine: [docs/engines.md](doc
 
 ## Commands
 
-`agentos <command> --help` (or `-h`) prints one command's usage. The 11 commands:
+`agentos <command> --help` (or `-h`) prints one command's usage. The 12 commands:
 
 ```bash
 # Setup & health
@@ -266,6 +279,7 @@ agentos status [--full]
 agentos doctor [--fix] [--dry-run] [--json]
 agentos doctor --explain <file>
 agentos doctor --engines [--json]
+agentos upgrade [--check] [--to <version>] [--dry-run] [--yes] [--json]
 
 # Work loop (agents run these)
 agentos context [claude|codex|opencode|hermes] [--task "<text>"] [--role <agent-id>] [--scope <repo-or-path>,...] [--budget <tokens>] [--json] [--strict] [--include-superseded]
