@@ -1066,6 +1066,21 @@ test('skills add / agents add materialize catalog agent and skill cards', async 
   assert.match(project, /- security-reviewer/);
 });
 
+test('agents add <file> --dry-run accepts good templates and exits 1 on missing sections', async () => {
+  const root = await tempProject();
+  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
+  const good = await agentsAgentOS({ cwd: root, add: join(process.cwd(), 'templates/agents/planner.md'), dryRun: true });
+  assert.equal(good.ok, true);
+  assert.match(good.text, /Validation: OK/);
+
+  const badPath = join(root, 'bad-agent.md');
+  await writeFile(badPath, '# Bad Agent\n\nNo required sections.\n');
+  const bad = await agentsAgentOS({ cwd: root, add: badPath, dryRun: true });
+  assert.equal(bad.ok, false);
+  assert.match(bad.text, /Validation: FAIL/);
+  assert.match(bad.text, /missing required section/);
+});
+
 test('agents add and skills add <file> refuse to overwrite changed files unless replace is explicit', async () => {
   const root = await tempProject();
   await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });

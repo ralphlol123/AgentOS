@@ -2215,7 +2215,7 @@ const isImportUrl = (value: unknown) => /^https?:\/\//i.test(String(value ?? '')
 
 /** Safe import of an external file or URL for `agents|skills add <file|url>`: hash pin, safety review, quarantine
  *  of blocked content, no overwrite without --replace, dry run unless --yes; prints the template structure check
- *  and writes an agent as a manifest card. */
+ *  (an explicit --dry-run exits 1 when it fails) and writes an agent as a manifest card. */
 async function importTemplateSource(root: string, options: any, label: 'agents add' | 'skills add') {
   const source = String(options.source || '').trim();
   const type = String(options.type || '').trim().toLowerCase();
@@ -2262,7 +2262,10 @@ async function importTemplateSource(root: string, options: any, label: 'agents a
   } else {
     lines.push(`Dry run only. Re-run with --yes --expected-sha256 ${fetched.sha256} to accept exactly the reviewed source.`);
   }
-  return { ok: true, root, dryRun, text: lines.join('\n'), review, validation };
+  // `--dry-run` is the template check (what `templates validate` was): it fails on an invalid template.
+  const failedCheck = options.dryRun === true && !validation.ok;
+  if (failedCheck) lines.push('Validation failed: exit 1. Without --dry-run, --yes still imports the file as reference material.');
+  return { ok: !failedCheck, root, dryRun, text: lines.join('\n'), review, validation };
 }
 
 /** A built-in agent or skill template by id (`skill:<category>/<id>` and `agent:<id>` also work; retired IDs resolve with a note). */

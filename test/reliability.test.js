@@ -80,6 +80,9 @@ test('review hash rejects changed sources and embedded fences remain literal', a
   await assert.rejects(skillsAgentOS({ cwd: root, add: source, name: 'reviewed', yes: true, expectedSha256: sha }), /SHA256/); await writeFile(source, reviewed); assert.equal((await skillsAgentOS({ cwd: root, add: source, name: 'reviewed', yes: true, expectedSha256: sha })).ok, true);
   assert.equal(markdownHeadings(await readFile(join(root, '.agentos/skills/imported/reviewed/SKILL.md'), 'utf8')).some(h => h.title === 'Fake heading'), false);
 });
+test('validation rejects required sections found only in fenced examples', async t => {
+  const root = await fixture(t), source = join(root, 'fake.md'); await writeFile(source, '# Example\n\n```md\n## Responsibilities in\nDo work.\n## Responsibilities out\nNo secrets.\n## Skills\nUse skills.\n```'); assert.equal((await agentsAgentOS({ cwd: root, add: source, dryRun: true })).ok, false);
+});
 test('writer lock excludes another process, releases on error and explains stale recovery', async t => {
   const root = await fixture(t);
   await withWorkspaceWriter(root, async () => { const r = spawnSync(process.execPath, [cli, 'skills', 'add', 'debugging'], { cwd: root, encoding: 'utf8' }); assert.ifError(r.error); assert.equal(r.status, 1); assert.match(r.stderr, /writer lock exists/); assert.equal((await doctorAgentOS({ cwd: root })).ok, true); });
