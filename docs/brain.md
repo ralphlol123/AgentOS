@@ -44,9 +44,51 @@ proposed ──apply──▶ accepted ──verify──▶ verified
 - `brain preview <proposal>` (read-only): target, change mode, frontmatter changes, supersession links, body diff, validation result.
 - `brain validate <proposal> [--json]` (read-only) runs every check; exit 1 on any rejection.
 - `brain apply <proposal> --by <owner> [--dry-run]` validates, then in one mutation transaction writes the target atomically (`status: accepted`, new `source_hash`, `updated_at`, a `history` entry `<time> applied <proposal> by <applier> (proposed by <proposer>): <old hash> -> <new hash>`, `supersedes`), marks each superseded record `status: superseded` + `superseded_by` (body untouched), moves the proposal to `applied/` with `status: applied` and `applied_by: <applier>`, and regenerates the index. Without `--by` (or with an empty one) a real apply is refused, exit 1, zero writes; `--dry-run`, `preview` and `validate` do not need it. The applier never defaults to the proposer.
-- **Applying is the owner's step: an instruction plus an audit trail, not enforcement.** The generated guidance tells engines to stage with `brain propose` and never run `brain apply`; the owner runs `brain apply <proposal> --by <owner>`. AgentOS cannot tell who is at the keyboard: an engine that ignores the instruction can still pass `--by` with any name. What `--by` buys is that every application names an applier separately from the proposer, so an engine-applied change is visible in `history` and in the applied file instead of being credited to the proposer (trial defect D6). No permission rule blocks `brain apply` for any engine. Any rejection: zero writes, exit 1. Applying an already-applied proposal (by path or file name) is a no-op that says so.
+- **Manual review is the default.** The owner runs `brain apply <proposal> --by <owner>`. Agents may use `--auto --by <self>` only under the owner-configured policy below; a refusal stays pending. `--by` is a supplied label, not authenticated identity. The CLI cannot prevent a caller from impersonating someone, dropping `--auto`, changing the policy or editing writable Markdown directly. History records declared attribution, not proof of who acted. Applying an already-applied proposal is a write-free no-op.
 - `brain verify <id-or-path> [--by <name>] [--dry-run]` records that a human checked the current text: `verified_at`, `verified_by`, `status: verified` (a superseded record stays superseded), and refreshes `source_hash` explicitly. Nothing else re-hashes a record.
 - `brain list [--status] [--kind]`, `brain show <id-or-path>`, `brain search <terms…>`, `brain check` are read-only; all accept `--json`. `search` uses the context builder's own term matcher (`taskTerms`/`termHits`: id slug, title, kind).
+
+### Optional automatic application
+
+Existing projects stay in manual mode. To stop reviewing every routine update, the **owner** can add this mapping under the existing `knowledge` section of `.agentos/project.yaml` (keep any `obsidian` settings):
+
+```yaml
+knowledge:
+  brain:
+    approval:
+      mode: auto-append
+      actors: [choco]
+      records: [brain:implementation]
+```
+
+Use an existing, deliberately selected `note` or `feature` record. For example, create `.agentos/brain/implementation.md`, review its starting text, and register it with `agentos brain register .agentos/brain/implementation.md --kind note --status accepted`. The policy does not create records, move notes, or enable itself. Use `mode: manual` or remove the approval mapping to disable it immediately. Exact names only; wildcards, malformed settings and empty allowlists cannot enable automatic application.
+
+An authorized agent uses its own name consistently:
+
+```bash
+agentos brain policy --json
+# Complete the work and record its checks first; keep the proposal body outside the Git work tree.
+agentos checkpoint --task helper --progress "Helper implemented" --next "Review" --check "npm test"
+agentos brain propose brain:implementation --from /path/outside/project/update.md --task helper --append --by choco
+agentos brain preview <proposal> --auto --by choco
+agentos brain apply <proposal> --auto --by choco
+```
+
+`preview` and `validate` accept `--auto --by` to inspect eligibility without writing; `apply --auto --dry-run` checks the same conditions. The agent still invokes the commands: no daemon, watcher or model call is added. Without `--auto`, the existing manual owner workflow is unchanged.
+
+Automatic application requires **all** of the following:
+
+- The actor and exact target ID are allowed, and proposer and applier have the same declared name.
+- The target is an accepted/verified **workspace** `note` or `feature`. Architecture, decisions, ADRs, conventions, proposed/superseded records and vault-only records require manual review.
+- The change is append-only, carries no supersession, adds at most 4,000 UTF-8 bytes, and leaves the total record body at most 32,000 bytes. Replacement, removal and larger updates need review.
+- Normal validation passes, including stale-base and duplicate checks, with **no detected conflict flags**. An unavailable or unreadable Brain also needs review.
+- The proposal cites the task's current checkpoint. It is not recovered, has no blockers, and the repository state is available, complete and unchanged. All recorded receipts are `observed-pass` for that state with intact local evidence logs; failed, claimed, unrun or unavailable checks cannot qualify.
+
+The policy is re-read under the workspace writer lock at apply time. A refusal exits 1, returns `review_required: true` and `approval.reasons` in JSON, and leaves the record, proposal, history and indexes untouched. The agent must leave it pending for the owner; it must not remove `--auto` or relax policy to get past a refusal.
+
+Successful auto application retains the existing transaction, history, index recovery and idempotency behavior. Applied proposals record `applied_by`, `approval_mode: auto-append`, and the SHA-256 of the normalized policy as `approval_policy_hash`. The history carries the policy hash too. Manual applications record `approval_mode: manual`. Neither path marks knowledge verified.
+
+**Limits:** this checks workflow evidence, not semantic truth. A passing command does not prove the appended prose; duplicate/conflict detection is heuristic, so differently worded contradictions can escape it. Use narrow records for factual implementation observations and keep decisions under review. Actor labels, policy files, checkpoints and evidence logs are locally writable, not authenticated or tamper-proof. Direct edits and the manual path remain available. Files excluded from Git evidence, runtime environment changes, external services and ignored files are not a complete reproducibility guarantee. Fresh real-engine adoption of this workflow still needs a trial; CLI fixtures alone do not prove agents will follow it.
 
 ### Validation checks
 
@@ -65,11 +107,11 @@ proposed ──apply──▶ accepted ──verify──▶ verified
 
 Completed work can change durable knowledge (an architecture fact, a decision, a convention). AgentOS keeps that upkeep in the normal completion loop **without calling a model**: the active engine (or an orchestrator) does the review; AgentOS supplies the instruction and a deterministic staging step.
 
-- **Trigger: an instruction, not a hook.** `agentos checkpoint` ends with `Knowledge: did this work change durable project knowledge (architecture, a decision, a convention)? If yes, stage one focused proposal: \`agentos brain propose <record-id> --from <file> --task <task>\` (ids: \`agentos brain list\`). Progress only: stage nothing. Never run \`agentos brain apply\`: the owner applies with \`--by <owner>\`.` The startup loop in `AGENTS.md`/`CLAUDE.md`/`.hermes.md` and `.agentos/guide.md` say the same. Whether a proposal is staged depends on the engine reading and following that instruction; nothing in AgentOS runs it automatically, and a checkpoint never stages a proposal by itself.
+- **Trigger: an instruction, not a hook.** `agentos checkpoint` ends with `Knowledge: did this work change durable project knowledge (architecture, a decision, a convention)? If yes, stage one focused proposal: \`agentos brain propose <record-id> --from <file> --task <task>\` (ids: \`agentos brain list\`). Progress only: stage nothing. Inspect \`agentos brain policy\`: manual review by default; automatic application is allowed only through the owner policy and \`--auto --by <self>\`. Refusals stay pending.` The startup loop in `AGENTS.md`/`CLAUDE.md`/`.hermes.md` and `.agentos/guide.md` say the same. Whether a proposal is staged depends on the engine reading and following that instruction; nothing in AgentOS runs it automatically, and a checkpoint never stages a proposal by itself.
 - **Staging: `agentos brain propose <id-or-path> --from <file|-> --task <id>`.** The normal `propose` (same validation, `base_hash`, `proposed_by`) plus `task`, `checkpoint` (the id `current.json` points at) and `evidence`: the changed paths the checkpoint recorded (`changed: src/db.js`, workspace-relative, at most 20 listed) and every receipt with its state (`observed-pass: npm run test (cwd .)`, `claimed: …`, `not-run: …`). `brain preview` prints the checkpoint and evidence.
 - **Progress-only or no-op: nothing.** No checkpoint for the task, an incomplete one, or one that records no changed file and no `observed-pass` check → `NOTHING STAGED`, exit 1, zero writes. A claim is not evidence.
 - **Same event, one proposal.** The file name is `<task>-<12 hex>-<record>.md`, the hex a sha256 over target, checkpoint id, mode, whitespace-normalized text and `supersedes`. Re-running the same staging (pending or already applied) prints `already staged as …; nothing written` (exit 0, `duplicate: true`). New text or a new checkpoint is a new proposal.
-- **Application stays the owner's.** `preview`, `validate`, `apply`, stale-base rejection, supersession and history are the ones above. `apply` sets `accepted`, never `verified`: a passing check or a new hash is not verification (`brain verify` stays a human step). After the record write, `index.json` and the Obsidian index note are refreshed; a failure there keeps the accepted record and reports `index_stale`/`note_stale`.
+- **Application follows the approval policy (manual by default).** `preview`, `validate`, `apply`, stale-base rejection, supersession and history are the ones above. `apply` sets `accepted`, never `verified`: a passing check or a new hash is not verification (`brain verify` stays a human step). After the record write, `index.json` and the Obsidian index note are refreshed; a failure there keeps the accepted record and reports `index_stale`/`note_stale`.
 - **Human edits win.** A human edit to the target after staging makes the proposal `stale` (exit 1, the file untouched, the proposal stays pending). Review, `brain verify`, then stage again.
 
 Tested in `test/project-brain-slice5.test.js` with CLI fixtures; whether a real engine follows the instruction unprompted is an engine trial, not a test ([acceptance A18](project-brain-acceptance.md)).
@@ -87,7 +129,7 @@ Tested in `test/project-brain-slice5.test.js` with CLI fixtures; whether a real 
 `agentos init` (new and `--existing`, also re-runs) ends with the `brain init` step above, so every initialized workspace has a usable Brain without a second command:
 
 - **No duplication.** Existing records, AgentOS files and covering docs are adopted or named, never copied. A project's own docs are never edited by `init`; `brain register` is the explicit adoption step.
-- **Nothing invented.** Templates hold `(unknown — fill in)` markers only. `init` prints the bounded discovery step for the engine (`Next: … fill the (unknown — fill in) sections only with facts it can cite from the code … as proposals: agentos brain propose <id> --from <file>`). AgentOS calls no model; documenting the project is the active engine's job, through proposals the owner applies.
+- **Nothing invented.** Templates hold `(unknown — fill in)` markers only. `init` prints the bounded discovery step for the engine (`Next: … fill the (unknown — fill in) sections only with facts it can cite from the code … as proposals: agentos brain propose <id> --from <file>`). AgentOS calls no model; documenting the project is the active engine's job, through proposals handled by the approval policy above.
 - **Repeatable.** Re-running `init` leaves every file byte- and mtime-identical (test-checked), custom content included. A Brain problem (e.g. a hand-written file at a template path) is printed and never fails or rolls back `init`.
 
 One Brain per workspace: the nearest folder with `.agentos/` is the workspace (`agentos status` prints it), so a child repo without its own `.agentos/` uses the parent's Brain, and two independent projects — siblings or one nested inside the other — never read each other's records (`test/project-brain-slice3.test.js`).
