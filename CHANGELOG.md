@@ -4,6 +4,15 @@ All notable changes to AgentOS for Projects are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- Opt-in `knowledge.brain.approval` policy (`manual` by default, or `auto-append` with exact actor/record allowlists). `brain policy` explains it; `brain preview|validate|apply --auto --by <self>` evaluates it. Small append-only updates to accepted workspace notes/features can apply after current observed-pass checkpoint evidence. Architecture, decisions, conventions, replacements, supersession, stale/missing evidence and detected conflicts require review. Refusals preserve pending proposals. History and applied metadata retain declared actors, approval mode and policy hash; this is not authenticated identity or a sandbox.
+- Engine bootloaders, context, checkpoint output and the packaged Brain guide explain policy-based upkeep. Existing manual application and checkpoints stay available; agents must not change policy or bypass a refusal.
+
+### Fixed
+
+- Checkpoint fingerprints include bounded changed-file content hashes, so same-length code edits invalidate test receipts. Incomplete content evidence is treated as stale and cannot authorize automatic Brain application. Older checkpoints remain readable but need fresh checks before their receipts are current.
+
 ## [2.0.0] - 2026-10-26
 
 Project Brain (PR #57). The Brain works without Obsidian, and Obsidian stays an optional second location. Upgrade: run `agentos doctor --fix` once to refresh the adapters and `.agentos/guide.md`, then check the breaking changes below. Migration: `docs/migration-project-brain.md`. Acceptance: `docs/project-brain-acceptance.md`.
