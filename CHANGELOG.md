@@ -4,6 +4,11 @@ All notable changes to AgentOS for Projects are documented here.
 
 ## [Unreleased]
 
+### Fixed
+
+- Hints that still pointed at `agentos brain init` (removed in 3.0.0) now name the 3.0 command: the `init --dry-run` plan line ends with "list them after init with `agentos brain list`", a failed Brain setup during `init` says "Fix it, then re-run `agentos init`", and an empty `brain list` and the Obsidian index note's empty Brain list say to re-run `agentos init` (or `agentos brain register <path>`). An index note written with the old empty-list line is still recognised as generated. `docs/release-readiness.md` uses `skills add <file>` instead of `templates import`, and `docs/reliability-acceptance.md` describes `run handoff` and `templates list` as removed.
+- A guard test runs help, every `<command> --help`, `init --dry-run`, an empty `brain list`, `doctor`, `status --full` and every file `init` generates, and fails if any names a removed form. The forms come from `src/removed-forms.ts`, the same table the CLI refuses them with.
+
 ## [3.1.0] - 2026-10-27
 
 ### Added

@@ -23,7 +23,7 @@ This change completes the repository-level reliability scope of discovery recomm
 
 Atomic replacement protects individual files. Multi-file rollback handles caught in-process failures; it is not a durable transaction journal and cannot guarantee all-or-nothing recovery after power loss or forced termination. Migration backups remain in `.claude/*.agentos-legacy-<timestamp>` destinations shown by the migration plan; inspect the actual backup paths before manually restoring native files. Do not overwrite newer edits during recovery.
 
-`agentos run handoff` records a pause, not task completion. It preserves original text even if an unclosed fence makes the appended metadata render as code. Inspect the run file directly in that case. Skill removal retains unrelated prose and fenced examples; native engine copies remain untouched.
+`run handoff` (removed in 3.0.0; use `agentos checkpoint --task <id>` and `agentos resume --task <id>`) recorded a pause, not task completion. Its run files preserve original text even if an unclosed fence makes the appended metadata render as code. Inspect the run file directly in that case. Skill removal retains unrelated prose and fenced examples; native engine copies remain untouched.
 
 Handoff excludes common environment, credential, private-key, and production paths from diff snippets. Additional workspace-relative paths can be declared in `.agentos/project.yaml`:
 
@@ -40,7 +40,7 @@ Remote template fetches permit HTTP(S), at most five redirects, a 15-second tota
 
 ## Catalogs and configuration
 
-`agents list` and `skills list` describe built-in sources. `templates list` describes the file registry; these are deliberately distinct surfaces, not guaranteed equivalent versions. `agents list --installed` and `skills list --installed` inspect workspace cards, compare known source content, and label unmatched content `custom-or-imported`; that label does not infer provenance. Agent inventory also reports activation in YAML. Files under `templates/schemas/` are examples, not executable validators.
+`agents list` and `skills list` describe built-in sources (`templates list`, which described the file registry, was removed in 3.0.0). `agents list --installed` and `skills list --installed` inspect workspace cards, compare known source content, and label unmatched content `custom-or-imported`; that label does not infer provenance. Agent inventory also reports activation in YAML. Files under `templates/schemas/` are examples, not executable validators.
 
 Adapter policy accepts `child_repo_pointer_files: true|false` and `child_repo_gitignore_policy: ignore|none`. Disabling pointers stops their generation/repair; it does not delete existing user-visible files. Re-init retains the existing agent profile; use explicit agent additions or review YAML separately to change selection. Refresh is additive discovery, not automatic reconciliation/deletion.
 
