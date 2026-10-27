@@ -75,8 +75,8 @@ agentos init --new
 agentos agents list
 agentos skills list
 printf 'License: MIT\n# Sample Skill\nUse safely.\n' > sample-skill.md
-agentos templates import sample-skill.md --type skill --name sample-skill --dry-run
-agentos templates import sample-skill.md --type skill --name sample-skill --yes
+agentos skills add sample-skill.md --name sample-skill --dry-run
+agentos skills add sample-skill.md --name sample-skill --yes
 agentos doctor
 ```
 

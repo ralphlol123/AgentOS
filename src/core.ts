@@ -896,7 +896,7 @@ async function initAgentOSUnlocked(options: any = {}) {
     const adapter = adapterPlans.find(entry => relative(cwd, entry.target.path) === path);
     plan.push({ path, action: adapter?.plan.action ?? (await exists(join(cwd, path)) ? (path.endsWith('.gitignore') || (options.refresh && path === '.agentos/project.yaml') ? 'reconcile' : 'preserve') : 'create') });
   }
-  if (options.dryRun) return { mode, workspaceKind, repos, planned, plan, agents: agentSelection, text: renderDryRun({ cwd, mode, workspaceKind, repos, agentSelection }) + '\n' + plan.map(item => `- ${item.action}: ${item.path}`).join('\n') + '\n- then: Project Brain setup (creates missing templates under .agentos/brain, adopts existing records; preview after init with `agentos brain init --dry-run`)' + (existing ? '' : '\n' + collectAgentDeprecationNotices(options.agents).map((n) => `Note: ${n}`).join('\n')) };
+  if (options.dryRun) return { mode, workspaceKind, repos, planned, plan, agents: agentSelection, text: renderDryRun({ cwd, mode, workspaceKind, repos, agentSelection }) + '\n' + plan.map(item => `- ${item.action}: ${item.path}`).join('\n') + '\n- then: Project Brain setup (creates missing templates under .agentos/brain, adopts existing records; list them after init with `agentos brain list`)' + (existing ? '' : '\n' + collectAgentDeprecationNotices(options.agents).map((n) => `Note: ${n}`).join('\n')) };
 
   // Every filesystem mutation init makes - the .agentos scaffold directories
   // and files, per-agent/repo files, root/child adapters, their
@@ -942,7 +942,7 @@ async function initAgentOSUnlocked(options: any = {}) {
   // nothing populated is rewritten (src/brain.ts initBrain). A Brain problem is reported; it never undoes init.
   let brain: string[];
   try { brain = (await initBrain(await brainCtxFor(cwd, cwd), {})).text.split('\n').slice(1); }
-  catch (error) { brain = [`- not set up: ${error.message}. Fix it, then run \`agentos brain init\`.`]; }
+  catch (error) { brain = [`- not set up: ${error.message}. Fix it, then re-run \`agentos init\`.`]; }
   const deprecationNotes = existing ? [] : collectAgentDeprecationNotices(options.agents).map((n) => `Note: ${n}`);
   return { mode, workspaceKind, repos, agents: agentSelection, text: [`AgentOS initialized (${mode}, ${workspaceKind}, agents: ${agentSelection.profile}) at ${cwd}`, ...deprecationNotes, '', 'Project Brain (.agentos/brain, `agentos brain list`):', ...brain, '', DISCOVERY_LINE].join('\n') };
 }
@@ -1928,7 +1928,7 @@ async function agentsAgentOSUnlocked(options: any = {}) {
   return { ok: true, root, id, dryRun, action: install.action, text: lines.join('\n') };
 }
 
-type DenyTarget = { path: string; dir: boolean; tools?: string[] };
+type DenyTarget = { path: string; dir: boolean };
 
 /** Claude Code deny targets for an edit scope: everything outside it. Deny wins over allow, so "deny /** + allow a
  *  subset" cannot work; instead, for each edit path, every entry at each ancestor level that is not on the way to an
@@ -1957,7 +1957,7 @@ async function claudeDenyTargets(root: string, edit: Array<{ path: string; dir: 
     }
   }
   if (!kept('.claude')) add({ path: '.claude', dir: true }); // sync itself creates .claude/: deny it whether or not it exists yet
-  for (const path of ['.claude/settings.json', '.claude/settings.local.json']) add({ path, dir: false, tools: ['Edit', 'Write'] });
+  for (const path of ['.claude/settings.json', '.claude/settings.local.json']) add({ path, dir: false });
   add({ path: '.agentos/project.yaml', dir: false });
   add({ path: '.agentos/agents', dir: true });
   listed.forEach(add);

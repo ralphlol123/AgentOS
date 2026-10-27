@@ -302,7 +302,8 @@ const NOTE_END = '<!-- agentos:brain-index:end -->';
 const START_PREFIX = '<!-- agentos:brain-index:start';
 const LEGACY_PROMISE = 'Written once by `agentos obsidian init|link`; AgentOS never overwrites it. Edit it freely.';
 const NOTE_RULE = 'AgentOS rewrites only the block between the `agentos:brain-index` markers (on every Brain write and `agentos brain index`); everything else in this note is yours.';
-const NONE_YET = '- None registered yet (`agentos brain init`, `agentos brain register <path>`).';
+const NONE_YET = '- None registered yet (`agentos init`, `agentos brain register <path>`).';
+const NONE_YET_BEFORE_311 = '- None registered yet (`agentos brain init`, `agentos brain register <path>`).'; // still recognised as generated
 const OUTSIDE = ' — outside this vault: edit in your editor';
 const OUTSIDE_RULE = 'Obsidian shows only records stored inside this vault folder. A record marked *outside this vault* lives in the workspace (for example `.agentos/`): Obsidian cannot open it; edit it in your editor or through `agentos brain propose|apply`. To have a new record editable here, create it inside this folder and register it in place: `agentos brain register <this folder>/<note>.md` (no copies, no moves).';
 const GENERATED_LINE = /^- \[.*\]\(<.*>\) — `brain:[a-z0-9-]+` \([a-z]+, [a-z]+\)( — outside this vault: edit in your editor)?$/;
@@ -335,7 +336,7 @@ function adoptNote(before: string, block: string) {
   const at = lines.indexOf('## Brain records');
   let end = at + 1;
   while (at >= 0 && end < lines.length && !lines[end].startsWith('#')) end++;
-  if (at >= 0 && lines.slice(at + 1, end).every((line) => line === '' || line === NONE_YET || line === OUTSIDE_RULE || GENERATED_LINE.test(line))) {
+  if (at >= 0 && lines.slice(at + 1, end).every((line) => line === '' || line === NONE_YET || line === NONE_YET_BEFORE_311 || line === OUTSIDE_RULE || GENERATED_LINE.test(line))) {
     return [...lines.slice(0, at), ...block.split('\n'), '', ...lines.slice(end)].join('\n').replace(/\n*$/, '\n');
   }
   const text = lines.join('\n');
@@ -585,7 +586,7 @@ export async function listBrain(ctx: BrainCtx, options: { status?: string; kind?
   for (const gone of groups) for (const record of gone.records) lines.push(`- ${record.id} [${record.state}] ${record.kind} ${record.path}: ${gone.reason} — ${record.title}`);
   for (const gone of groups) if (gone.failed && !gone.records.length) lines.push(`- ${gone.reason}; no records known there`);
   return out(options.json, true, { records: [...records.map(publicRecord), ...groups.flatMap((gone) => gone.records)] }, lines.length ? lines
-    : ['No Brain records. Start with `agentos brain init` or `agentos brain register <path>`.']);
+    : ['No Brain records. Re-run `agentos init` (creates the Brain templates) or `agentos brain register <path>`.']);
 }
 
 export async function showBrain(ctx: BrainCtx, ref: string | undefined, options: { json?: boolean }) {

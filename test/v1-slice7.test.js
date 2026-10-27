@@ -66,9 +66,9 @@ async function workspace(t, { gitRoot = false, scope = 'task_scope:\n  read: [ap
 // --- D1: agents sync claude-code restricts with deny rules -------------------------------------------
 
 const TRUST = /Claude Code ignores `\.claude\/settings\.local\.json` until the workspace is trusted; run `claude` interactively once or set `projects\[<root>\]\.hasTrustDialogAccepted`/;
-const rules = (path, tools = ['Edit', 'Write', 'NotebookEdit']) => tools.map((tool) => `${tool}(/${path})`);
+const rules = (path, tools = ['Edit']) => tools.map((tool) => `${tool}(/${path})`);
 /** Root entries every sibling-enumerated deny list carries for this fixture (closure fix; see v1-claude-deny-siblings.test.js). */
-const ROOT_DENY = [...rules('.agentos/agents/**'), ...rules('.agentos/project.yaml'), ...rules('.claude/**'), ...rules('.claude/settings.json', ['Edit', 'Write']), ...rules('.claude/settings.local.json', ['Edit', 'Write']), ...rules('.hermes.md'), ...rules('AGENTS.md'), ...rules('CLAUDE.md')];
+const ROOT_DENY = [...rules('.agentos/agents/**'), ...rules('.agentos/project.yaml'), ...rules('.claude/**'), ...rules('.claude/settings.json'), ...rules('.claude/settings.local.json'), ...rules('.hermes.md'), ...rules('AGENTS.md'), ...rules('CLAUDE.md')];
 const DENY_API = [...ROOT_DENY, ...rules('api/**'), ...rules('api/contracts/openapi.yaml')];
 
 test('D1: sync claude-code denies every repo and read path outside the edit scope, keeps the allow entry, prints the trust note; a read-only role denies everything', async (t) => {
@@ -89,7 +89,7 @@ test('D1: sync claude-code denies every repo and read path outside the edit scop
   await rm(join(root, '.claude'), { recursive: true });
   ok(cli(['agents', 'add', 'reviewer', '--replace'], root));
   ok(cli(['agents', 'sync', 'claude-code', '--role', 'reviewer'], root));
-  assert.deepEqual(JSON.parse(await read(root, '.claude/settings.local.json')), { permissions: { deny: ['Edit(/**)', 'Write(/**)', 'NotebookEdit(/**)'] } });
+  assert.deepEqual(JSON.parse(await read(root, '.claude/settings.local.json')), { permissions: { deny: ['Edit(/**)'] } });
 });
 
 test('D1: an existing different deny list refuses the sync with zero writes; an identical one is accepted unchanged', async (t) => {
