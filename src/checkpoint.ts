@@ -61,6 +61,8 @@ export interface CheckpointContext {
   acceptance: { source: string; text: string } | null;
   bundle: ContextBundle | null;
   task: { id: string; source: string };
+  /** Valid autonomous Brain policy: the knowledge footer tells the engine to apply its own proposal. */
+  autonomous?: boolean;
 }
 
 export const slugTask = (text: string) => String(text).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64).replace(/-+$/, '');
@@ -302,6 +304,7 @@ export function replaceCheckpointBlock(content: string, lines: string[]) {
 
 /** The knowledge-review step (goal Slice 5). An instruction the engine reads and acts on; AgentOS decides nothing. */
 export const knowledgeLine = (task: string) => `Knowledge: did this work change durable project knowledge (architecture, a decision, a convention)? If yes, stage one focused proposal: \`agentos brain propose <record-id> --from <file> --task ${task}\` (ids: \`agentos brain list\`). Progress only: stage nothing. Inspect \`agentos brain policy\`: manual review by default; agents may use \`brain apply --auto --by <self>\` only under the owner policy. Refusals stay pending; never bypass them or change the policy.`;
+export const autonomousKnowledgeLine = (task: string) => `Knowledge: did this work change durable project knowledge (architecture, a decision, a convention)? If yes, stage one focused proposal: \`agentos brain propose <record-id> --from <file> --task ${task}\` (ids: \`agentos brain list\`), then apply it yourself (Brain policy: autonomous): \`agentos brain apply <proposal> --auto --by <self>\`. Cite only facts from files you read; leave unknowns unknown. Progress only: stage nothing. A refusal stays pending; never bypass it or change the policy.`;
 
 export async function writeCheckpoint(ctx: CheckpointContext, options: CheckpointOptions) {
   if (options.recover && (options.progress || options.next || options.blocker || options.checks?.length || options.claims?.length)) {
@@ -322,7 +325,7 @@ export async function writeCheckpoint(ctx: CheckpointContext, options: Checkpoin
     `Repos: ${repoLine(record.repos)}`,
     `Receipts: ${receiptCounts(record.receipts)}`,
     ...record.receipts.map(receiptLine),
-    ...(record.recovered ? [] : [knowledgeLine(ctx.task.id)]),
+    ...(record.recovered ? [] : [(ctx.autonomous ? autonomousKnowledgeLine : knowledgeLine)(ctx.task.id)]),
     SINGLE_WRITER,
   ].join('\n');
   const result = (ok: boolean, body: string) => ({ ok, dryRun: Boolean(options.dryRun), path: recordRel, record, text: options.json ? JSON.stringify({ ok, dryRun: Boolean(options.dryRun), path: recordRel, record }, null, 2) : body });

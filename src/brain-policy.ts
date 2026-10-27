@@ -8,25 +8,27 @@ import type { BrainCtx, BrainRecord } from './brain.js';
 
 export const AUTO_APPEND_BYTES = 4000;
 export const AUTO_RECORD_BYTES = 32000;
+export const AUTONOMOUS_RECORD_BYTES = 64000;
 const hash = (text: string) => createHash('sha256').update(text).digest('hex');
-export interface ApprovalPolicy { mode: 'manual' | 'auto-append'; actors: string[]; records: string[] }
+export type ApprovalMode = 'manual' | 'auto-append' | 'autonomous';
+export interface ApprovalPolicy { mode: ApprovalMode; actors: string[]; records: string[]; exclude: string[] }
 export interface ApprovalDecision {
-  eligible: boolean; mode: 'manual' | 'auto-append'; actor: string | null;
+  eligible: boolean; mode: ApprovalMode; actor: string | null;
   policy_hash: string | null; reasons: string[];
 }
 
 export function parseApprovalPolicy(value: unknown): { policy: ApprovalPolicy; errors: string[]; hash: string } {
-  const policy: ApprovalPolicy = { mode: 'manual', actors: [], records: [] };
+  const policy: ApprovalPolicy = { mode: 'manual', actors: [], records: [], exclude: [] };
   const errors: string[] = [];
   const at = 'knowledge.brain.approval';
   if (value !== undefined) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) errors.push(`${at} must be a mapping`);
     else {
       const data = value as Record<string, unknown>;
-      for (const key of Object.keys(data)) if (!['mode', 'actors', 'records'].includes(key)) errors.push(`${at}: unknown key ${key}`);
-      if (!['manual', 'auto-append'].includes(String(data.mode))) errors.push(`${at}.mode must be manual or auto-append`);
-      else policy.mode = data.mode as ApprovalPolicy['mode'];
-      for (const key of ['actors', 'records'] as const) {
+      for (const key of Object.keys(data)) if (!['mode', 'actors', 'records', 'exclude'].includes(key)) errors.push(`${at}: unknown key ${key}`);
+      if (!['manual', 'auto-append', 'autonomous'].includes(String(data.mode))) errors.push(`${at}.mode must be manual, auto-append or autonomous`);
+      else policy.mode = data.mode as ApprovalMode;
+      for (const key of ['actors', 'records', 'exclude'] as const) {
         const list = data[key] ?? [];
         const pattern = key === 'actors' ? /^[a-z0-9][a-z0-9._-]{0,63}$/ : /^brain:[a-z0-9][a-z0-9-]{0,127}$/;
         if (!Array.isArray(list) || list.length > 50 || list.some((entry) => typeof entry !== 'string' || !pattern.test(entry))) {
@@ -34,14 +36,25 @@ export function parseApprovalPolicy(value: unknown): { policy: ApprovalPolicy; e
         } else policy[key] = [...new Set(list)].sort();
       }
       if (policy.mode === 'auto-append' && (!policy.actors.length || !policy.records.length)) errors.push(`${at}: auto-append needs nonempty actors and records lists`);
+      if (policy.mode === 'autonomous' && !policy.actors.length) errors.push(`${at}: autonomous needs a nonempty actors list`);
+      if (policy.mode !== 'autonomous' && policy.exclude.length) errors.push(`${at}.exclude applies only to mode autonomous`);
     }
   }
-  return { policy, errors, hash: hash(JSON.stringify(policy)) };
+  // `exclude` joins the hash only when set, so policies written before autonomous mode keep their hash.
+  const { exclude, ...hashed } = policy;
+  return { policy, errors, hash: hash(JSON.stringify(exclude.length ? policy : hashed)) };
 }
+
+/** True only for a valid autonomous policy: generated agent instructions switch on this. */
+export const isAutonomous = (value: unknown) => { const { policy, errors } = parseApprovalPolicy(value); return !errors.length && policy.mode === 'autonomous'; };
+
+/** Autonomous scope: `records` (empty = every workspace record) minus `exclude`. */
+export const inAutonomousScope = (policy: ApprovalPolicy, id: string | null) => Boolean(id) && !policy.exclude.includes(id) && (!policy.records.length || policy.records.includes(id));
 
 export function approvalGuidance(value: unknown) {
   const { policy, errors } = parseApprovalPolicy(value);
   if (errors.length) return 'Brain approval policy is invalid; automatic application is disabled. Run `agentos brain policy`; leave proposals for owner review.';
+  if (policy.mode === 'autonomous') return 'Brain approval: autonomous. Allowed agents (`agentos brain policy`) stage one focused proposal, then `agentos brain apply <proposal> --auto --by <self>`. Cite only facts from files you read; leave unknowns unknown. A refusal stays pending for owner review. Rollback: `agentos brain revert <id> --last --by <name>`. Never impersonate another actor or change the policy.';
   return policy.mode === 'manual'
     ? 'Brain approval: manual (default). Agents propose; the owner applies. Only the owner may change knowledge.brain.approval.'
     : 'Brain approval: auto-append. Run `agentos brain policy` for the owner-approved actors and records. Agents use only `brain apply --auto --by <self>`; a refusal stays pending for owner review. Never impersonate the owner or change the policy.';
@@ -49,20 +62,32 @@ export function approvalGuidance(value: unknown) {
 
 /** Re-evaluated at application, under the existing workspace writer lock. Nothing here executes checks. */
 export async function automaticApproval(ctx: BrainCtx, proposal: { fields: Record<string, any>; body: string }, target: BrainRecord | null,
-  newBody: string | null, actor: string | undefined, validation: { rejections: unknown[]; flags: unknown[]; incomplete: boolean }): Promise<ApprovalDecision> {
+  newBody: string | null, actor: string | undefined, validation: { rejections: unknown[]; flags: unknown[]; incomplete: boolean; supersede?: BrainRecord[] }): Promise<ApprovalDecision> {
   const parsed = parseApprovalPolicy(ctx.approval);
   const { policy } = parsed;
   const reasons = [...parsed.errors];
   const result = (): ApprovalDecision => ({ eligible: reasons.length === 0, mode: policy.mode, actor: actor || null, policy_hash: parsed.errors.length ? null : parsed.hash, reasons });
-  if (policy.mode !== 'auto-append') reasons.push('Automatic application is disabled; the owner reviews and applies this proposal.');
+  const autonomous = policy.mode === 'autonomous' && !parsed.errors.length;
+  if (policy.mode !== 'auto-append' && !autonomous) reasons.push('Automatic application is disabled; the owner reviews and applies this proposal.');
   if (!actor || !policy.actors.includes(actor)) reasons.push('The applying actor must be explicitly allowed by the owner policy.');
   if (proposal.fields.proposed_by !== actor) reasons.push('Automatic application is limited to the same declared proposer and applier.');
-  if (!target || !policy.records.includes(target.id)) reasons.push('The target record is not explicitly allowed by the owner policy.');
-  if (target && (!['note', 'feature'].includes(target.kind) || !['accepted', 'verified'].includes(target.status) || target.location !== 'workspace')) {
-    reasons.push('Automatic application requires an existing accepted/verified workspace note or feature record; architecture, decisions, ADRs, conventions and vault records need owner review.');
+  if (autonomous) {
+    // Any kind, replace or append, supersession included: every record written must be in scope and workspace-canonical.
+    for (const record of [target, ...(validation.supersede ?? [])].filter(Boolean)) {
+      if (policy.exclude.includes(record.id)) reasons.push(`${record.id} is excluded from autonomous application by the owner policy.`);
+      else if (!inAutonomousScope(policy, record.id)) reasons.push(`${record.id} is not in the owner policy's records list.`);
+      if (record.location !== 'workspace') reasons.push(`${record.id} is vault-canonical; vault records need owner review.`);
+    }
+    if (target?.status === 'superseded') reasons.push('The target record is superseded; reviving it needs owner review.');
+    if (Buffer.byteLength(newBody ?? '') > AUTONOMOUS_RECORD_BYTES) reasons.push(`Autonomous updates are limited to ${AUTONOMOUS_RECORD_BYTES} body bytes; ask the owner to curate larger records.`);
+  } else {
+    if (!target || !policy.records.includes(target.id)) reasons.push('The target record is not explicitly allowed by the owner policy.');
+    if (target && (!['note', 'feature'].includes(target.kind) || !['accepted', 'verified'].includes(target.status) || target.location !== 'workspace')) {
+      reasons.push('Automatic application requires an existing accepted/verified workspace note or feature record; architecture, decisions, ADRs, conventions and vault records need owner review.');
+    }
+    if (proposal.fields.mode !== 'append' || proposal.fields.supersedes !== undefined) reasons.push('Only append proposals without supersession are eligible; replacements and deletions need owner review.');
+    if (Buffer.byteLength(proposal.body) > AUTO_APPEND_BYTES || Buffer.byteLength(newBody ?? '') > AUTO_RECORD_BYTES) reasons.push(`Automatic updates are limited to ${AUTO_APPEND_BYTES} appended bytes and ${AUTO_RECORD_BYTES} total body bytes; ask the owner to curate larger records.`);
   }
-  if (proposal.fields.mode !== 'append' || proposal.fields.supersedes !== undefined) reasons.push('Only append proposals without supersession are eligible; replacements and deletions need owner review.');
-  if (Buffer.byteLength(proposal.body) > AUTO_APPEND_BYTES || Buffer.byteLength(newBody ?? '') > AUTO_RECORD_BYTES) reasons.push(`Automatic updates are limited to ${AUTO_APPEND_BYTES} appended bytes and ${AUTO_RECORD_BYTES} total body bytes; ask the owner to curate larger records.`);
   if (validation.rejections.length || validation.flags.length) reasons.push('Validation rejections or conflict flags require owner review.');
   if (validation.incomplete) reasons.push('Missing, unreadable or invalid Brain records require owner review.');
   const task = proposal.fields.task;
@@ -75,6 +100,11 @@ export async function automaticApproval(ctx: BrainCtx, proposal: { fields: Recor
       return result();
     }
     const checkpoint = loaded.record;
+    if (autonomous) {
+      // Docs-only fills may record no checks; only an observed failure blocks.
+      if (checkpoint.receipts.some((receipt) => receipt.status === 'observed-fail')) reasons.push('The checkpoint records an observed-fail check; fix it, checkpoint again and stage again (unrun checks are fine).');
+      return result();
+    }
     if (checkpoint.recovered || checkpoint.blockers.length) reasons.push('Recovered work or an unresolved blocker needs owner review.');
     if (!ctx.evidence) throw new Error('Current repository evidence is unavailable');
     const excluded = ctx.evidence.excluded;
