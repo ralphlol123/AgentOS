@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile, readdir, lstat, readlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
+import { createServer } from 'node:http';
+import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -78,6 +80,12 @@ const managers = [
 
 console.log(`TARBALL=${tarball}`);
 
+// A local npm-registry stub for `agentos upgrade --check` (no network). unref: it never keeps the process alive.
+const registry = createServer((req, res) => res.end(JSON.stringify({ name: 'agentos-for-projects', version: '99.0.0' })));
+await new Promise((done) => registry.listen(0, '127.0.0.1', done));
+registry.unref();
+const registryUrl = `http://127.0.0.1:${registry.address().port}`;
+
 for (const manager of managers) {
   if (!has(manager.command)) {
     throw new Error(`Required package manager missing: ${manager.name}. Install npm, pnpm, and Bun before compatibility verification.`);
@@ -90,6 +98,12 @@ for (const manager of managers) {
   const installedBin = join(cwd, 'node_modules/.bin/agentos');
   const invoke = args => run(installedBin, args, { cwd });
   assert.equal(invoke(['--version']), '3.0.0', `${manager.name}: packed installed CLI version`);
+  // Async on purpose: spawnSync would block the in-process registry stub.
+  const check = await promisify(execFile)(installedBin, ['upgrade', '--check', '--json'], { cwd, env: { ...process.env, AGENTOS_REGISTRY_URL: registryUrl } }).catch((error) => error);
+  assert.equal(check.code, 10, `${manager.name}: upgrade --check exits 10 when an update exists\n${check.stdout}${check.stderr}`);
+  const plan = JSON.parse(check.stdout);
+  assert.equal(plan.method, 'local', `${manager.name}: a project install is detected as project-local`);
+  assert.equal(plan.upgradeCommand, `${manager.name === 'npm' ? 'npm install' : `${manager.name} add`} agentos-for-projects@99.0.0`);
   invoke(['init', '--new']);
   const approval = JSON.parse(invoke(['brain', 'policy', '--json']));
   assert.equal(approval.policy.mode, 'manual', `${manager.name}: packed CLI defaults to manual Brain approval`);
@@ -170,5 +184,5 @@ for (const manager of managers) {
     throw new Error(`${manager.name}: ambiguous plain compact did not refuse with candidates\n${ambiguous.stdout}\n${ambiguous.stderr}`);
   }
   assert.deepEqual(await snapshot(cwd), beforeAmbiguous, `${manager.name}: ambiguous default compact wrote to disk`);
-  console.log(`PASS ${manager.name}: installed 3.0.0 bin; init; default preview/apply/status/doctor/no-op; removed-alias refusal; checkpoint; ambiguity refusal; 15 cards/9 references`);
+  console.log(`PASS ${manager.name}: installed 3.0.0 bin; upgrade --check; init; default preview/apply/status/doctor/no-op; removed-alias refusal; checkpoint; ambiguity refusal; 15 cards/9 references`);
 }
