@@ -5,26 +5,26 @@ AgentOS can import useful agent or skill material from local files or web URLs, 
 ## Command
 
 ```bash
-agentos skills add <url-or-file> [--name <id>] [--mode summary|full] [--dry-run] [--yes] [--replace] [--expected-sha256 <hash>]
+agentos skills add <url-or-file> [--name <id>] [--dry-run] [--yes] [--replace] [--expected-sha256 <hash>]
 agentos agents add <url-or-file> [--name <id>] [--dry-run] [--yes] [--replace] [--expected-sha256 <hash>]
 ```
 
-Since 2.1.0 these replace `agentos templates import <url-or-file> --type agent|skill --name <id> …`, which still works until 3.0.0 and prints one deprecation notice. Same review, hash pin, quarantine and overwrite rules. Differences: the add forms also print the template structure check (`Validation: …`), and an imported agent is written as a manifest card (`installed_from: import:<url>` or `template:<path>`) instead of a legacy card. `agents add <file>` for a file that already is a valid agent template installs it as written (as before 2.1), and is refused on a BLOCK finding.
+These replaced `agentos templates import <url-or-file> --type agent|skill --name <id> …` in 2.1.0 (`templates` was removed in 3.0.0). Same review, hash pin, quarantine and overwrite rules. The add forms also print the template structure check (`Validation: …`), and an imported agent is written as a manifest card (`installed_from: import:<url>` or `template:<path>`). `agents add <file>` for a file that already is a valid agent template installs it as written, and is refused on a BLOCK finding.
 
 ## Default behavior
 
 Imports are dry-run by default unless `--yes` is provided.
 
-Dry-run:
-
-```bash
-agentos skills add ./external-skill.md --name external-skill --dry-run
-```
-
-Equivalent safe default:
+Preview (the default without `--yes`):
 
 ```bash
 agentos skills add ./external-skill.md --name external-skill
+```
+
+`--dry-run` is the same preview plus a template check: it exits 1 (and prints the `Validation: FAIL` findings) when the file is not a valid agent/skill template. A plain source document is still imported as reference material with `--yes`.
+
+```bash
+agentos skills add ./external-skill.md --name external-skill --dry-run
 ```
 
 Write after review:
@@ -122,21 +122,15 @@ sha256
 
 Skill imports include this metadata in frontmatter. Agent imports include it in the imported agent file.
 
-## Summary vs full skill mode
+## Summary excerpt
 
-Summary mode, the default, keeps imported skill content compact:
-
-```bash
-agentos skills add ./external.md --name external --mode summary --yes
-```
-
-Full mode preserves a larger excerpt:
+An imported skill keeps a compact summary excerpt of its source (the first 80 non-empty lines, at most 8,000 characters):
 
 ```bash
-agentos skills add ./external.md --name external --mode full --yes
+agentos skills add ./external.md --name external --yes
 ```
 
-Use full mode only when the extra detail is worth the token cost.
+`--mode full` (a larger excerpt) was removed in 3.0.0; keep the full source next to the workspace and link it if you need it.
 
 ## Recommended workflow
 

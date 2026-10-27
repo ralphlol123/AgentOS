@@ -29,8 +29,8 @@ Each engine's auto-loaded file names the same short loop with its own engine id,
 The task id is the one identity across engines: a checkpoint written by one engine is what `resume --task <id>` shows another (`test/project-brain-slice3.test.js`). This is generated instruction, not proof that an engine reads or follows it; observed consumption is the Slice 4 trial (acceptance row A16). Phynceon's Hermes project-start workflow lives outside this repository; the proposed change is [`evidence/hermes-start-workflow-proposal.md`](evidence/hermes-start-workflow-proposal.md).
 
 ```bash
-agentos engines            # the table below
-agentos engines --json     # { ok, rows, matrix: { <engine>: { <row>: { status, evidence, edit_scope? } } } }
+agentos doctor --engines            # the table below
+agentos doctor --engines --json     # { ok, rows, matrix: { <engine>: { <row>: { status, evidence, edit_scope? } } } }
 ```
 
 ## Matrix

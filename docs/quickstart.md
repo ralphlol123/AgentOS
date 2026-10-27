@@ -67,7 +67,7 @@ AgentOS detects child repos with package metadata and writes parent-managed poin
 
 ## Choose agents
 
-Minimal delivery team (developer, tester, reviewer, release-manager; the same team you get without `--agents`, and `--agents detected` is accepted as a synonym). Add `--yes` (`-y`) to skip the confirmation prompt:
+Minimal delivery team (developer, tester, reviewer, release-manager; the same team you get without `--agents`). Add `--yes` (`-y`) to skip the confirmation prompt:
 
 ```bash
 agentos init --existing --agents minimal --yes
@@ -107,13 +107,13 @@ agentos skills add debugging
 agentos skills show debugging      # read a skill card (installed, else the catalog template)
 ```
 
-Local skills and their optional `references/` files are written under `.agentos/skills/<category>/<id>/` and indexed in `.agentos/skills.md`. Every card holds the complete procedure (`--mode summary|full` is accepted and has no effect). Load references only for the assigned repo's actual stack; project conventions prevail.
+Local skills and their optional `references/` files are written under `.agentos/skills/<category>/<id>/` and indexed in `.agentos/skills.md`. Every card holds the complete procedure. Load references only for the assigned repo's actual stack; project conventions prevail.
 
 Use `agentos skills list --installed` to distinguish installed cards from the available catalog. Merely listing a skill does not install it. Differing local cards/references require reviewed, explicit `--replace`; native engine copies remain untouched. See [the consolidated catalog and compatibility limits](templates.md).
 
 ## Agent and skill templates
 
-The built-in catalog is listed by `agents list` and `skills list` (the 2.0 `templates` command is deprecated):
+The built-in catalog is listed by `agents list` and `skills list` (the 2.0 `templates` command was removed in 3.0.0):
 
 ```bash
 agentos agents list
@@ -169,12 +169,12 @@ agentos obsidian init                                                        # k
 agentos obsidian link --vault /path/to/vault --dest "Projects/MyProduct" --create   # one navigation note in an existing vault
 ```
 
-The vault path of `obsidian link` is machine-local: it goes to `.agentos/local.yaml` (git-ignored), not to the shared `project.yaml`. Off switch: `knowledge.obsidian.enabled: false`. AgentOS links notes; it never bulk-loads a vault. Exact-note link-only mode: `agentos obsidian link --note <path> --vault <path> --dest <folder>` (formerly `agentos link-obsidian`).
+The vault path of `obsidian link` is machine-local: it goes to `.agentos/local.yaml` (git-ignored), not to the shared `project.yaml`. Off switch: `knowledge.obsidian.enabled: false`. AgentOS links notes; it never bulk-loads a vault. Exact-note link-only mode: `agentos obsidian link --note <path> --vault <path> --dest <folder>` (`agentos link-obsidian` before 3.0.0).
 
 ## Short engine start prefix
 
 ```bash
-agentos context claude --brief      # codex | opencode | hermes; formerly `agentos prompt <engine>`
+agentos context claude --brief      # codex | opencode | hermes; `agentos prompt <engine>` before 3.0.0
 ```
 
 `agentos status --full` adds the full handoff to the status summary.
@@ -186,7 +186,7 @@ agentos compact --dry-run
 agentos compact
 ```
 
-`compact --dry-run` gives a concise, write-free structural preview; add `--diff` when you need the detailed patch. Plain `compact` applies only when the combined live context strictly shrinks, after archiving and hash-verifying the exact originals. `compact --checkpoint` explicitly selects the older archive-and-link behavior, which retains all live text and may grow it. See [compaction](../README.md#compaction) and [the detailed policy](compaction.md) for collision, CRLF, and rollback behavior.
+`compact --dry-run` gives a concise, write-free structural preview; add `--diff` when you need the detailed patch. Plain `compact` applies only when the combined live context strictly shrinks, after archiving and hash-verifying the exact originals. `compact --archive-only` explicitly selects the older archive-and-link behavior, which retains all live text and may grow it. See [compaction](../README.md#compaction) and [the detailed policy](compaction.md) for collision, CRLF, and rollback behavior.
 
 ## Health checks
 

@@ -7,8 +7,9 @@ flag.
 | Command | Role | Live-state behavior |
 | --- | --- | --- |
 | `agentos compact` | **Default structural compaction** | Rebuilds canonical live context and applies only when the combined character count strictly decreases. |
-| `agentos compact --rewrite` | Compatibility alias | Uses exactly the same planner, safety checks, and apply behavior as normal compact; it is not a separate or safer mode. |
-| `agentos compact --checkpoint` | Legacy checkpoint | Retains all live text, appends archive links, and may grow live state. |
+| `agentos compact --archive-only` | Archive-and-link | Retains all live text, appends archive links, and may grow live state. |
+
+`compact --rewrite` (an alias of plain `compact`) and `compact --checkpoint` (the old name of `--archive-only`) were removed in 3.0.0; each exits 1 naming its replacement.
 
 ## Default structural compaction
 
@@ -36,11 +37,11 @@ One valid current objective is selected automatically. `--objective` is needed o
 are ambiguous or the user intentionally overrides the automatic selection. Dates and labels such as
 “latest” are content, never selection rules.
 
-## Explicit checkpoint mode
+## Explicit archive-only mode
 
 ```bash
-agentos compact --checkpoint --dry-run
-agentos compact --checkpoint
+agentos compact --archive-only --dry-run
+agentos compact --archive-only
 ```
 
 Checkpoint mode archives the exact before/after text under

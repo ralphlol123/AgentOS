@@ -2,7 +2,7 @@
 
 `agentos context <engine> [--task "<text>"] [--role <agent-id>] [--scope <repo-or-path>,...] [--budget <tokens>] [--json] [--include-superseded] [--require-synced-config] [--require-enforcement] [--require-complete]`
 
-Builds the context one engine needs for one task and one role. Read-only: it reads `.agentos/` state and never writes a file, lock or temp file (tested by hashing the whole fixture tree with a private `TMPDIR`). `agentos prompt` is unchanged. Code: `src/context-builder.ts`; wiring: `contextAgentOS` in `src/core.ts`.
+Builds the context one engine needs for one task and one role. Read-only: it reads `.agentos/` state and never writes a file, lock or temp file (tested by hashing the whole fixture tree with a private `TMPDIR`). `agentos context --brief` (the short prefix `agentos prompt` printed before 3.0.0) is unchanged. Code: `src/context-builder.ts`; wiring: `contextAgentOS` in `src/core.ts`.
 
 ## Inputs
 

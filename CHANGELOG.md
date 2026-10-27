@@ -4,38 +4,50 @@ All notable changes to AgentOS for Projects are documented here.
 
 ## [Unreleased]
 
+### Breaking changes / Removed
+
+3.0.0 removes every form deprecated in 2.1 and the legacy upgrade paths deprecated since 0.9.0. A removed form exits 1 with one stderr line, `agentos <x> was removed in 3.0.0; use <new>`, and writes nothing (also with `--help`). Table: `docs/migration-3.0-cli.md`. **Older workspaces that still need a legacy migration: run `npx agentos-for-projects@2 doctor --fix` once first** (the 2.x line keeps every legacy migration), then upgrade.
+
+- `handoff` → `status --full`.
+- `run handoff` → `checkpoint --task <id>` and `resume --task <id>`.
+- `prompt [engine]` → `context [engine] --brief` (byte-identical output).
+- `adapters explain <file>` → `doctor --explain <file>`.
+- `engines [--json]` → `doctor --engines [--json]`.
+- `templates list|show|copy|validate|import` → `agents|skills list`, `agents|skills show <id>`, `agents|skills add <id>`, `agents|skills add <file> --dry-run`, `agents|skills add <url|file>`.
+- `link-obsidian` → `obsidian link --note <path>`; `obsidian link-workspace` → `obsidian link --no-index`.
+- `brain validate` → `brain preview`; `brain init` (workspace) → `init` (`brain init --location vault` stays).
+- `agents manifest <id> --from-catalog` → `doctor --fix` (`agents manifest <id> --custom` stays).
+- `compact --checkpoint` → `compact --archive-only`; `compact --rewrite` → `compact`.
+- `skills add --mode summary|full` → `skills add` (catalog cards are always complete; an imported skill keeps a summary excerpt; `--mode full` imports are gone).
+- `init --agents detected` → `init --agents minimal` (same team; also the default).
+- `doctor --fix --adopt-custom-adapters` → `npx agentos-for-projects@2 doctor --fix --adopt-custom-adapters` once (or by hand); a plain `doctor --fix` refuses an `adopt` adapter with zero writes and names both.
+- `doctor --fix --prune-retired`, and the migration of byte-matched retired agent cards by plain `doctor --fix` → `npx agentos-for-projects@2 doctor --fix [--prune-retired]` once, or `agents add <canonical>` / `skills remove` + `skills add`. Retired IDs in `project.yaml` are still resolved to the canonical IDs.
+- `doctor --fix --normalize-repo-ids` → `npx agentos-for-projects@2 doctor --fix --normalize-repo-ids` once, or rename the key and `.agentos/repos/<id>.md` by hand.
+- `migrate claude --preserve` → `npx agentos-for-projects@2 migrate claude --preserve` once, or rename the `.claude` files by hand.
+- The 2.1 `Deprecated:` notices, the `deprecations` field of `--json` output and `migration.deprecations` in `doctor --json` are gone. The read-only `migration` inventory stays; retired cards are classified `manual-review` (or `index-only`) and every `next` names the manual step or the 2.x command.
+- Library (`dist/core.js`, not a public API): `templatesAgentOS`, `runHandoffAgentOS`, `migrateClaudeAgentOS`, `normalizeRepoIdsAgentOS` removed; `compactAgentOS` takes `archiveOnly` instead of `checkpoint`/`rewrite`.
+- Deleted modules: `src/legacy-deprecation.ts`, `src/legacy-skill-shapes.ts`.
+- Still read unchanged: configs written by removed commands (`knowledge.obsidian.mode: link-only`; `mode: workspace-folder` with an absolute `vault` in `project.yaml` and no `canonical`/`index`), skill cards written with `mode: full`, legacy agent cards from `templates import`.
+
 ### Added
 
 - **Autonomous Brain mode.** `knowledge.brain.approval.mode: autonomous` (owner-set; `actors` required, optional `records` and `exclude`) lets an allowed agent apply its own proposal with `agentos brain apply <proposal> --auto --by <self>` for any workspace record kind, `replace` or `append`, including supersession. Still refused and left pending: validation rejections or conflicts, vault-canonical or excluded records, a checkpoint with an `observed-fail` receipt, bodies over 64,000 bytes. Applied proposals record `approval_mode: autonomous`; an invalid policy behaves as manual. Under this policy, the adapters, guide, checkpoint footer and context rules tell engines to apply their own proposals (run `agentos doctor --fix` after changing it). `manual` and `auto-append` are unchanged. See `docs/brain.md#autonomous-mode`.
 - **Brain snapshots.** Every apply (any mode) saves the target's previous file to `.agentos/brain/history/<record>/<body sha256>.md`. The history line now ends with `; approval <mode>`.
 - **`agentos brain revert <id> --last|--to <hash> --by <name> [--auto] [--force] [--dry-run]`** restores a snapshot under the writer lock, snapshots the replaced version (so a revert is revertible), and refuses missing or mismatched snapshots and hand-edited records unless `--force`.
 - **`agentos brain log [<id>]`** lists recent applies and reverts with actor, approval mode and hashes.
-- **2.1 CLI: 11 commands** (`init`, `status`, `doctor`, `context`, `checkpoint`, `resume`, `brain`, `agents`, `skills`, `obsidian`, `compact`). New forms: `status --full`, `context [engine] --brief` (byte-identical to `prompt`), `context --strict` (= `--require-synced-config --require-enforcement --require-complete`), `doctor --explain <file>`, `doctor --engines [--json]`, `obsidian link --note <path>` (exact-note link-only mode, same prompts), `obsidian link --no-index`, `compact --archive-only`. Old → new: `docs/migration-2.1-cli.md`.
-- **`agents add <file|url>` and `skills add <file|url>`** run the safe import (hash pin with `--expected-sha256`, safety review, quarantine of BLOCK findings, no overwrite without `--replace`, preview until `--yes`, `--mode` for skills) and print the template structure check. An imported agent is written as a **manifest card** (was a legacy card). A valid agent template file still installs directly, but is now refused on a BLOCK finding.
+- **The 11-command CLI** (`init`, `status`, `doctor`, `context`, `checkpoint`, `resume`, `brain`, `agents`, `skills`, `obsidian`, `compact`). New forms: `status --full`, `context [engine] --brief` (byte-identical to `prompt`), `context --strict` (= `--require-synced-config --require-enforcement --require-complete`), `doctor --explain <file>`, `doctor --engines [--json]`, `obsidian link --note <path>` (exact-note link-only mode, same prompts), `obsidian link --no-index`, `compact --archive-only`. Old → new: `docs/migration-3.0-cli.md`.
+- **`agents add <file|url>` and `skills add <file|url>`** run the safe import (hash pin with `--expected-sha256`, safety review, quarantine of BLOCK findings, no overwrite without `--replace`, preview until `--yes`) and print the template structure check; `--dry-run` exits 1 when that check fails. An imported agent is written as a **manifest card** (was a legacy card). A valid agent template file still installs directly, but is now refused on a BLOCK finding.
 - **`agentos skills show <id>`** (installed card, else the catalog template). `agents show <id>` shows the catalog card when the agent is not installed.
 - **`doctor --fix` gives legacy agent cards that byte-match the catalog their manifest** (the `agents manifest --from-catalog` rule; body byte-identical, other cards untouched).
-- **`agentos --help`** shows the 11 commands in five groups (Setup & health, Work loop, Knowledge, Team, Optional & maintenance) and a deprecated old → new map; `init --yes` is documented.
-
-### Deprecated (removed in 3.0.0)
-
-Each still works as in 2.0.0 and prints one `Deprecated:` line on stderr naming its replacement (with `--json`, a `deprecations` entry in the JSON instead):
-
-- `handoff` → `status --full`; `prompt` → `context --brief`; `adapters explain` → `doctor --explain`; `engines` → `doctor --engines`; `run handoff` → `checkpoint` / `resume`.
-- `link-obsidian` → `obsidian link --note`; `obsidian link-workspace` → `obsidian link --no-index`.
-- `brain validate` → `brain preview`; `brain init` (workspace) → `init` (`brain init --location vault` stays).
-- `agents manifest --from-catalog` → `doctor --fix` (`--custom` stays until 3.0 decides).
-- `templates list|show|copy|validate|import` → `agents|skills list|show|add` (`add <file> --dry-run` validates, `add <url|file>` imports).
-- `compact --checkpoint` → `compact --archive-only`.
-- Silent, no notice: `compact --rewrite` (= `compact`), `init --agents detected` (= `minimal`), `skills add --mode` for catalog skills (no effect; dropped from help).
-- The legacy migrations (`doctor --fix --adopt-custom-adapters|--prune-retired|--normalize-repo-ids`, `migrate claude`) are removed in 3.0.0 as well; migrate with any 2.x (`npx agentos-for-projects@2`).
-- The generated `.agentos/guide.md` and child pointers name only the new forms (run `agentos doctor --fix` to refresh them).
+- **`agentos --help`** shows only the 11 commands in five groups (Setup & health, Work loop, Knowledge, Team, Optional & maintenance); `init --yes` is documented.
 
 ### Fixed
 
-- `agentos --help` claimed the legacy migration paths were "removed in 2.0.0" although 2.0.0 ships them; they are now labelled removed in 3.0.0, and their notices name `npx agentos-for-projects@2`.
-- `brain preview` exits 1 when validation rejects the proposal (as `brain validate` does).
+- `agentos --help` claimed the legacy migration paths were "removed in 2.0.0" although 2.0.0 shipped them (they are removed in 3.0.0, see above).
+- `brain preview` exits 1 when validation rejects the proposal (as `brain validate` did).
 - A `knowledge.brain.approval.exclude` list under `manual` or `auto-append` is ignored with a warning (`brain policy` shows it; `--json` `warnings`) instead of invalidating the policy; policy hashes are unchanged.
-- The engine matrix no longer says "there is no `agentos run`" (`run handoff` exists until 3.0.0); `launch` now reads "AgentOS never launches an engine process".
+- The engine matrix's `launch` row reads "AgentOS never launches an engine process" (it said "there is no `agentos run`").
+- `agents add <file> --dry-run` and `skills add <file> --dry-run` exit 1 on a file that is not a valid template (they printed `Validation: FAIL` but exited 0).
 
 ## [2.0.0] - 2026-10-27
 

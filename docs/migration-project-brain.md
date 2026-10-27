@@ -4,7 +4,7 @@ The Project Brain ([brain.md](brain.md)) works without Obsidian; Obsidian is an 
 
 ## Legacy link-only setups (`link-obsidian`)
 
-`agentos link-obsidian --vault <path> --link <note>` (`mode: link-only`, absolute `vault` in `project.yaml`) still works unchanged and binds no Brain location.
+A setup written by `agentos link-obsidian --vault <path> --link <note>` (`mode: link-only`, absolute `vault` in `project.yaml`) is still read unchanged and binds no Brain location. The command itself was removed in 3.0.0; `agentos obsidian link --note <path>` is the same mode.
 
 To move to the current layout, run `agentos obsidian link --vault <abs-vault> --dest <sub/folder> --create` (add `--dry-run` first). It rewrites `knowledge.obsidian` to `mode: workspace-folder` without the host path, writes the path to `.agentos/local.yaml` (git-ignored) and creates the index note in `<vault>/<dest>/`. Check before you run it: the legacy `linked:` list is replaced by `linked: []`. The linked notes themselves are not touched, so copy the list into the index note or `.agentos/knowledge.md` first if you still want it.
 
