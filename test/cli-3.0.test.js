@@ -2,7 +2,7 @@
 // replacement and writes nothing; configs written by removed commands still read.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
 import { test } from 'node:test';
@@ -103,7 +103,7 @@ test('context [engine] --brief: the short start prefix (what prompt printed); --
   for (const engine of [[], ['claude'], ['codex'], ['opencode'], ['hermes']]) {
     const r = run(['context', ...engine, '--brief'], root);
     ok(r);
-    assert.equal(r.stdout, `${(await promptAgentOS({ cwd: await realpath(root), engine: engine[0] ?? 'generic' })).text}\n`, engine.join() || 'generic');
+    assert.equal(r.stdout, `${(await promptAgentOS({ cwd: spawnSync(process.execPath, ['-e', 'process.stdout.write(process.cwd())'], { cwd: root, encoding: 'utf8' }).stdout, engine: engine[0] ?? 'generic' })).text}\n`, engine.join() || 'generic');
   }
   assert.equal(run(['context', '--brief', '--task', 'x'], root).status, 1);
 });
