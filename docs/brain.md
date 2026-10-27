@@ -43,7 +43,7 @@ proposed ──apply──▶ accepted ──verify──▶ verified
 - `brain propose … --task <id>` ties the proposal to that task's current checkpoint; see [Knowledge upkeep at completion](#knowledge-upkeep-at-completion).
 - `brain preview <proposal>` (read-only): target, change mode, frontmatter changes, supersession links, body diff, validation result.
 - `brain validate <proposal> [--json]` (read-only) runs every check; exit 1 on any rejection.
-- `brain apply <proposal> --by <owner> [--dry-run]` validates, then in one mutation transaction writes the target atomically (`status: accepted`, new `source_hash`, `updated_at`, a `history` entry `<time> applied <proposal> by <applier> (proposed by <proposer>): <old hash> -> <new hash>`, `supersedes`), marks each superseded record `status: superseded` + `superseded_by` (body untouched), moves the proposal to `applied/` with `status: applied` and `applied_by: <applier>`, and regenerates the index. Without `--by` (or with an empty one) a real apply is refused, exit 1, zero writes; `--dry-run`, `preview` and `validate` do not need it. The applier never defaults to the proposer.
+- `brain apply <proposal> --by <owner> [--dry-run]` validates, then in one mutation transaction writes the target atomically (`status: accepted`, new `source_hash`, `updated_at`, a `history` entry `<time> applied <proposal> by <applier> (proposed by <proposer>): <old hash> -> <new hash>; approval <mode>`, `supersedes`), marks each superseded record `status: superseded` + `superseded_by` (body untouched), moves the proposal to `applied/` with `status: applied` and `applied_by: <applier>`, and regenerates the index. First, in the same transaction, it saves the previous full file of the target (and of each superseded record) as a snapshot; see [Snapshots, revert and log](#snapshots-revert-and-log). Without `--by` (or with an empty one) a real apply is refused, exit 1, zero writes; `--dry-run`, `preview` and `validate` do not need it. The applier never defaults to the proposer.
 - **Manual review is the default.** The owner runs `brain apply <proposal> --by <owner>`. Agents may use `--auto --by <self>` only under the owner-configured policy below; a refusal stays pending. `--by` is a supplied label, not authenticated identity. The CLI cannot prevent a caller from impersonating someone, dropping `--auto`, changing the policy or editing writable Markdown directly. History records declared attribution, not proof of who acted. Applying an already-applied proposal is a write-free no-op.
 - `brain verify <id-or-path> [--by <name>] [--dry-run]` records that a human checked the current text: `verified_at`, `verified_by`, `status: verified` (a superseded record stays superseded), and refreshes `source_hash` explicitly. Nothing else re-hashes a record.
 - `brain list [--status] [--kind]`, `brain show <id-or-path>`, `brain search <terms…>`, `brain check` are read-only; all accept `--json`. `search` uses the context builder's own term matcher (`taskTerms`/`termHits`: id slug, title, kind).
@@ -90,6 +90,51 @@ Successful auto application retains the existing transaction, history, index rec
 
 **Limits:** this checks workflow evidence, not semantic truth. A passing command does not prove the appended prose; duplicate/conflict detection is heuristic, so differently worded contradictions can escape it. Use narrow records for factual implementation observations and keep decisions under review. Actor labels, policy files, checkpoints and evidence logs are locally writable, not authenticated or tamper-proof. Direct edits and the manual path remain available. Files excluded from Git evidence, runtime environment changes, external services and ignored files are not a complete reproducibility guarantee. Fresh real-engine adoption of this workflow still needs a trial; CLI fixtures alone do not prove agents will follow it.
 
+### Autonomous mode
+
+For owners who want agents to keep the Brain current without applying each proposal themselves. The **owner** sets:
+
+```yaml
+knowledge:
+  brain:
+    approval:
+      mode: autonomous
+      actors: [claude-code, codex, opencode, hermes]   # required, exact names
+      exclude: [brain:decisions]                       # optional; omitted = every record
+      # records: [brain:architecture, brain:conventions]   # optional; omitted = every workspace record
+```
+
+Scope is `records` (or every workspace record) minus `exclude`. An empty or missing `actors` list, wildcards, unknown keys, or `exclude` under another mode make the policy invalid, and an invalid policy behaves as manual. Run `agentos doctor --fix` after changing the mode: `AGENTS.md`, `CLAUDE.md`, `.hermes.md` and `.agentos/guide.md` then tell engines to stage one focused proposal and apply it with `agentos brain apply <proposal> --auto --by <self>`, cite only facts from files they read, leave unknowns unknown, and leave a refusal pending. The checkpoint `Knowledge:` footer and `agentos context` read the policy directly. `agentos brain policy` prints the mode, actors, scope and revert command.
+
+| Condition | Autonomous | Auto-append |
+|---|---|---|
+| Actor in `actors`, proposer = applier | required | required |
+| Record kinds | any (architecture, decision, ADR, convention, note, feature) | accepted/verified note or feature |
+| Target status | any except superseded (templates start `proposed`) | accepted or verified |
+| Change | `replace` or `append`; `--supersedes` allowed (each superseded record must be in scope too) | append only, no supersession |
+| Scope | `records` (default all) minus `exclude` | listed in `records` |
+| Location | workspace-canonical only; vault-canonical records need owner review | workspace only |
+| Validation | no rejection (schema, identity, scope, references, duplicate, stale) and no conflict flag; Brain fully readable | same |
+| Checkpoint | proposal cites the task's current checkpoint, which has no `observed-fail` receipt (unrun or no checks are fine) | every receipt `observed-pass` for the current, unchanged repository state |
+| Size | new body ≤ 64,000 bytes | ≤ 4,000 appended, ≤ 32,000 total |
+
+`preview`/`validate --auto --by <actor>` and `apply --auto --dry-run` evaluate the same conditions without writing. A refusal exits 1 with `review_required: true` and the reasons, and writes nothing. Applied proposals record `approval_mode: autonomous` and `approval_policy_hash`; the history line ends `; approval autonomous (<policy hash>)`. An allowed actor may also roll back in scope: `agentos brain revert <id> --last --auto --by <self>`.
+
+**Limits.** Names in `actors` and `--by` are labels, not authentication: anyone with file access can claim one, edit the policy or edit the records. AgentOS checks workflow evidence, never the correctness of the prose; a wrong architecture description passes every check. Snapshots and `brain log` make every agent apply visible and reversible, so review them. To keep decisions under owner review, set `exclude: [brain:decisions]` (and any ADR records).
+
+### Snapshots, revert and log
+
+Every successful `apply` (manual, auto-append, autonomous) first saves the target's previous full file to `.agentos/brain/history/<record-slug>/<sha256 of its body>.md` (hex names only, safe on Windows; the folder is never read as records). Supersession saves each superseded record the same way. A snapshot with the same body hash is overwritten by the newer file.
+
+`agentos brain revert <id-or-path> --last|--to <hash> --by <name> [--auto] [--force] [--dry-run]` restores a snapshot through the apply path (writer lock, one transaction, index refresh):
+
+- `--last` restores the version before the last apply or revert in the record's history; `--to` takes a snapshot hash or a unique prefix of 8+ hex characters (`brain log` prints them).
+- The restored file is the snapshot, with the current `history` plus `<time> reverted to <hash> by <name>: <old> -> <new>; approval manual|autonomous`. The replaced version is snapshotted first, so a revert can be reverted.
+- Refused, exit 1, zero writes: no snapshot (or an ambiguous prefix), a snapshot whose body no longer matches its hash, a result that is not a valid record at that path, and a record edited since its `source_hash` (stale) unless `--force` (the edit is snapshotted first).
+- `--by` is required for a real revert. `--auto` needs a valid autonomous policy, an allowed actor and a record in scope.
+
+`agentos brain log [<id-or-path>] [--json]` lists the most recent 50 applies and reverts (newest first) from the records' `history`: time, record, action, actor, approval mode, old and new hash. Older history lines without `; approval …` count as manual.
+
 ### Validation checks
 
 | Check | Rejects when |
@@ -107,7 +152,7 @@ Successful auto application retains the existing transaction, history, index rec
 
 Completed work can change durable knowledge (an architecture fact, a decision, a convention). AgentOS keeps that upkeep in the normal completion loop **without calling a model**: the active engine (or an orchestrator) does the review; AgentOS supplies the instruction and a deterministic staging step.
 
-- **Trigger: an instruction, not a hook.** `agentos checkpoint` ends with `Knowledge: did this work change durable project knowledge (architecture, a decision, a convention)? If yes, stage one focused proposal: \`agentos brain propose <record-id> --from <file> --task <task>\` (ids: \`agentos brain list\`). Progress only: stage nothing. Inspect \`agentos brain policy\`: manual review by default; automatic application is allowed only through the owner policy and \`--auto --by <self>\`. Refusals stay pending.` The startup loop in `AGENTS.md`/`CLAUDE.md`/`.hermes.md` and `.agentos/guide.md` say the same. Whether a proposal is staged depends on the engine reading and following that instruction; nothing in AgentOS runs it automatically, and a checkpoint never stages a proposal by itself.
+- **Trigger: an instruction, not a hook.** `agentos checkpoint` ends with `Knowledge: did this work change durable project knowledge (architecture, a decision, a convention)? If yes, stage one focused proposal: \`agentos brain propose <record-id> --from <file> --task <task>\` (ids: \`agentos brain list\`). Progress only: stage nothing. Inspect \`agentos brain policy\`: manual review by default; automatic application is allowed only through the owner policy and \`--auto --by <self>\`. Refusals stay pending.` Under an autonomous policy the footer instead says to apply the staged proposal with \`agentos brain apply <proposal> --auto --by <self>\`, citing only facts from files read. The startup loop in `AGENTS.md`/`CLAUDE.md`/`.hermes.md` and `.agentos/guide.md` say the same. Whether a proposal is staged depends on the engine reading and following that instruction; nothing in AgentOS runs it automatically, and a checkpoint never stages a proposal by itself.
 - **Staging: `agentos brain propose <id-or-path> --from <file|-> --task <id>`.** The normal `propose` (same validation, `base_hash`, `proposed_by`) plus `task`, `checkpoint` (the id `current.json` points at) and `evidence`: the changed paths the checkpoint recorded (`changed: src/db.js`, workspace-relative, at most 20 listed) and every receipt with its state (`observed-pass: npm run test (cwd .)`, `claimed: …`, `not-run: …`). `brain preview` prints the checkpoint and evidence.
 - **Progress-only or no-op: nothing.** No checkpoint for the task, an incomplete one, or one that records no changed file and no `observed-pass` check → `NOTHING STAGED`, exit 1, zero writes. A claim is not evidence.
 - **Same event, one proposal.** The file name is `<task>-<12 hex>-<record>.md`, the hex a sha256 over target, checkpoint id, mode, whitespace-normalized text and `supersedes`. Re-running the same staging (pending or already applied) prints `already staged as …; nothing written` (exit 0, `duplicate: true`). New text or a new checkpoint is a new proposal.

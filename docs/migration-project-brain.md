@@ -32,6 +32,10 @@ Relocate the vault-canonical records first (above). Then set `enabled: false` un
 
 Obsidian opens only files inside the vault. Workspace records (`.agentos/brain/*.md`, `.agentos/decisions.md`) are listed in the index note with `— outside this vault: edit in your editor`. Edit them in an editor or through `brain propose|apply`. To edit a record in Obsidian, create it inside `<vault>/<dest>` and `brain register` it there; that needs `canonical: vault` for a linked vault. AgentOS never copies or symlinks a record to make it visible.
 
+## Autonomous Brain updates (after 2.0.0)
+
+Nothing changes until the owner opts in. To let agents apply their own Brain proposals, set `knowledge.brain.approval.mode: autonomous` with an `actors` list (optionally `exclude: [brain:decisions]`), then run `agentos doctor --fix` so the adapters and guide carry the new instructions ([Autonomous mode](brain.md#autonomous-mode)). Every apply now keeps a snapshot under `.agentos/brain/history/`, which grows with each apply and revert. Roll back with `agentos brain revert <id> --last --by <name>` and review agent changes with `agentos brain log`.
+
 ## WSL
 
 Under WSL, `obsidian init|link|status` also print the Windows path that a Windows Obsidian opens: `/mnt/c/…` → `C:\…`, and other paths → `\\wsl$\<distro>\…`. Store the Linux path (`/mnt/c/…`) in `local.yaml`, because AgentOS runs on the Linux side.
