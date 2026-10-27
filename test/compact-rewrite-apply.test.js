@@ -64,7 +64,7 @@ function candidateIds(text) {
 }
 /** Ambiguous state: the blocked report is the review surface that lists candidate ids. */
 function objectiveIdFor(root) {
-  const blocked = cli(root, ['compact', '--rewrite']);
+  const blocked = cli(root, ['compact']);
   const [id] = candidateIds(blocked.stdout);
   assert.ok(id, `expected objective candidates in:\n${blocked.stdout}`);
   return id;
@@ -79,7 +79,7 @@ async function archiveDirs(root) {
 test('ambiguous objective blocks the rewrite with exit 1 and zero writes', async (t) => {
   const { root } = await fixture(t);
   const before = await snapshot(root);
-  const result = cli(root, ['compact', '--rewrite']);
+  const result = cli(root, ['compact']);
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.match(result.stdout, /blocked/i);
   assert.match(result.stdout, /2 current-objective headings/);
@@ -87,7 +87,7 @@ test('ambiguous objective blocks the rewrite with exit 1 and zero writes', async
   assert.equal(candidateIds(result.stdout).length, 2, 'blocked output lists the candidate ids');
   assert.deepEqual(await snapshot(root), before, 'a blocked rewrite must not touch the workspace');
 
-  const unknown = cli(root, ['compact', '--rewrite', '--objective', 'obj-0000000000']);
+  const unknown = cli(root, ['compact', '--objective', 'obj-0000000000']);
   assert.equal(unknown.status, 1);
   assert.match(unknown.stdout, /unknown --objective/);
   assert.deepEqual(await snapshot(root), before);
@@ -97,13 +97,13 @@ test('dry run keeps exact live proposals in the API and prints a concise CLI sum
   const { root } = await fixture(t);
   const before = await snapshot(root);
   const objective = objectiveIdFor(root);
-  const plan = await compactAgentOS({ cwd: root, rewrite: true, objective, dryRun: true });
+  const plan = await compactAgentOS({ cwd: root, objective, dryRun: true });
   assert.equal(plan.ok, true, plan.text);
   assert.ok(plan.proposed.handoff.includes('## Current objective — 2026-09-15 (latest): AUM work merged'));
   assert.equal(plan.proposed.handoff.includes('Superseded narrative that must leave live context.'), false);
   assert.equal(plan.objectiveCandidates.length, 2);
 
-  const preview = cli(root, ['compact', '--rewrite', '--objective', objective, '--dry-run']);
+  const preview = cli(root, ['compact', '--objective', objective, '--dry-run']);
   assert.equal(preview.status, 0, preview.stdout + preview.stderr);
   assert.match(preview.stdout, /dry run/i);
   assert.match(preview.stdout, /Mode: structural rewrite/);
@@ -117,11 +117,11 @@ test('apply archives original bytes, replaces live state, and preserves unresolv
   const { root } = await fixture(t);
   const originalHandoff = await readFile(join(root, '.agentos/handoff.md'));
   const originalTasks = await readFile(join(root, '.agentos/tasks.md'));
-  const preview = cli(root, ['compact', '--rewrite', '--dry-run']);
+  const preview = cli(root, ['compact', '--dry-run']);
   const [objective] = candidateIds(preview.stdout);
   assert.ok(objective, preview.stdout);
 
-  const apply = cli(root, ['compact', '--rewrite', '--objective', objective]);
+  const apply = cli(root, ['compact', '--objective', objective]);
   assert.equal(apply.status, 0, apply.stdout + apply.stderr);
   assert.match(apply.stdout, /rewrite/i);
 
@@ -161,17 +161,17 @@ test('apply archives original bytes, replaces live state, and preserves unresolv
 
 test('a second rewrite of unchanged state is a write-free no-op', async (t) => {
   const { root } = await fixture(t);
-  const preview = cli(root, ['compact', '--rewrite', '--dry-run']);
+  const preview = cli(root, ['compact', '--dry-run']);
   const [objective] = candidateIds(preview.stdout);
-  assert.equal(cli(root, ['compact', '--rewrite', '--objective', objective]).status, 0);
+  assert.equal(cli(root, ['compact', '--objective', objective]).status, 0);
   const after = await snapshot(root);
-  const again = cli(root, ['compact', '--rewrite', '--objective', objective]);
+  const again = cli(root, ['compact', '--objective', objective]);
   assert.equal(again.status, 0, again.stdout + again.stderr);
   assert.match(again.stdout, /No safe reduction found; files unchanged\./);
   assert.deepEqual(await snapshot(root), after, 'repeat rewrite must not write, re-archive, or re-link');
   assert.equal((await archiveDirs(root)).length, 1);
 
-  const dryAgain = cli(root, ['compact', '--rewrite', '--objective', objective, '--dry-run']);
+  const dryAgain = cli(root, ['compact', '--objective', objective, '--dry-run']);
   assert.equal(dryAgain.status, 0);
   assert.deepEqual(await snapshot(root), after);
 });
@@ -179,42 +179,42 @@ test('a second rewrite of unchanged state is a write-free no-op', async (t) => {
 test('expect-state refuses to apply a stale preview', async (t) => {
   const { root } = await fixture(t);
   const objective = objectiveIdFor(root);
-  const preview = cli(root, ['compact', '--rewrite', '--objective', objective, '--dry-run', '--diff']);
+  const preview = cli(root, ['compact', '--objective', objective, '--dry-run', '--diff']);
   assert.equal(preview.status, 0, preview.stdout + preview.stderr);
   const state = /--expect-state ([a-f0-9]{64})/.exec(preview.stdout);
   assert.ok(state, `preview must print the source state hash:\n${preview.stdout}`);
   await writeFile(join(root, '.agentos/handoff.md'), `${await readFile(join(root, '.agentos/handoff.md'), 'utf8')}\n## Late addition\n\n- Added by another agent.\n`);
   const before = await snapshot(root);
-  const stale = cli(root, ['compact', '--rewrite', '--objective', objective, '--expect-state', state[1]]);
+  const stale = cli(root, ['compact', '--objective', objective, '--expect-state', state[1]]);
   assert.equal(stale.status, 1, stale.stdout + stale.stderr);
   assert.match(stale.stdout, /changed after this preview/);
   assert.match(stale.stdout, /--expect-state/);
   assert.deepEqual(await snapshot(root), before, 'stale preview must not write');
 
-  const fresh = cli(root, ['compact', '--rewrite', '--objective', objective, '--dry-run', '--diff']);
+  const fresh = cli(root, ['compact', '--objective', objective, '--dry-run', '--diff']);
   const freshState = /--expect-state ([a-f0-9]{64})/.exec(fresh.stdout);
   assert.ok(freshState);
-  assert.equal(cli(root, ['compact', '--rewrite', '--objective', objective, '--expect-state', freshState[1]]).status, 0);
+  assert.equal(cli(root, ['compact', '--objective', objective, '--expect-state', freshState[1]]).status, 0);
 });
 
 test('apply rolls the whole workspace back when any write fails', async (t) => {
   const { root } = await fixture(t);
-  const preview = cli(root, ['compact', '--rewrite', '--dry-run']);
+  const preview = cli(root, ['compact', '--dry-run']);
   const [objective] = candidateIds(preview.stdout);
   const before = await snapshot(root);
   const live = await readFile(join(root, '.agentos/handoff.md'), 'utf8');
-  const plan = await compactAgentOS({ cwd: root, rewrite: true, objective, dryRun: true });
+  const plan = await compactAgentOS({ cwd: root, objective, dryRun: true });
   assert.equal(plan.ok, true, plan.text);
   const expectedArchive = plan.archivePath;
 
   __setAtomicWriteFaultForTests(join(root, '.agentos/tasks.md'), 'before-rename');
   t.after(__clearAtomicWriteFaultForTests);
-  await assert.rejects(compactAgentOS({ cwd: root, rewrite: true, objective }), /Injected atomic-write test fault/);
+  await assert.rejects(compactAgentOS({ cwd: root, objective }), /Injected atomic-write test fault/);
   assert.deepEqual(await snapshot(root), before, 'failed apply must restore live files and remove the archive bundle');
   assert.equal(await readFile(join(root, '.agentos/handoff.md'), 'utf8'), live);
 
   __setAtomicWriteFaultForTests(join(expectedArchive, 'handoff.md'), 'before-rename');
-  await assert.rejects(compactAgentOS({ cwd: root, rewrite: true, objective }), /Injected atomic-write test fault/);
+  await assert.rejects(compactAgentOS({ cwd: root, objective }), /Injected atomic-write test fault/);
   assert.deepEqual(await snapshot(root), before, 'archive failure must leave live state untouched');
 });
 
@@ -232,12 +232,12 @@ test('apply carries an uncertain obligation live and records the block as archiv
   ].join('\n');
   const { root } = await fixture(t, { handoff });
   const originalHandoff = await readFile(join(root, '.agentos/handoff.md'));
-  const preview = await compactAgentOS({ cwd: root, rewrite: true, dryRun: true });
+  const preview = await compactAgentOS({ cwd: root, dryRun: true });
   assert.equal(preview.ok, true, preview.text);
   const objective = preview.objective;
   assert.equal(typeof objective, 'string');
 
-  const apply = cli(root, ['compact', '--rewrite', '--objective', objective]);
+  const apply = cli(root, ['compact', '--objective', objective]);
   assert.equal(apply.status, 0, apply.stdout + apply.stderr);
 
   const liveHandoff = await readFile(join(root, '.agentos/handoff.md'), 'utf8');
@@ -254,7 +254,7 @@ test('apply carries an uncertain obligation live and records the block as archiv
   assert.match(entry.reason, /uncertain obligation\(s\) carried forward verbatim/);
   assert.equal(manifest.classification.handoff.filter((section) => section.decision === 'archived').length, 1);
 
-  const again = cli(root, ['compact', '--rewrite', '--objective', objective]);
+  const again = cli(root, ['compact', '--objective', objective]);
   assert.equal(again.status, 0, again.stdout + again.stderr);
   assert.equal((await archiveDirs(root)).length, 1, 'a repeat run re-archives nothing');
 });
@@ -263,7 +263,7 @@ test('rewrite refuses invalid UTF-8 and unreadable sources without writing', asy
   const { root } = await fixture(t);
   await writeFile(join(root, '.agentos/tasks.md'), Buffer.from([0x23, 0x20, 0xff, 0x0a]));
   const before = await snapshot(root);
-  const result = cli(root, ['compact', '--rewrite', '--dry-run']);
+  const result = cli(root, ['compact', '--dry-run']);
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.match(result.stdout, /UTF-8/);
   assert.deepEqual(await snapshot(root), before);
@@ -275,7 +275,7 @@ test('compact flags permit normal selectors and checkpoint preserves the legacy 
   assert.equal(normalSelector.status, 1);
   assert.match(normalSelector.stdout, /unknown --objective/);
 
-  const checkpoint = cli(root, ['compact', '--checkpoint']);
+  const checkpoint = cli(root, ['compact', '--archive-only']);
   assert.equal(checkpoint.status, 0, checkpoint.stdout + checkpoint.stderr);
   assert.match(checkpoint.stdout, /Mode: archival checkpoint/);
   assert.equal((await archiveDirs(root)).length, 0, 'checkpoint mode uses the compact-archive-* format');
@@ -288,7 +288,7 @@ test('rewrite reports growth honestly and never claims negative savings', async 
     handoff: '# Handoff\n\n## Current objective\n\nSmall objective.\n\n## Scope\n\n- Single repo.\n',
     tasks: '# Tasks\n\n## Now\n\n- [ ] Small task.\n\n## Done\n\n- [x] Nothing yet.\n',
   });
-  const preview = cli(root, ['compact', '--rewrite', '--dry-run']);
+  const preview = cli(root, ['compact', '--dry-run']);
   assert.equal(preview.status, 0, preview.stdout + preview.stderr);
   assert.match(preview.stdout, /chars (added|removed)/);
   assert.doesNotMatch(preview.stdout, /-\d+\s*%/);
@@ -297,7 +297,7 @@ test('rewrite reports growth honestly and never claims negative savings', async 
 
 test('rewrite reports how many sections it archived per file', async (t) => {
   const { root } = await fixture(t);
-  const preview = cli(root, ['compact', '--rewrite', '--objective', objectiveIdFor(root), '--dry-run']);
+  const preview = cli(root, ['compact', '--objective', objectiveIdFor(root), '--dry-run']);
   assert.equal(preview.status, 0, preview.stdout + preview.stderr);
   assert.match(preview.stdout, /Classification:/);
   assert.match(preview.stdout, /handoff\.md: \d+ archived/);
@@ -313,7 +313,7 @@ test('rewrite refuses symlinked live state without touching the link target', as
   await rm(join(root, '.agentos/handoff.md'));
   await (await import('node:fs/promises')).symlink(outside, join(root, '.agentos/handoff.md'));
   const before = await snapshot(parent);
-  const result = cli(root, ['compact', '--rewrite', '--dry-run']);
+  const result = cli(root, ['compact', '--dry-run']);
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.match(result.stdout + result.stderr, /symlink/i, 'boundary preflight must refuse linked live state');
   assert.deepEqual(await snapshot(parent), before, 'no write, no outside mutation, no archive');

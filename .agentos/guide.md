@@ -22,13 +22,12 @@ How to operate AgentOS: `agentos status` shows the objective, open tasks and che
 - This directory is one repo of a larger workspace. The AgentOS root is the nearest parent that has `.agentos/`.
 - Run `agentos status`. It works from any subdirectory and needs no file reads.
 - In some engines a refused read outside the start directory ends the session. Use the CLI first; read parent files only if reads work.
-- `agentos handoff` prints the full handoff and the reading list when you need more than the status summary.
+- `agentos status --full` adds the full handoff and the reading list when you need more than the status summary.
 
 ## Stopping, switching engines, decisions
 
 - Before stopping or switching engines: `agentos checkpoint --task <id> --progress "<done>" --next "<remaining>" --check "<cmd>"`. Each `--check` runs as a receipt, from the workspace root or the `--cwd <dir>` after it (root-relative, or absolute inside the workspace); `--claim "<text>"` records what AgentOS did not observe.
 - Next engine: `agentos resume --task <id>`, then `context`. No checkpoint was written: `agentos checkpoint --recover --task <id>`.
-- Prefer these to `agentos run handoff`: it writes only a prose note, no receipts for `resume` to reconcile.
 - Durable changes: `agentos brain propose <id-or-path> --from <file|-> --task <id> --summary "<why>"`; progress only: nothing. Review: `agentos brain preview <proposal>`. Manual default: owner runs `agentos brain apply <proposal> --by <owner>`. With owner-enabled `agentos brain policy`, agents may use `agentos brain apply <proposal> --auto --by <self>`. Refusals stay pending; never drop --auto, impersonate the owner or change policy.
 - Engine role config (`claude-code`, `codex`): `agentos agents sync <engine> --role <id> --dry-run`, then without `--dry-run`. When `agentos doctor` prints `Synced config: STALE`, re-run the command it prints; add `--replace` only when that line does.
 
@@ -36,9 +35,9 @@ How to operate AgentOS: `agentos status` shows the objective, open tasks and che
 
 - Health check: `agentos doctor` (read-only). To repair, preview with `agentos doctor --fix --dry-run`, then run `agentos doctor --fix`.
 - Handoff or tasks too long: `agentos compact --dry-run`, review the report, then `agentos compact`. It archives recognised history byte-for-byte and refuses ambiguous state. If it reports nothing to archive, rewrite the file as the rule below says instead of leaving it to grow.
-- Add a workflow: `agentos skills list` shows the catalog, `agentos skills list --installed` shows what is installed, `agentos templates show <id>` reads one first, then `agentos skills add <skill-id> --dry-run` and `agentos skills add <skill-id>`.
+- Add a workflow: `agentos skills list` shows the catalog, `agentos skills list --installed` shows what is installed, `agentos skills show <id>` reads one first, then `agentos skills add <skill-id> --dry-run` and `agentos skills add <skill-id>`.
 - Roles: `agentos agents list`, `agentos agents list --installed`, `agentos agents add <agent-id> --dry-run`.
-- Is this adapter file current? `agentos adapters explain <file>`.
+- Is this adapter file current? `agentos doctor --explain <file>`.
 
 ## Rules
 

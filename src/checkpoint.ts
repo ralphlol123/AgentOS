@@ -2,7 +2,7 @@
  *
  * A checkpoint is an immutable JSON record under `.agentos/checkpoints/<task>/<ISO-ts>-<hash>.json` plus a
  * `current.json` pointer and one bounded managed section in `.agentos/handoff.md`. Git evidence comes from
- * collectRunHandoffGitState (same sensitive-path exclusions and size bounds as `run handoff`). Receipts say what
+ * collectRunHandoffGitState (same sensitive-path exclusions and size bounds as `run handoff` used). Receipts say what
  * was observed, claimed or never run, and which working-tree state they tested.
  *
  * Writes: per-file atomic (temp + rename/link) inside one in-process mutation transaction. Not a crash-safe

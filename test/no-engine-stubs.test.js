@@ -111,10 +111,10 @@ test('agentos prompt names the right bootloader for each engine and never an eng
   }
 });
 
-test('agentos handoff reading lists no longer ask for an engine file', async (t) => {
+test('agentos status --full reading lists no longer ask for an engine file', async (t) => {
   const root = await multiRepo(t);
   for (const cwd of [root, join(root, 'web')]) {
-    const r = spawnSync(process.execPath, [CLI, 'handoff'], { cwd, encoding: 'utf8' });
+    const r = spawnSync(process.execPath, [CLI, 'status', '--full'], { cwd, encoding: 'utf8' });
     assert.equal(r.status, 0, r.stderr);
     assert.doesNotMatch(r.stdout, /engines\//);
     assert.match(r.stdout, /relevant \.agentos\/agents\/<role>\.md/, 'the agent-card line stays');

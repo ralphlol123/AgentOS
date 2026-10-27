@@ -33,7 +33,6 @@ Closed during v1 (evidence in the plan file and the named tests):
 - **Hard enforcement (`context --require-enforcement` exiting 0).** v1 always exits 1: AgentOS cannot verify workspace trust, the residual paths above stay writable, and the deny rules bind only Claude Code's own tools (Codex: the sandbox is chosen at launch, no per-path scope). `--require-synced-config` checks configuration presence only. Justified when AgentOS controls the boundary itself: it launches the engine in a sandbox whose writable paths equal the edit scope (or installs a pre-tool hook that refuses every write outside it, shell included) and can read back that the boundary is active for the session; then a re-trial must show refusals for the residual paths before any exit 0.
 - **Codex per-path scope.** Not expressible with `--sandbox` (T4). Only if Codex gains a per-path mechanism.
 - **Per-tool allowlists.** `tools_requested` reaches only the Claude Code subagent `tools:` list (consumption verified for the invoked subagent, closure T9); no Codex/OpenCode mapping, no per-tool ADVISORY. Catalog cards ship with `tools_requested: []`, so edit roles get no `tools:` line. When a role needs a tool restriction enforced.
-- **Import provenance.** `templates import --type agent` still writes a legacy card; `import:<url>` is accepted but never written. When imported agents are used.
 - **Legacy-card upgrade notice** in the release notes (`agents manifest`), since nothing upgrades them automatically. At release.
 - **`knowledge_selectors` / `skills` used by the context builder.** Recorded, unused. When role-specific selection misses show up.
 - **Native session resume** (`unsupported` everywhere). Only if engines expose a resumable session AgentOS can drive.
@@ -64,7 +63,7 @@ Closed during v1 (evidence in the plan file and the named tests):
 
 - The `engines.allowed does not list opencode` doctor warning is noise for owners who limited engines on purpose.
 - `task_scope` entries are not checked for existence by `doctor`.
-- Equivalent aliases (`--mode summary|full`, `--agents minimal|detected`, `compact --rewrite`) and overlapping commands (`handoff`/`run handoff` vs `checkpoint`/`resume`, `prompt` vs `context`, `link-obsidian`/`obsidian link-workspace` vs `obsidian link`): see [migration.md](migration.md#keep--simplify--remove-inventory). Deprecate with one release of notice.
-- Deprecated migration writers: **GATED** (unchanged; gate in [migration.md](migration.md#keep--simplify--remove-inventory)).
+- Done in 2.1.0 / 3.0.0: the overlapping commands were deprecated in 2.1.0 and removed in 3.0.0, together with the aliases (`--mode`, `--agents detected`, `compact --rewrite`). See [migration.md](migration.md#command-inventory) and [migration-3.0-cli.md](migration-3.0-cli.md).
+- Legacy migration writers: removed in 3.0.0 (owner decision 2026-10-27; [migration.md](migration.md#command-inventory)).
 - `src/core.ts` (~5k lines): extract along slice boundaries.
 - `bun` is not on the developer sandbox PATH; gates run as the identical `npm run` scripts there.

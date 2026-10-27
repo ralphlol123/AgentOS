@@ -29,7 +29,7 @@ A relative `vault` is resolved against the workspace root, never the current dir
 
 This is the preferred Obsidian path: open the knowledge folder itself as a project vault ("Open folder as vault"). Obsidian then adds `.obsidian/` and you may add notes there; Brain writes and `agentos brain index` rewrite only the generated block of `index.md`, and leave `.obsidian/` and every other note byte- and mtime-identical (test-checked).
 
-**What Obsidian can show.** Obsidian opens only files inside the vault folder. The default Brain records (`agentos brain init`: `.agentos/brain/*.md`, `.agentos/decisions.md`) live outside `knowledge/`, so their links in `index.md` (`../.agentos/…`) leave the vault and Obsidian cannot open or edit them. The generated block says so: each such line ends with `— outside this vault: edit in your editor`, and one sentence above the list explains it. Edit those records in your editor or through `agentos brain propose|apply`. To have a record viewable and editable in Obsidian, create it inside the vault folder and register it in place: `agentos brain register knowledge/<note>.md` (that line is not marked). AgentOS never relocates, copies or symlinks a record to make it visible: each record has exactly one editable file.
+**What Obsidian can show.** Obsidian opens only files inside the vault folder. The default Brain records (set up by `agentos init`: `.agentos/brain/*.md`, `.agentos/decisions.md`) live outside `knowledge/`, so their links in `index.md` (`../.agentos/…`) leave the vault and Obsidian cannot open or edit them. The generated block says so: each such line ends with `— outside this vault: edit in your editor`, and one sentence above the list explains it. Edit those records in your editor or through `agentos brain propose|apply`. To have a record viewable and editable in Obsidian, create it inside the vault folder and register it in place: `agentos brain register knowledge/<note>.md` (that line is not marked). AgentOS never relocates, copies or symlinks a record to make it visible: each record has exactly one editable file.
 
 ## Existing vault: `agentos obsidian link`
 
@@ -45,7 +45,7 @@ Setup prints optional app guidance only: `Obsidian app: found (<path>)` or `Obsi
 
 **WSL → Windows path mapping.** Under WSL (`WSL_DISTRO_NAME` is set, or `/proc/sys/kernel/osrelease` contains `microsoft`), `obsidian init` and `obsidian link` add `Windows path (WSL): …` and `obsidian status` adds `Vault Windows path (WSL): …`, the folder a Windows Obsidian opens. The mapping is explicit string mapping, no `wslpath` call: `/mnt/<d>/rest` → `<D>:\rest`; any other absolute path → `\\wsl$\<distro>\rest` (`<distro>` from `WSL_DISTRO_NAME`; without it a Linux-side path is not mapped and no line is printed). Code: `wslWindowsPath` in `src/core.ts`.
 
-`obsidian link` is `obsidian link-workspace` (boundary only, no index note, no `canonical`) plus the index note and the canonical location; both share one code path. `link-obsidian` (exact-note `link-only` mode) is unchanged and still works.
+`obsidian link --no-index` (`obsidian link-workspace` before 3.0.0) is the boundary only: no index note, no `canonical`; plain `obsidian link` adds the index note and the canonical location on the same code path. `obsidian link --note <path> [--vault --dest --create]` (`link-obsidian --link` before 3.0.0) is the older exact-note `link-only` mode, unchanged, with the same prompts on a terminal. The old forms were removed in 3.0.0; configs they wrote (`mode: link-only`, or `mode: workspace-folder` without `canonical`/`index`, with an absolute `vault` in `project.yaml`) are still read.
 
 The config key is `destination` (the name existing configs use); a hand-written `dest` is read as an alias.
 
@@ -61,7 +61,7 @@ The index note (`index.md`, or `<Project> AgentOS Index.md` for `obsidian link`)
 <!-- agentos:brain-index:end -->
 ```
 
-- Every successful Brain write (`brain init|register|verify|apply`) and `agentos brain index` rewrite only the bytes between the two markers; everything before and after is kept byte-for-byte. The list is in walk order (deterministic): unchanged records give a byte-identical note and the file is not rewritten. There is no daemon or watcher.
+- Every successful Brain write (`init`, `brain register|verify|apply`) and `agentos brain index` rewrite only the bytes between the two markers; everything before and after is kept byte-for-byte. The list is in walk order (deterministic): unchanged records give a byte-identical note and the file is not rewritten. There is no daemon or watcher.
 - A deleted note is recreated by the next Brain write or by `agentos brain index` (`--dry-run` previews). Nothing else is touched.
 - An **older note without markers** (written by AgentOS 1.1 and earlier, possibly hand-edited) is never rewritten silently. Brain writes leave it alone and print `Warning: index note … has no agentos:brain-index markers …`. `agentos brain index` prints a preview diff; `agentos brain index --adopt` applies it: the old "Written once …" sentence is replaced, and the `## Brain records` section is replaced by the block only when every line in it is one AgentOS generated — otherwise the hand-written section stays and the block is appended after the note. Adopting twice is a no-op.
 - **Damaged markers** (two start markers, an end before the start, …) are never written: `brain index` exits 1 and asks to fix them by hand; Brain writes warn.
@@ -88,7 +88,7 @@ obsidian:
 ```
 
 - **Precedence:** `.agentos/local.yaml` `obsidian.vault` (this machine) wins over `.agentos/project.yaml` `knowledge.obsidian.vault` (shared). Everything else (`mode`, `destination`, `canonical`, `index`, `enabled`) is shared and read from `project.yaml` only. A relative value is resolved against the workspace root. `obsidian status` prints where the path came from: `Vault: <path> (from .agentos/local.yaml)`.
-- **New setups** (`obsidian link`, `obsidian link-workspace`, `obsidian init --dir <outside the workspace>`) write the host path there, never to `project.yaml`. `obsidian init` inside the workspace keeps its relative `vault: knowledge` in `project.yaml`: it is portable.
+- **New setups** (`obsidian link`, with or without `--no-index`, `obsidian init --dir <outside the workspace>`) write the host path there, never to `project.yaml`. `obsidian init` inside the workspace keeps its relative `vault: knowledge` in `project.yaml`: it is portable.
 - **Git:** `agentos init` and every write of `local.yaml` ensure `.agentos/.gitignore` lists `local.yaml`.
 - **Legacy setups** with an absolute `vault` in `project.yaml` keep working unchanged. To move one machine to the new layout, re-run the same `agentos obsidian link --vault … --dest …`: it rewrites `knowledge.obsidian` without the host path and writes `local.yaml`.
 - **Another machine** (a clone without `local.yaml`): `obsidian status` exits 1 with `Obsidian vault not bound on this machine: set obsidian.vault in .agentos/local.yaml (or re-run agentos obsidian link)`; core commands treat the integration as off (a `context --json` warning), so Brain, context, checkpoint and resume keep working and vault-only records are listed as Missing, as for a disabled integration.
@@ -107,7 +107,7 @@ Agent reads, creates and updates of vault notes go through `agentos brain regist
 
 ## Disable the integration
 
-Migrating a legacy `link-obsidian` setup, or relocating vault-canonical records before disabling: [`docs/migration-project-brain.md`](migration-project-brain.md).
+Migrating a legacy `link-obsidian` (link-only) setup, or relocating vault-canonical records before disabling: [`docs/migration-project-brain.md`](migration-project-brain.md).
 
 Set `enabled: false` under `knowledge.obsidian` in `.agentos/project.yaml`. Nothing is deleted: the folder, the index note, the records and the rest of the block stay. `obsidian status` prints `DISABLED`, `context` drops the Obsidian rule line, and the linked folder is not read. Brain, context, checkpoint and resume keep working. Records that live only in the vault (`canonical: vault`) are then unavailable and listed under **Missing** (see [`docs/brain.md`](brain.md#independent-of-obsidian)); to keep them available, keep the integration enabled. Remove the key or set `enabled: true` to re-enable. An invalid `knowledge.obsidian` block (e.g. `canonical: bogus`) is treated the same way: ignored, with a `doctor` problem and a `context --json` warning.
 
@@ -117,6 +117,6 @@ Set `enabled: false` under `knowledge.obsidian` in `.agentos/project.yaml`. Noth
 - No vault-wide ingestion or search: only `<vault>/<dest>` is walked, only when `canonical: vault`, and only for files declaring `id: brain:…`.
 - The index note lists readable records only; records that are unavailable or unreadable right now appear in `brain list`/`brain check`, not in the note.
 - Relative links from a vault index note to workspace records leave the vault; Obsidian may not open them, a Markdown viewer or editor does. The note says so (navigation only).
-- `link-obsidian` (legacy exact-note `link-only` mode) still writes its vault path to `project.yaml`; it binds no Brain location. Use `obsidian link` for new setups.
+- `obsidian link --note` (the exact-note `link-only` mode) still writes its vault path to `project.yaml`; it binds no Brain location. Use plain `obsidian link` for new setups.
 - No UI trial: the setup paths are proven on filesystem fixtures; a real Obsidian app round trip is the Slice 4 trial (A17).
 - `agents remove` does not look for Brain references in the vault folder.

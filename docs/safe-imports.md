@@ -5,29 +5,32 @@ AgentOS can import useful agent or skill material from local files or web URLs, 
 ## Command
 
 ```bash
-agentos templates import <url-or-file> --type agent|skill --name <id> [--mode summary|full] [--dry-run] [--yes] [--replace]
+agentos skills add <url-or-file> [--name <id>] [--dry-run] [--yes] [--replace] [--expected-sha256 <hash>]
+agentos agents add <url-or-file> [--name <id>] [--dry-run] [--yes] [--replace] [--expected-sha256 <hash>]
 ```
+
+These replaced `agentos templates import <url-or-file> --type agent|skill --name <id> …` in 2.1.0 (`templates` was removed in 3.0.0). Same review, hash pin, quarantine and overwrite rules. The add forms also print the template structure check (`Validation: …`), and an imported agent is written as a manifest card (`installed_from: import:<url>` or `template:<path>`). `agents add <file>` for a file that already is a valid agent template installs it as written, and is refused on a BLOCK finding.
 
 ## Default behavior
 
 Imports are dry-run by default unless `--yes` is provided.
 
-Dry-run:
+Preview (the default without `--yes`):
 
 ```bash
-agentos templates import ./external-skill.md --type skill --name external-skill --dry-run
+agentos skills add ./external-skill.md --name external-skill
 ```
 
-Equivalent safe default:
+`--dry-run` is the same preview plus a template check: it exits 1 (and prints the `Validation: FAIL` findings) when the file is not a valid agent/skill template. A plain source document is still imported as reference material with `--yes`.
 
 ```bash
-agentos templates import ./external-skill.md --type skill --name external-skill
+agentos skills add ./external-skill.md --name external-skill --dry-run
 ```
 
 Write after review:
 
 ```bash
-agentos templates import ./external-skill.md --type skill --name external-skill --yes
+agentos skills add ./external-skill.md --name external-skill --yes
 ```
 
 ## What dry-run shows
@@ -99,13 +102,13 @@ AgentOS refuses to overwrite existing project-local template files by default. T
 If the target already exists, the command fails with recovery text and no file is changed. Replace only after review:
 
 ```bash
-agentos templates import ./external-skill.md --type skill --name external-skill --yes --replace
+agentos skills add ./external-skill.md --name external-skill --yes --replace
 ```
 
 The same rule applies to registry copies:
 
 ```bash
-agentos templates copy agent:planner --replace
+agentos agents add planner --replace
 ```
 
 ## Attribution metadata
@@ -119,21 +122,15 @@ sha256
 
 Skill imports include this metadata in frontmatter. Agent imports include it in the imported agent file.
 
-## Summary vs full skill mode
+## Summary excerpt
 
-Summary mode, the default, keeps imported skill content compact:
-
-```bash
-agentos templates import ./external.md --type skill --name external --mode summary --yes
-```
-
-Full mode preserves a larger excerpt:
+An imported skill keeps a compact summary excerpt of its source (the first 80 non-empty lines, at most 8,000 characters):
 
 ```bash
-agentos templates import ./external.md --type skill --name external --mode full --yes
+agentos skills add ./external.md --name external --yes
 ```
 
-Use full mode only when the extra detail is worth the token cost.
+`--mode full` (a larger excerpt) was removed in 3.0.0; keep the full source next to the workspace and link it if you need it.
 
 ## Recommended workflow
 
@@ -146,8 +143,8 @@ Use full mode only when the extra detail is worth the token cost.
 Example:
 
 ```bash
-agentos templates import ./react-review.md --type skill --name react-review --dry-run
-agentos templates import ./react-review.md --type skill --name react-review --yes
+agentos skills add ./react-review.md --name react-review --dry-run
+agentos skills add ./react-review.md --name react-review --yes
 agentos doctor
 ```
 

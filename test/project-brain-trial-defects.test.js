@@ -28,8 +28,8 @@ async function project(t) {
 
 // --- D1: `<command> --help` --------------------------------------------------------------------------
 
-const COMMANDS = ['init', 'status', 'handoff', 'run', 'doctor', 'adapters', 'compact', 'link-obsidian', 'obsidian', 'skills', 'agents', 'engines',
-  'templates', 'migrate', 'prompt', 'context', 'checkpoint', 'resume', 'brain'];
+// The 11 commands of 3.0.0 (the removed ones print their removal line instead; see cli-removal-3.0.test.js).
+const COMMANDS = ['init', 'status', 'doctor', 'compact', 'obsidian', 'skills', 'agents', 'context', 'checkpoint', 'resume', 'brain'];
 
 test('D1: --help and -h on every command (and on a subcommand) print that command\'s usage, exit 0, and run nothing', async (t) => {
   const dir = await base(t);
@@ -98,7 +98,7 @@ test('D2 (A14): an absolute --cwd is compared canonically, so a root reached thr
 
 test('D3: the vault index marks records outside the vault folder; a record registered inside it is not marked; no copies', async (t) => {
   const { root } = await project(t);
-  ok(cli(['brain', 'init'], root));
+  ok(cli(['init', '--existing', '--yes'], root)); // `brain init` (workspace) was removed in 3.0.0; init runs the same Brain setup
   ok(cli(['obsidian', 'init'], root));
   await writeFile(join(root, 'knowledge/design.md'), '# Design\n\nIn the vault.\n');
   ok(cli(['brain', 'register', 'knowledge/design.md'], root));

@@ -9,7 +9,7 @@ import { initAgentOS, doctorAgentOS, agentsAgentOS } from '../dist/core.js';
 import { patchProjectYaml } from '../dist/project-yaml-edit.js';
 
 // project.yaml is edited by six commands (doctor --fix, agents add, templates copy/import of an agent,
-// link-obsidian, obsidian link-workspace). Each parsed the file, changed the object and re-dumped the
+// obsidian link --note / --no-index). Each parsed the file, changed the object and re-dumped the
 // WHOLE file, so a hand-formatted file lost its comments, flow style and key layout - even from a
 // `doctor --fix` that had nothing to change. Observed contract:
 //   * nothing to change  -> the file is returned byte-for-byte;
@@ -186,11 +186,11 @@ test('agents add keeps comments and flow style in project.yaml', async (t) => {
   assert.ok(parseYaml(after).agents.enabled.includes('planner'));
 });
 
-test('link-obsidian keeps comments and flow style in project.yaml', async (t) => {
+test('obsidian link --note keeps comments and flow style in project.yaml', async (t) => {
   const { root, path } = await handFormatted(t);
   const vault = await mkdtemp(join(tmpdir(), 'agentos-yamlfid-vault-'));
   t.after(() => rm(vault, { recursive: true, force: true }));
-  const r = cli(['link-obsidian', '--vault', vault, '--dest', 'Projects/Shop/AgentOS', '--create'], root);
+  const r = cli(['obsidian', 'link', '--note', 'Projects/Shop/AgentOS/Project.md', '--vault', vault, '--dest', 'Projects/Shop/AgentOS', '--create'], root);
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const after = await readFile(path, 'utf8');
   assert.match(after, /^# Owner notes: keep this file small\.$/m);
@@ -198,9 +198,9 @@ test('link-obsidian keeps comments and flow style in project.yaml', async (t) =>
   assert.equal(parseYaml(after).knowledge.obsidian.mode, 'link-only');
 });
 
-test('templates copy of an agent keeps comments in project.yaml', async (t) => {
+test('agents add of a catalog agent keeps comments in project.yaml', async (t) => {
   const { root, path } = await handFormatted(t);
-  const r = cli(['templates', 'copy', 'agent:security-reviewer'], root);
+  const r = cli(['agents', 'add', 'security-reviewer'], root);
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const after = await readFile(path, 'utf8');
   assert.match(after, /^# Owner notes: keep this file small\.$/m);

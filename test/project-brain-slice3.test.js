@@ -79,7 +79,7 @@ test('F5/A09: init --new creates a usable Brain without duplicates; re-running i
   ok(again);
   assert.match(again.stdout, /Present: brain:conventions/);
   assert.deepEqual(await snapshot(root), before, 'second init: every file byte- and mtime-identical, custom content kept');
-  ok(cli(['brain', 'init'], root));
+  ok(cli(['init', '--existing', '--yes'], root)); // `brain init` (workspace) was removed in 3.0.0; init runs the same Brain setup
   assert.deepEqual(await snapshot(root), before, '`brain init` after init is a no-op');
 });
 

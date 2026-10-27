@@ -131,7 +131,7 @@ test('an invalid manifest is a doctor problem; a legacy card is reported with th
   const { root } = await workspace(t);
   await writeFile(join(root, '.agentos/agents/developer.md'), await TEMPLATE('developer')); // a pre-slice-6 legacy card
   const { out } = json(['doctor'], root);
-  assert.ok(out.diagnostics.some((line) => line.includes('legacy agent card .agentos/agents/developer.md has no manifest') && line.includes('agentos agents manifest developer --from-catalog')), out.diagnostics.join('\n'));
+  assert.ok(out.diagnostics.some((line) => line.includes('legacy agent card .agentos/agents/developer.md has no manifest') && line.includes('`agentos doctor --fix` (it matches the catalog card)')), out.diagnostics.join('\n'));
   assert.equal(out.ok, true, 'legacy cards are not problems');
   ok(cli(['agents', 'add', 'developer'], root));
   await withManifest(root, 'developer', 'sandbox: off');
@@ -200,11 +200,11 @@ test('a hand-edited card survives doctor --fix and agents add byte for byte; --r
   assert.equal(await read(root, `.agentos/runs/replaced-agents/${kept[0]}`), customBytes, 'the replaced card is kept, not lost');
 });
 
-test('legacy cards: a byte-matched card gets its manifest from add or manifest --from-catalog; an unmatched one is never given inferred provenance', async (t) => {
+test('legacy cards: a byte-matched card gets its manifest from doctor --fix; an unmatched one is never given inferred provenance', async (t) => {
   const { root } = await workspace(t);
   const template = await TEMPLATE('tester');
   await writeFile(join(root, '.agentos/agents/tester.md'), template); // a pre-slice-6 legacy card (init now writes manifests)
-  ok(cli(['agents', 'manifest', 'tester', '--from-catalog'], root));
+  ok(cli(['doctor', '--fix'], root)); // `agents manifest --from-catalog` was removed in 3.0.0
   assert.equal(bodyOf(await read(root, '.agentos/agents/tester.md')), template);
   assert.match(frontOf(await read(root, '.agentos/agents/tester.md')), /installed_from: catalog:tester/);
 
@@ -214,12 +214,9 @@ test('legacy cards: a byte-matched card gets its manifest from add or manifest -
   const edited = `${await TEMPLATE('reviewer')}\nLocal note.\n`;
   await writeFile(join(root, '.agentos/agents/reviewer.md'), edited);
   const before = await snapshot(root);
-  const refused = cli(['agents', 'manifest', 'reviewer', '--from-catalog'], root);
-  fails(refused);
-  assert.match(refused.stdout, /differs from catalog:reviewer, so its provenance cannot be inferred/);
   fails(cli(['agents', 'add', 'reviewer'], root));
   ok(cli(['doctor', '--fix'], root));
-  assert.deepEqual(await snapshot(root), before, 'unmatched legacy card left alone by manifest --from-catalog, add and doctor --fix');
+  assert.deepEqual(await snapshot(root), before, 'unmatched legacy card left alone by add and doctor --fix');
   const diag = json(['doctor'], root).out.diagnostics;
   assert.ok(diag.includes('legacy agent card .agentos/agents/reviewer.md has no manifest; add one with `agentos agents manifest reviewer --custom` (it differs from catalog:reviewer; or replace it with `agentos agents add reviewer --replace`)'), diag.join('\n'));
 
@@ -293,9 +290,9 @@ test('remove refuses while referenced (enabled, capabilities, current checkpoint
 
 // --- E3 engines --------------------------------------------------------------------------------------
 
-test('agentos engines --json: five engines, exactly the six rows each, statuses from the closed set, verified only with a trial section', async (t) => {
+test('agentos doctor --engines --json: five engines, exactly the six rows each, statuses from the closed set, verified only with a trial section', async (t) => {
   const { root } = await workspace(t);
-  const { r, out } = json(['engines'], root);
+  const { r, out } = json(['doctor', '--engines'], root);
   ok(r);
   assert.deepEqual(Object.keys(out.matrix), ['claude-code', 'codex', 'opencode', 'hermes', 'generic']);
   const rows = ['context_rendering', 'native_agent_config', 'tool_restrictions', 'permission_enforcement', 'launch', 'native_session_resume'];
@@ -409,9 +406,9 @@ test('agents sync refuses a legacy card and a symlinked .claude directory withou
   let before = await snapshot(base);
   const legacy = cli(['agents', 'sync', 'claude-code'], root);
   fails(legacy);
-  assert.match(legacy.stdout, /no manifest.*agentos agents manifest developer --from-catalog/s);
+  assert.match(legacy.stdout, /no manifest.*agentos doctor --fix.*agentos agents manifest developer --custom/s);
   assert.deepEqual(await snapshot(base), before);
-  ok(cli(['agents', 'manifest', 'developer', '--from-catalog'], root));
+  ok(cli(['doctor', '--fix'], root)); // gives the byte-matched legacy card its catalog manifest
   await symlink(join(base, 'outside'), join(root, '.claude'));
   before = await snapshot(base);
   await assert.rejects(() => agentsAgentOS({ cwd: root, command: 'sync', engine: 'claude-code' }), /symlink/i);

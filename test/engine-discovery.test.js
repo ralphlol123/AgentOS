@@ -77,7 +77,7 @@ test('the guide tells an engine which command to run for which job, with the saf
     ['skill install', /agentos skills add/],
     ['skill listing', /agentos skills list/],
     ['agent listing', /agentos agents list/],
-    ['template inspection', /agentos templates (show|list)/],
+    ['template inspection', /agentos skills show/],
     ['dry-run-first rule', /--dry-run/],
     ['never hand-edit generated state rule', /(do not|never) (hand-)?edit/i],
     ['no commit or push unless asked', /(commit|push)/i],
@@ -143,12 +143,12 @@ test('child pointers point at the parent guide and carry the CLI fallback', asyn
   }
 });
 
-test('agentos prompt output mentions the guide for every engine', async (t) => {
+test('agentos context --brief output mentions the guide for every engine', async (t) => {
   const root = await multiRepo(t);
   for (const engine of ['claude', 'codex', 'opencode', 'hermes']) {
-    const r = spawnSync(process.execPath, [CLI, 'prompt', engine], { cwd: root, encoding: 'utf8' });
+    const r = spawnSync(process.execPath, [CLI, 'context', engine, '--brief'], { cwd: root, encoding: 'utf8' });
     assert.equal(r.status, 0, r.stderr);
-    assert.match(r.stdout, /\.agentos\/guide\.md/, `prompt ${engine} must mention the guide`);
+    assert.match(r.stdout, /\.agentos\/guide\.md/, `context ${engine} --brief must mention the guide`);
   }
 });
 
@@ -247,7 +247,7 @@ test('`agentos guide` is not a command, and nothing generated or printed recomme
     assert.doesNotMatch(await read(root, file), /agentos guide/, `${file} must not mention \`agentos guide\``);
   }
   for (const cwd of [root, join(root, 'web')]) {
-    for (const command of [['status'], ['handoff']]) {
+    for (const command of [['status'], ['status', '--full']]) {
       assert.doesNotMatch(runCli(command, cwd).stdout, /agentos guide/, `agentos ${command[0]} from ${relative(root, cwd) || '.'}`);
     }
   }
@@ -261,7 +261,7 @@ test('child pointers put the CLI before any path under `..` and explain why', as
     const firstParentPath = text.indexOf('`../');
     assert.ok(status >= 0, `${file} must name \`agentos status\``);
     assert.ok(status < firstParentPath, `${file}: \`agentos status\` must come before the first ../ path`);
-    assert.match(text, /agentos handoff/, `${file} must name \`agentos handoff\` for the full handoff`);
+    assert.match(text, /agentos status --full/, `${file} must name \`agentos status --full\` for the full handoff`);
     assert.match(text, /(refused|denied).{0,80}(end|stop|abort).{0,40}(session|turn|run)|(end|stop|abort).{0,40}(session|turn|run).{0,80}(refused|denied)/is, `${file} must say a refused read can end the session`);
   }
 });
@@ -370,17 +370,24 @@ test('the guide does not tell the reader to read handoff/tasks before using the 
   assert.match(guide, /only (if|when) (file )?reads? (work|succeed|are allowed)/i, 'any file-reading advice is conditional');
 });
 
-test('agentos handoff at the workspace root is unchanged', async (t) => {
+/** The part `status --full` appends after the status output (what `agentos handoff` printed before 3.0.0). */
+function fullPart(cwd) {
+  const status = runCli(['status'], cwd).stdout, full = runCli(['status', '--full'], cwd).stdout;
+  assert.ok(full.startsWith(`${status}\n`), 'status --full starts with the status output and a blank line');
+  return full.slice(status.length + 1);
+}
+
+test('agentos status --full at the workspace root appends the original reading list', async (t) => {
   const root = await multiRepo(t);
-  const out = runCli(['handoff'], root).stdout;
+  const out = fullPart(root);
   assert.ok(out.startsWith('Read these before continuing:\n1. AGENTS.md\n'), 'root output keeps the original reading list first');
   assert.match(out, /Current handoff excerpt:/);
 });
 
-test('agentos handoff from a child repo prints the content first and makes the file list conditional', async (t) => {
+test('agentos status --full from a child repo prints the content first and makes the file list conditional', async (t) => {
   const root = await multiRepo(t);
   await writeFile(join(root, '.agentos/handoff.md'), '# Handoff\n\n## Current objective\n\nShip the checkout.\n');
-  const out = runCli(['handoff'], join(root, 'web')).stdout;
+  const out = fullPart(join(root, 'web'));
   assert.ok(!out.startsWith('Read these before continuing:'), 'a child repo must not be told to read first');
   assert.match(out, /You are in repo: web/);
   assert.match(out, /Ship the checkout\./, 'the handoff content is printed');
@@ -390,9 +397,9 @@ test('agentos handoff from a child repo prints the content first and makes the f
   assert.ok(out.indexOf('Ship the checkout.') < list, 'content comes before the list');
 });
 
-test('agentos handoff stays read-only from a child repo', async (t) => {
+test('agentos status --full stays read-only from a child repo', async (t) => {
   const root = await multiRepo(t);
   const before = await snapshot(root);
-  runCli(['handoff'], join(root, 'api'));
+  runCli(['status', '--full'], join(root, 'api'));
   assert.deepEqual(await snapshot(root), before);
 });

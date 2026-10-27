@@ -120,7 +120,7 @@ test('D1/codex: sync codex prints that Codex enforces only its launch-time sandb
 });
 
 test('matrix: claude-code and codex rows match the 2026-10-25 trial; every verified cell carries report evidence', async () => {
-  const { out } = json(['engines'], process.cwd());
+  const { out } = json(['doctor', '--engines'], process.cwd());
   const claude = out.matrix['claude-code'], codex = out.matrix.codex;
   const CLOSURE = /docs\/evidence\/2026-10-25-cross-engine\/closure\/REPORT-closure\.md#/;
   assert.equal(claude.permission_enforcement.status, 'verified');

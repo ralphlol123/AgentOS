@@ -67,16 +67,10 @@ AgentOS detects child repos with package metadata and writes parent-managed poin
 
 ## Choose agents
 
-Minimal delivery team (developer, tester, reviewer, release-manager):
+Minimal delivery team (developer, tester, reviewer, release-manager; the same team you get without `--agents`). Add `--yes` (`-y`) to skip the confirmation prompt:
 
 ```bash
-agentos init --existing --agents minimal
-```
-
-Detected profile (same core team as minimal; frontend/backend specialists were absorbed into the single `developer` role):
-
-```bash
-agentos init --existing --agents detected
+agentos init --existing --agents minimal --yes
 ```
 
 Custom list:
@@ -109,67 +103,47 @@ Add a pack or individual skill:
 
 ```bash
 agentos skills add frontend-pack
-agentos skills add debugging --mode full
+agentos skills add debugging
+agentos skills show debugging      # read a skill card (installed, else the catalog template)
 ```
 
-Local skills and their optional `references/` files are written under `.agentos/skills/<category>/<id>/` and indexed in `.agentos/skills.md`. Both modes preserve the complete procedure. Load references only for the assigned repo's actual stack; project conventions prevail.
+Local skills and their optional `references/` files are written under `.agentos/skills/<category>/<id>/` and indexed in `.agentos/skills.md`. Every card holds the complete procedure. Load references only for the assigned repo's actual stack; project conventions prevail.
 
 Use `agentos skills list --installed` to distinguish installed cards from the available catalog. Merely listing a skill does not install it. Differing local cards/references require reviewed, explicit `--replace`; native engine copies remain untouched. See [the consolidated catalog and compatibility limits](templates.md).
 
-## Use templates
+## Agent and skill templates
 
-List agent convenience templates:
+The built-in catalog is listed by `agents list` and `skills list` (the 2.0 `templates` command was removed in 3.0.0):
 
 ```bash
 agentos agents list
-```
-
-List the full repository template registry:
-
-```bash
-agentos templates list
-```
-
-Preview a template:
-
-```bash
-agentos templates show agent:planner
-```
-
-Copy a built-in registry template:
-
-```bash
-agentos templates copy agent:planner --dry-run
-agentos templates copy agent:planner
-agentos templates copy agent:planner --replace
-agentos templates copy skill:frontend/frontend-design
-```
-
-Validate a template file:
-
-```bash
-agentos templates validate templates/agents/planner.md --type agent
-```
-
-Add a built-in or local agent template through the agent convenience command:
-
-```bash
+agentos agents show planner                # catalog card when it is not installed
+agentos agents add planner --dry-run
 agentos agents add planner
+agentos agents add planner --replace
+agentos skills add frontend-design
+```
+
+Check a template file you wrote (prints the structure check, writes nothing):
+
+```bash
 agentos agents add ./my-agent.md --name my-agent --dry-run
+agentos skills add ./my-skill.md --dry-run
 ```
 
 ## Import useful web/file templates safely
 
-Dry-run first:
+Preview first (nothing is written without `--yes`):
 
 ```bash
-agentos templates import ./external-skill.md --type skill --name external-skill --dry-run
+agentos skills add ./external-skill.md --name external-skill
+agentos agents add https://example.com/agent.md --name external-agent
 ```
 
-Write only after reviewing findings:
+Write only after reviewing findings, pinned to the reviewed bytes:
 
 ```bash
-agentos templates import ./external-skill.md --type skill --name external-skill --yes
+agentos skills add ./external-skill.md --name external-skill --yes --expected-sha256 <sha256 from the preview>
 ```
 
 ## Start a session (any engine)
@@ -195,16 +169,15 @@ agentos obsidian init                                                        # k
 agentos obsidian link --vault /path/to/vault --dest "Projects/MyProduct" --create   # one navigation note in an existing vault
 ```
 
-The vault path of `obsidian link` is machine-local: it goes to `.agentos/local.yaml` (git-ignored), not to the shared `project.yaml`. Off switch: `knowledge.obsidian.enabled: false`. AgentOS links notes; it never bulk-loads a vault. The older `agentos link-obsidian` (exact-note link-only mode) still works.
+The vault path of `obsidian link` is machine-local: it goes to `.agentos/local.yaml` (git-ignored), not to the shared `project.yaml`. Off switch: `knowledge.obsidian.enabled: false`. AgentOS links notes; it never bulk-loads a vault. Exact-note link-only mode: `agentos obsidian link --note <path> --vault <path> --dest <folder>` (`agentos link-obsidian` before 3.0.0).
 
-## Generate an engine prompt
+## Short engine start prefix
 
 ```bash
-agentos prompt claude
-agentos prompt codex
-agentos prompt opencode
-agentos prompt hermes
+agentos context claude --brief      # codex | opencode | hermes; `agentos prompt <engine>` before 3.0.0
 ```
+
+`agentos status --full` adds the full handoff to the status summary.
 
 ## Keep context compact
 
@@ -213,7 +186,7 @@ agentos compact --dry-run
 agentos compact
 ```
 
-`compact --dry-run` gives a concise, write-free structural preview; add `--diff` when you need the detailed patch. Plain `compact` applies only when the combined live context strictly shrinks, after archiving and hash-verifying the exact originals. `compact --checkpoint` explicitly selects the older archive-and-link behavior, which retains all live text and may grow it. See [compaction](../README.md#compaction) and [the detailed policy](compaction.md) for collision, CRLF, and rollback behavior.
+`compact --dry-run` gives a concise, write-free structural preview; add `--diff` when you need the detailed patch. Plain `compact` applies only when the combined live context strictly shrinks, after archiving and hash-verifying the exact originals. `compact --archive-only` explicitly selects the older archive-and-link behavior, which retains all live text and may grow it. See [compaction](../README.md#compaction) and [the detailed policy](compaction.md) for collision, CRLF, and rollback behavior.
 
 ## Health checks
 

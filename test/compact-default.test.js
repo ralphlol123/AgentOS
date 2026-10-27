@@ -70,25 +70,20 @@ async function rewriteBundles(root) {
     .filter((name) => name.startsWith('compact-rewrite-'));
 }
 
-test('plain compact and --rewrite use the same structural planner; dry runs write nothing', async (t) => {
+test('plain compact uses the structural planner; dry runs write nothing; --rewrite was removed in 3.0.0', async (t) => {
   const { root } = await fixture(t);
   const before = await snapshot(root);
   const plain = await compactAgentOS({ cwd: root, dryRun: true });
-  const alias = await compactAgentOS({ cwd: root, rewrite: true, dryRun: true });
-
   assert.equal(plain.ok, true, plain.text);
-  assert.equal(alias.ok, true, alias.text);
-  assert.deepEqual(plain.proposed, alias.proposed);
-  assert.equal(plain.stateHash, alias.stateHash);
   assert.match(plain.text, /Mode: structural rewrite/);
   assert.deepEqual(await snapshot(root), before);
 
   const plainCli = cli(root, ['compact', '--dry-run']);
-  const aliasCli = cli(root, ['compact', '--rewrite', '--dry-run']);
   assert.equal(plainCli.status, 0, plainCli.stdout + plainCli.stderr);
-  assert.equal(aliasCli.status, 0, aliasCli.stdout + aliasCli.stderr);
   assert.match(plainCli.stdout, /Mode: structural rewrite/);
-  assert.equal(plainCli.stdout, aliasCli.stdout);
+  const removed = cli(root, ['compact', '--rewrite', '--dry-run']);
+  assert.equal(removed.status, 1);
+  assert.equal(removed.stderr, 'agentos compact --rewrite was removed in 3.0.0; use agentos compact\n');
   assert.deepEqual(await snapshot(root), before);
 });
 
@@ -131,30 +126,20 @@ test('objective and expect-state work in normal mode and ordinary apply replans 
   assert.equal((await rewriteBundles(root)).length, 1, 'plain apply must replan and archive the current source');
 });
 
-test('checkpoint is the only legacy selector and boolean false stays in normal mode', async (t) => {
+test('--archive-only is the archival selector and boolean false stays in normal mode', async (t) => {
   const { root } = await fixture(t);
-  const checkpoint = cli(root, ['compact', '--checkpoint']);
-  assert.equal(checkpoint.status, 0, checkpoint.stdout + checkpoint.stderr);
-  assert.match(checkpoint.stdout, /Mode: archival checkpoint/);
+  const archive = cli(root, ['compact', '--archive-only']);
+  assert.equal(archive.status, 0, archive.stdout + archive.stderr);
+  assert.match(archive.stdout, /Mode: archival checkpoint/);
   assert.ok((await readdir(join(root, '.agentos/runs'))).some((name) => /^compact-archive-[a-f0-9]{64}\.md$/.test(name)));
 
-  for (const args of [
-    ['compact', '--rewrite=false', '--dry-run'],
-    ['compact', '--checkpoint=false', '--dry-run'],
-  ]) {
-    const result = cli(root, args);
-    assert.equal(result.status, 0, result.stdout + result.stderr);
-    assert.match(result.stdout, /Mode: structural rewrite/);
-  }
-
-  const allowedFalse = cli(root, ['compact', '--checkpoint', '--rewrite=false', '--dry-run']);
-  assert.equal(allowedFalse.status, 0, allowedFalse.stdout + allowedFalse.stderr);
-  assert.match(allowedFalse.stdout, /Mode: archival checkpoint/);
+  const result = cli(root, ['compact', '--archive-only=false', '--dry-run']);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /Mode: structural rewrite/);
 });
 
-test('checkpoint conflicts are rejected before every workspace side effect', async (t) => {
+test('--archive-only conflicts are rejected before every workspace side effect', async (t) => {
   for (const conflicting of [
-    ['--rewrite'],
     ['--objective', 'obj-0000000000'],
     ['--expect-state', '0'.repeat(64)],
     ['--diff', '--dry-run'],
@@ -162,9 +147,9 @@ test('checkpoint conflicts are rejected before every workspace side effect', asy
     await t.test(conflicting.join(' '), async (t) => {
       const { root } = await fixture(t);
       const before = await snapshot(root);
-      const result = cli(root, ['compact', '--checkpoint', ...conflicting]);
+      const result = cli(root, ['compact', '--archive-only', ...conflicting]);
       assert.equal(result.status, 1, result.stdout + result.stderr);
-      assert.match(result.stdout + result.stderr, /--checkpoint.*conflict|cannot combine --checkpoint/i);
+      assert.match(result.stdout + result.stderr, /cannot combine --archive-only/i);
       assert.deepEqual(await snapshot(root), before);
     });
   }
@@ -283,10 +268,10 @@ test('combined reduction may apply when one file grows and reports both deltas h
   assert.equal((await rewriteBundles(root)).length, 1);
 });
 
-test('compact help advertises structural default, checkpoint, alias and normal selectors', () => {
+test('compact help advertises the structural default and --archive-only only (3.0.0)', () => {
   const result = spawnSync(process.execPath, [CLI, 'help'], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /agentos compact \[--objective <id>\] \[--expect-state <sha256>\]/);
-  assert.match(result.stdout, /--checkpoint/);
-  assert.match(result.stdout, /--rewrite.*compatibility alias/i);
+  assert.match(result.stdout, /agentos compact --archive-only \[--dry-run\]/);
+  assert.doesNotMatch(result.stdout, /--rewrite|--checkpoint/);
 });

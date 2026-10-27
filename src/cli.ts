@@ -4,7 +4,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import { parseFlagsAndPositionals, validateCommandFlags } from './cli-options.js';
 import { createRequire } from 'node:module';
 import { enginesReport } from './engines.js';
-import { adaptersAgentOS, agentsAgentOS, BRAIN_USAGE, brainAgentOS, checkpointAgentOS, compactAgentOS, contextAgentOS, doctorAgentOS, handoffAgentOS, initAgentOS, linkObsidianAgentOS, migrateClaudeAgentOS, normalizeRepoIdsAgentOS, obsidianAgentOS, promptAgentOS, resumeAgentOS, runHandoffAgentOS, skillsAgentOS, statusAgentOS, templatesAgentOS } from './core.js';
+import { adaptersAgentOS, agentsAgentOS, BRAIN_USAGE, brainAgentOS, checkpointAgentOS, compactAgentOS, contextAgentOS, doctorAgentOS, handoffAgentOS, initAgentOS, linkObsidianAgentOS, obsidianAgentOS, promptAgentOS, resumeAgentOS, skillsAgentOS, statusAgentOS } from './core.js';
 
 const require = createRequire(import.meta.url);
 const VERSION = require('../package.json').version;
@@ -12,6 +12,8 @@ const VERSION = require('../package.json').version;
 async function main() {
   const [, , command = 'help', ...args] = process.argv;
   try {
+    const removed = removedForm(command, args);
+    if (removed) { console.error(removed); process.exitCode = 1; return; }
     // `<command> --help|-h` anywhere before `--` prints that command's usage and runs nothing (no option parsing).
     const end = args.indexOf('--');
     if (!['help', '--help', '-h'].includes(command) && (end < 0 ? args : args.slice(0, end)).some((arg) => arg === '--help' || arg === '-h')) {
@@ -38,58 +40,19 @@ async function main() {
     }
     if (command === 'status') {
       const result = await statusAgentOS({ cwd: process.cwd() });
-      console.log(result.text);
-      process.exitCode = result.ok ? 0 : 1;
-      return;
-    }
-    if (command === 'handoff') {
-      const result = await handoffAgentOS({ cwd: process.cwd() });
-      console.log(result.text);
-      process.exitCode = result.ok ? 0 : 1;
-      return;
-    }
-    if (command === 'run') {
-      const [sub, ...rest] = args;
-      if (sub !== 'handoff') {
-        console.log('Usage: agentos run handoff [--engine name] [--role role] [--repo repo] [--worktree path] [--phase slug] [--reason reason] [--dry-run]');
-        process.exitCode = sub ? 1 : 0;
-        return;
-      }
-      const { flags: subFlags } = parseFlagsAndPositionals(rest);
-      const result = await runHandoffAgentOS({
-        cwd: process.cwd(),
-        engine: subFlags.engine,
-        role: subFlags.role,
-        repo: subFlags.repo,
-        worktree: subFlags.worktree,
-        phase: subFlags.phase,
-        reason: subFlags.reason,
-        dryRun: subFlags['dry-run'],
-      });
-      console.log(result.text);
-      process.exitCode = result.ok ? 0 : 1;
+      // --full appends what `agentos handoff` printed (the reading list and the handoff excerpt).
+      const full = flags.full ? await handoffAgentOS({ cwd: process.cwd() }) : null;
+      console.log(full ? `${result.text}\n\n${full.text}` : result.text);
+      process.exitCode = result.ok && (!full || full.ok) ? 0 : 1;
       return;
     }
     if (command === 'doctor') {
-      if (flags['normalize-repo-ids'] && !flags.fix) {
-        console.log('Usage: agentos doctor --fix --normalize-repo-ids [--dry-run]\n--normalize-repo-ids only runs together with --fix (migrations are never implicit).');
-        process.exitCode = 1;
-        return;
-      }
-      if (flags['normalize-repo-ids']) {
-        const result = await normalizeRepoIdsAgentOS({ cwd: process.cwd(), dryRun: flags['dry-run'] });
+      if (flags.explain !== undefined || flags.engines) {
+        const extra = Object.keys(flags).filter((key) => !['explain', 'engines'].includes(key) && !(key === 'json' && flags.engines));
+        if ((flags.explain !== undefined && flags.engines) || extra.length) throw new Error('doctor --explain <file> and doctor --engines [--json] are read-only views; use one on its own.');
+        const result = flags.engines ? enginesReport({ json: Boolean(flags.json) }) : await adaptersAgentOS({ cwd: process.cwd(), explain: flags.explain });
         console.log(result.text);
         process.exitCode = result.ok ? 0 : 1;
-        return;
-      }
-      if (flags['adopt-custom-adapters'] && !flags.fix) {
-        console.log('Usage: agentos doctor --fix --adopt-custom-adapters\n--adopt-custom-adapters only runs together with --fix (migrations are never implicit).');
-        process.exitCode = 1;
-        return;
-      }
-      if (flags['prune-retired'] && !flags.fix) {
-        console.log('Usage: agentos doctor --fix --prune-retired\n--prune-retired only runs together with --fix (migrations are never implicit).');
-        process.exitCode = 1;
         return;
       }
       const result = await doctorAgentOS({
@@ -97,35 +60,13 @@ async function main() {
         fix: flags.fix,
         json: flags.json,
         dryRun: flags['dry-run'],
-        adoptCustomAdapters: flags['adopt-custom-adapters'],
-        pruneRetired: flags['prune-retired'],
       });
       console.log(result.text);
       process.exitCode = result.ok ? 0 : 1;
       return;
     }
-    if (command === 'adapters') {
-      const [sub, ...rest] = args;
-      if (sub !== 'explain') {
-        console.log('Usage: agentos adapters explain <file>');
-        process.exitCode = sub ? 1 : 0;
-        return;
-      }
-      const file = rest.find((arg) => !arg.startsWith('-'));
-      const result = await adaptersAgentOS({ cwd: process.cwd(), explain: file });
-      console.log(result.text);
-      process.exitCode = result.ok ? 0 : 1;
-      return;
-    }
     if (command === 'compact') {
-      const result = await compactAgentOS({ cwd: process.cwd(), dryRun: flags['dry-run'], diff: flags.diff, rewrite: flags.rewrite, checkpoint: flags.checkpoint, objective: flags.objective, expectState: flags['expect-state'] });
-      console.log(result.text);
-      process.exitCode = result.ok ? 0 : 1;
-      return;
-    }
-    if (command === 'link-obsidian') {
-      const setup = await resolveObsidianOptions(flags);
-      const result = await linkObsidianAgentOS({ cwd: process.cwd(), ...setup });
+      const result = await compactAgentOS({ cwd: process.cwd(), dryRun: flags['dry-run'], diff: flags.diff, archiveOnly: flags['archive-only'], objective: flags.objective, expectState: flags['expect-state'] });
       console.log(result.text);
       process.exitCode = result.ok ? 0 : 1;
       return;
@@ -133,9 +74,19 @@ async function main() {
     if (command === 'obsidian') {
       const [sub = 'status', ...rest] = args;
       const { flags: subFlags, positionals } = parseFlagsAndPositionals(rest);
+      if (sub !== 'link' && (subFlags.note !== undefined || subFlags['no-index'])) throw new Error('--note and --no-index belong to agentos obsidian link.');
+      if (sub === 'link' && subFlags.note !== undefined) {
+        // Exact-note, link-only mode (prompts included on a TTY).
+        if (subFlags['no-index'] || subFlags.canonical) throw new Error('obsidian link --note links one exact note; it does not combine with --no-index or --canonical.');
+        const { note, ...linkFlags } = subFlags;
+        const result = await linkObsidianAgentOS({ cwd: process.cwd(), ...(await resolveObsidianOptions({ ...linkFlags, link: note })) });
+        console.log(result.text);
+        process.exitCode = result.ok ? 0 : 1;
+        return;
+      }
       const result = await obsidianAgentOS({
         cwd: process.cwd(),
-        command: sub,
+        command: sub === 'link' && subFlags['no-index'] ? 'link-workspace' : sub,
         subcommand: positionals[0],
         note: positionals[1],
         vault: subFlags.vault,
@@ -157,18 +108,26 @@ async function main() {
         process.exitCode = result.ok ? 0 : 1;
         return;
       }
-      if (sub !== 'add' && sub !== 'remove') {
-        console.log('Usage: agentos skills list | agentos skills add [--detected] [skill-id|category-pack,...] [--mode summary|full] [--dry-run] | agentos skills remove <skill-id> [--dry-run]');
+      if (sub !== 'add' && sub !== 'remove' && sub !== 'show') {
+        console.log('Usage: agentos skills list | agentos skills show <skill-id> | agentos skills add [--detected] [skill-id|category-pack,...] [--dry-run] | agentos skills add <file|url> [--name id] [--yes] [--dry-run] | agentos skills remove <skill-id> [--dry-run]');
         process.exitCode = sub ? 1 : 0;
         return;
       }
       const { flags: subFlags, positionals } = parseFlagsAndPositionals(rest);
+      if (sub === 'show') {
+        const result = await skillsAgentOS({ cwd: process.cwd(), show: positionals[0] ?? '' });
+        console.log(result.text);
+        process.exitCode = result.ok ? 0 : 1;
+        return;
+      }
       const result = await skillsAgentOS({
         cwd: process.cwd(),
+        name: subFlags.name,
+        yes: subFlags.yes,
+        expectedSha256: subFlags['expected-sha256'],
         detected: sub === 'add' ? Boolean(subFlags.detected) : false,
         add: sub === 'add' && positionals.length ? positionals.join(',') : undefined,
         remove: sub === 'remove' && positionals.length ? positionals.join(',') : undefined,
-        mode: subFlags.mode,
         replace: subFlags.replace,
         dryRun: subFlags['dry-run'],
       });
@@ -192,83 +151,30 @@ async function main() {
       }
       const { flags: subFlags, positionals } = parseFlagsAndPositionals(rest);
       const result = sub === 'add'
-        ? await agentsAgentOS({ cwd: process.cwd(), add: positionals[0], name: subFlags.name, replace: subFlags.replace, dryRun: subFlags['dry-run'] })
+        ? await agentsAgentOS({ cwd: process.cwd(), add: positionals[0], name: subFlags.name, replace: subFlags.replace, dryRun: subFlags['dry-run'], yes: subFlags.yes, expectedSha256: subFlags['expected-sha256'] })
         : await agentsAgentOS({
           cwd: process.cwd(), command: sub, id: sub === 'sync' ? undefined : positionals[0], engine: sub === 'sync' ? positionals[0] : undefined,
-          role: subFlags.role, scope: subFlags.scope, json: subFlags.json, dryRun: subFlags['dry-run'], replace: subFlags.replace, fromCatalog: subFlags['from-catalog'], custom: subFlags.custom,
+          role: subFlags.role, scope: subFlags.scope, json: subFlags.json, dryRun: subFlags['dry-run'], replace: subFlags.replace, custom: subFlags.custom,
         });
-      console.log(result.text);
-      process.exitCode = result.ok ? 0 : 1;
-      return;
-    }
-    if (command === 'templates') {
-      const [sub, ...rest] = args;
-      if (sub === 'list') {
-        const result = await templatesAgentOS({ cwd: process.cwd(), command: 'list' });
-        console.log(result.text);
-        process.exitCode = result.ok ? 0 : 1;
-        return;
-      }
-      if (sub === 'show') {
-        const result = await templatesAgentOS({ cwd: process.cwd(), command: 'show', id: rest[0] });
-        console.log(result.text);
-        process.exitCode = result.ok ? 0 : 1;
-        return;
-      }
-      if (sub === 'copy') {
-        const { flags: subFlags, positionals } = parseFlagsAndPositionals(rest);
-        const result = await templatesAgentOS({ cwd: process.cwd(), command: 'copy', id: positionals[0], dryRun: subFlags['dry-run'], replace: subFlags.replace });
-        console.log(result.text);
-        process.exitCode = result.ok ? 0 : 1;
-        return;
-      }
-      if (sub === 'validate') {
-        const { flags: subFlags, positionals } = parseFlagsAndPositionals(rest);
-        const result = await templatesAgentOS({ cwd: process.cwd(), command: 'validate', source: positionals[0], type: subFlags.type });
-        console.log(result.text);
-        process.exitCode = result.ok ? 0 : 1;
-        return;
-      }
-      if (sub !== 'import') {
-        console.log('Usage: agentos templates list | show <id> | copy <id> [--dry-run] | validate <file> --type agent|skill | import <url-or-file> --type agent|skill --name <id> [--mode summary|full] [--dry-run] [--yes]');
-        process.exitCode = sub ? 1 : 0;
-        return;
-      }
-      const { flags: subFlags, positionals } = parseFlagsAndPositionals(rest);
-      const result = await templatesAgentOS({ cwd: process.cwd(), command: 'import', source: positionals[0], type: subFlags.type, name: subFlags.name, mode: subFlags.mode, dryRun: subFlags['dry-run'], yes: subFlags.yes, replace: subFlags.replace, expectedSha256: subFlags['expected-sha256'] });
-      console.log(result.text);
-      process.exitCode = result.ok ? 0 : 1;
-      return;
-    }
-    if (command === 'migrate') {
-      const [target] = args;
-      if (target !== 'claude') {
-        console.log('Usage: agentos migrate claude --preserve [--dry-run]');
-        process.exitCode = target ? 1 : 0;
-        return;
-      }
-      const result = await migrateClaudeAgentOS({ cwd: process.cwd(), preserve: flags.preserve, dryRun: flags['dry-run'] });
-      console.log(result.text);
-      process.exitCode = result.ok ? 0 : 1;
-      return;
-    }
-    if (command === 'prompt') {
-      const engine = args.find((arg) => !arg.startsWith('-')) || 'generic';
-      const result = await promptAgentOS({ cwd: process.cwd(), engine });
       console.log(result.text);
       process.exitCode = result.ok ? 0 : 1;
       return;
     }
     if (command === 'context') {
       const { positionals } = parseFlagsAndPositionals(args);
-      const result = await contextAgentOS({ cwd: process.cwd(), engine: positionals[0] || 'generic', task: flags.task, role: flags.role, scope: flags.scope, budget: flags.budget, json: flags.json, includeSuperseded: flags['include-superseded'], requireEnforcement: flags['require-enforcement'], requireSyncedConfig: flags['require-synced-config'], requireComplete: flags['require-complete'] });
+      if (flags.brief) {
+        // The short generic start prefix (what `agentos prompt [engine]` printed before 3.0.0).
+        const extra = Object.keys(flags).filter((key) => key !== 'brief');
+        if (extra.length) throw new Error(`context --brief takes only an engine name, not --${extra[0]}.`);
+        const result = await promptAgentOS({ cwd: process.cwd(), engine: positionals[0] || 'generic' });
+        console.log(result.text);
+        process.exitCode = result.ok ? 0 : 1;
+        return;
+      }
+      const strict = Boolean(flags.strict); // --strict = all three --require-* gates
+      const result = await contextAgentOS({ cwd: process.cwd(), engine: positionals[0] || 'generic', task: flags.task, role: flags.role, scope: flags.scope, budget: flags.budget, json: flags.json, includeSuperseded: flags['include-superseded'], requireEnforcement: strict || flags['require-enforcement'], requireSyncedConfig: strict || flags['require-synced-config'], requireComplete: strict || flags['require-complete'] });
       console.log(result.text);
       process.exitCode = result.ok ? 0 : 1;
-      return;
-    }
-    if (command === 'engines') {
-      const result = enginesReport({ json: Boolean(flags.json) });
-      console.log(result.text);
       return;
     }
     if (command === 'checkpoint') {
@@ -316,6 +222,46 @@ async function main() {
   }
 }
 
+const removedLine = (form: string, use: string) => `agentos ${form} was removed in 3.0.0; use ${use}`;
+const LEGACY = (flags: string) => `npx agentos-for-projects@2 ${flags} once, then upgrade`;
+/** Commands and subcommands removed in 3.0.0, looked up as `<command> <sub>` then `<command>`: [old form, replacement]. */
+const REMOVED_COMMANDS: Record<string, [string, string]> = {
+  handoff: ['handoff', 'agentos status --full'],
+  run: ['run handoff', 'agentos checkpoint --task <id> and agentos resume --task <id>'],
+  prompt: ['prompt', 'agentos context [engine] --brief'],
+  adapters: ['adapters explain', 'agentos doctor --explain <file>'],
+  engines: ['engines', 'agentos doctor --engines [--json]'],
+  'link-obsidian': ['link-obsidian', 'agentos obsidian link --note <path>'],
+  migrate: ['migrate claude', LEGACY('migrate claude --preserve')],
+  'templates list': ['templates list', 'agentos agents list / agentos skills list'],
+  'templates show': ['templates show', 'agentos agents show <id> / agentos skills show <id>'],
+  'templates copy': ['templates copy', 'agentos agents add <id> / agentos skills add <id>'],
+  'templates validate': ['templates validate', 'agentos agents add <file> --dry-run / agentos skills add <file> --dry-run'],
+  'templates import': ['templates import', 'agentos agents add <url|file> / agentos skills add <url|file>'],
+  templates: ['templates', 'agentos agents and agentos skills'],
+  'obsidian link-workspace': ['obsidian link-workspace', 'agentos obsidian link --no-index'],
+  'brain validate': ['brain validate', 'agentos brain preview <proposal>'],
+};
+
+/** The one line a form removed in 3.0.0 prints (exit 1), or null. Reads raw args: removed flags no longer parse. */
+function removedForm(command: string, args: string[]): string | null {
+  const end = args.indexOf('--');
+  const opts = end < 0 ? args : args.slice(0, end);
+  const value = (flag: string) => { const i = opts.findIndex((a) => a === `--${flag}` || a.startsWith(`--${flag}=`)); return i < 0 ? undefined : opts[i].includes('=') ? opts[i].slice(opts[i].indexOf('=') + 1) : opts[i + 1] ?? ''; };
+  const has = (flag: string) => value(flag) !== undefined;
+  const sub = opts.find((a) => !a.startsWith('-'));
+  const hit = REMOVED_COMMANDS[`${command} ${sub}`] ?? (Object.hasOwn(REMOVED_COMMANDS, command) ? REMOVED_COMMANDS[command] : undefined);
+  if (hit) return removedLine(...hit);
+  if (command === 'doctor') for (const flag of ['adopt-custom-adapters', 'prune-retired', 'normalize-repo-ids']) if (has(flag)) return removedLine(`doctor --fix --${flag}`, LEGACY(`doctor --fix --${flag}`));
+  if (command === 'compact' && has('checkpoint')) return removedLine('compact --checkpoint', 'agentos compact --archive-only');
+  if (command === 'compact' && has('rewrite')) return removedLine('compact --rewrite', 'agentos compact');
+  if (command === 'skills' && has('mode')) return removedLine('skills add --mode', 'agentos skills add <id|file|url> (no --mode; imports keep a summary excerpt)');
+  if (command === 'init' && value('agents') === 'detected') return removedLine('init --agents detected', 'agentos init --agents minimal');
+  if (command === 'brain' && sub === 'init' && value('location') !== 'vault') return removedLine('brain init', 'agentos init (brain init --location vault stays)');
+  if (command === 'agents' && sub === 'manifest' && has('from-catalog')) return removedLine('agents manifest --from-catalog', 'agentos doctor --fix');
+  return null;
+}
+
 async function readStdin() {
   const chunks: Buffer[] = [];
   for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
@@ -324,11 +270,11 @@ async function readStdin() {
 
 const AGENTS_USAGE = [
   'Usage: agentos agents list [--installed]',
-  '       agentos agents add <agent-id|template-file> [--name id] [--replace] [--dry-run]',
+  '       agentos agents add <agent-id|file|url> [--name id] [--replace] [--dry-run] [--yes] [--expected-sha256 hash]',
   '       agentos agents show <id> [--json]',
   '       agentos agents enable|disable <id> [--dry-run]',
   '       agentos agents remove <id> [--dry-run]',
-  '       agentos agents manifest <id> --from-catalog|--custom [--dry-run]',
+  '       agentos agents manifest <id> --custom [--dry-run]',
   '       agentos agents sync claude-code|codex [--role <id>] [--scope <repo-or-path>,...] [--dry-run] [--replace]',
 ].join('\n');
 
@@ -377,6 +323,55 @@ function commandUsage(command: string) {
   return lines.length ? `Usage:\n${lines.join('\n')}` : null;
 }
 
-const HELP = `Usage:\n  agentos init [--new|--existing] [--agents minimal|detected|developer,tester,reviewer,release-manager] [--refresh] [--dry-run]\n  agentos status\n  agentos handoff\n  agentos run handoff [--engine name] [--role role] [--repo repo] [--worktree path] [--phase slug] [--reason reason] [--dry-run]\n  agentos doctor [--fix] [--json]\n  agentos doctor --fix [--dry-run] [--adopt-custom-adapters] [--prune-retired]\n  agentos doctor --fix --normalize-repo-ids [--dry-run]\n  agentos adapters explain <file>\n  agentos compact [--objective <id>] [--expect-state <sha256>]\n  agentos compact [--objective <id>] --dry-run [--diff]\n  agentos compact --checkpoint [--dry-run]\n  agentos compact --rewrite ...  # compatibility alias for normal structural compaction\n  agentos link-obsidian [--vault <path> --dest <folder> --link <note> --create]\n  agentos obsidian init [--dir <path>] [--dry-run]\n  agentos obsidian link --vault <abs-path> --dest <sub/folder> [--canonical workspace|vault] [--create] [--dry-run]\n  agentos obsidian link-workspace --vault <path> --dest <folder> [--create] [--dry-run]\n  agentos obsidian status\n  agentos skills list [--installed]\n  agentos skills remove <skill-id> [--dry-run]\n  agentos skills add [--detected] [skill-id|category-pack,...] [--mode summary|full] [--dry-run] [--replace]\n  agentos agents list [--installed]\n  agentos agents add <agent-id|template-file> [--name id] [--dry-run] [--replace]\n  agentos agents show <id> [--json] | enable <id> | disable <id> | remove <id> [--dry-run]\n  agentos agents manifest <id> --from-catalog|--custom [--dry-run]\n  agentos agents sync claude-code|codex [--role <id>] [--scope <repo-or-path>,...] [--dry-run] [--replace]\n  agentos engines [--json]\n  agentos templates list\n  agentos templates show <id>\n  agentos templates copy <id> [--dry-run] [--replace]\n  agentos templates validate <file> --type agent|skill\n  agentos templates import <url-or-file> --type agent|skill --name <id> [--mode summary|full] [--dry-run] [--yes] [--replace] [--expected-sha256 hash]\n  agentos migrate claude --preserve [--dry-run]\n  agentos prompt [claude|codex|opencode|hermes]\n  agentos context [claude|codex|opencode|hermes] [--task "<text>"] [--role <agent-id>] [--scope <repo-or-path>,...] [--budget <tokens>] [--json] [--include-superseded] [--require-synced-config] [--require-enforcement] [--require-complete]\n  agentos checkpoint [--task <id>] [--engine <e>] [--role <r>] [--progress \"<text>\"] [--blocker \"<text>\"] [--next \"<text>\"] [--check \"<cmd>\" [--cwd <dir>]]... [--claim \"<text>\"]... [--json] [--dry-run]\n  agentos checkpoint --recover [--task <id>] [--dry-run]\n  agentos checkpoint list [--task <id>] [--json] | agentos checkpoint show <id> [--json]\n  agentos resume [--task <id>] [--engine <e>] [--json]\n  agentos brain init|register|list|show|search|propose|preview|validate|apply|revert|log|check|verify|index|policy ...  (agentos brain for details)\n\nDeprecated, removed in 2.0.0 (to migrate an older workspace first, run npx agentos-for-projects@1):\n  --adopt-custom-adapters, --prune-retired, --normalize-repo-ids, and agentos migrate claude.\n\nCore rule:\n  One AgentOS per product/workspace.\n  Many repos inside it.\n  Each task declares which repo(s) are in scope.`;
+const HELP = [
+  'Usage:',
+  '',
+  'Setup & health',
+  '  agentos init [--new|--existing] [--agents minimal|<agent-id>,...] [--refresh] [--dry-run] [--yes]',
+  '  agentos status [--full]',
+  '  agentos doctor [--fix] [--dry-run] [--json]',
+  '  agentos doctor --explain <file>',
+  '  agentos doctor --engines [--json]',
+  '',
+  'Work loop (agents run these)',
+  '  agentos context [claude|codex|opencode|hermes] [--task "<text>"] [--role <agent-id>] [--scope <repo-or-path>,...] [--budget <tokens>] [--json] [--strict] [--include-superseded]',
+  '  agentos context [claude|codex|opencode|hermes] --brief',
+  '  agentos checkpoint [--task <id>] [--engine <e>] [--role <r>] [--progress "<text>"] [--blocker "<text>"] [--next "<text>"] [--check "<cmd>" [--cwd <dir>]]... [--claim "<text>"]... [--json] [--dry-run]',
+  '  agentos checkpoint --recover [--task <id>] [--dry-run]',
+  '  agentos checkpoint list [--task <id>] [--json] | agentos checkpoint show <id> [--json]',
+  '  agentos resume [--task <id>] [--engine <e>] [--json]',
+  '',
+  'Knowledge',
+  '  agentos brain list|show|search|check|register|propose|preview|apply|revert|log|policy|verify|index ...  (agentos brain for details)',
+  '',
+  'Team',
+  '  agentos agents list [--installed]',
+  '  agentos agents show <id> [--json] | enable <id> | disable <id> | remove <id> [--dry-run]',
+  '  agentos agents add <agent-id|file|url> [--name id] [--dry-run] [--replace] [--yes] [--expected-sha256 hash]',
+  '  agentos agents manifest <id> --custom [--dry-run]',
+  '  agentos agents sync claude-code|codex [--role <id>] [--scope <repo-or-path>,...] [--dry-run] [--replace]',
+  '  agentos skills list [--installed]',
+  '  agentos skills show <skill-id>',
+  '  agentos skills add [--detected] [skill-id|category-pack,...] [--dry-run] [--replace]',
+  '  agentos skills add <file|url> [--name id] [--dry-run] [--yes] [--replace] [--expected-sha256 hash]',
+  '  agentos skills remove <skill-id> [--dry-run]',
+  '',
+  'Optional & maintenance',
+  '  agentos obsidian init [--dir <path>] [--dry-run]',
+  '  agentos obsidian link --vault <abs-path> --dest <sub/folder> [--canonical workspace|vault] [--no-index] [--create] [--dry-run]',
+  '  agentos obsidian link --note <path> [--vault <path> --dest <folder> --create] [--dry-run]',
+  '  agentos obsidian status',
+  '  agentos compact [--objective <id>] [--expect-state <sha256>]',
+  '  agentos compact [--objective <id>] --dry-run [--diff]',
+  '  agentos compact --archive-only [--dry-run]',
+  '',
+  'Removed in 3.0.0: the 2.x old forms and legacy migrations exit 1 naming their replacement (docs/migration-3.0-cli.md).',
+  'Older workspaces that still need a legacy migration: run npx agentos-for-projects@2 doctor --fix once first.',
+  '',
+  'Core rule:',
+  '  One AgentOS per product/workspace.',
+  '  Many repos inside it.',
+  '  Each task declares which repo(s) are in scope.',
+].join('\n');
 
 main();

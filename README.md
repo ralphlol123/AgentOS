@@ -12,7 +12,7 @@ These checks protect against existing unsafe paths, not concurrent filesystem re
 
 Every critical AgentOS text file — `.agentos/project.yaml`, `handoff.md`, `tasks.md`, `knowledge.md`, `skills.md`, managed agent/repo markdown, and root/child adapter files (`AGENTS.md`, `CLAUDE.md`, `.hermes.md`, child repo pointers) plus their `.agentos.bak` backups — is replaced through a single atomic-write primitive: the new content is written to a uniquely named temporary file in the *same directory* as the destination, flushed and fsync'd, closed, given the destination's existing file mode (or the OS default for a brand-new file), then renamed over the destination in one filesystem `rename()` call. `rename()` never follows a symlink at the destination — it replaces the link entry itself — and this primitive does not change Task 2's symlink/boundary checks, which still run before any of this. If the temp file can't be renamed (or any earlier step fails), the temp file is removed; no partial or zero-byte destination file is ever left behind.
 
-Commands that touch more than one output — `agentos init`, `doctor --fix`, `agentos obsidian link` / `link-workspace`, `agents add` and agent template copy, `skills add` / `skills remove` and skill template copy/import, `compact`, `agentos run handoff`, and `agentos checkpoint` — run their entire write phase as one in-process mutation transaction. For `init`, that includes every filesystem mutation it makes, not just the adapter files: the `.agentos` scaffold directories and files, per-agent/engine/repo files, root/child adapters and their one-time backups, and child `.gitignore` blocks are all one transaction, so a fault partway through leaves the workspace exactly as it was before `init` ran. Before each write/create/remove, the transaction snapshots either the target's existing bytes and mode (if it already existed) or its topmost not-yet-existing ancestor directory (if it's new), so a brand-new nested folder can be removed as a whole on rollback. If any later step in the same command throws, every tracked path is restored to its pre-command bytes, mode, or absence, in reverse order, before the error is re-raised; dry-run and dependency/config validation still happen before any of this and are unaffected.
+Commands that touch more than one output — `agentos init`, `doctor --fix`, `agentos obsidian link` (with or without `--no-index`), `agents add`, `skills add` / `skills remove` (catalog cards, file and URL imports), `compact`, and `agentos checkpoint` — run their entire write phase as one in-process mutation transaction. For `init`, that includes every filesystem mutation it makes, not just the adapter files: the `.agentos` scaffold directories and files, per-agent/engine/repo files, root/child adapters and their one-time backups, and child `.gitignore` blocks are all one transaction, so a fault partway through leaves the workspace exactly as it was before `init` ran. Before each write/create/remove, the transaction snapshots either the target's existing bytes and mode (if it already existed) or its topmost not-yet-existing ancestor directory (if it's new), so a brand-new nested folder can be removed as a whole on rollback. If any later step in the same command throws, every tracked path is restored to its pre-command bytes, mode, or absence, in reverse order, before the error is re-raised; dry-run and dependency/config validation still happen before any of this and are unaffected.
 
 Guarantees:
 
@@ -47,17 +47,7 @@ Init/doctor --fix only ever rewrite the bytes strictly between a *valid* single 
 - the file uses the older `custom text\n\n---\n\nAgentOS section` convention and the custom part mentions nothing AgentOS-related; or
 - the file has no AgentOS-related content at all — a genuinely custom file — in which case the managed block is appended after the existing bytes.
 
-**Adopting custom content.** The recorded real-world upgrade case is a root `AGENTS.md` that holds project knowledge *with* a stale AgentOS bootloader section interleaved in it. That file is neither whole-legacy nor safe-custom, so it used to be a conflict that had to be resolved by hand. It is now classified **`adopt`**: AgentOS can see exactly which contiguous byte span is a byte-exact historical section, and can replace only that span while leaving every custom byte before and after it untouched. Adoption is offered, never assumed:
-
-```bash
-agentos doctor --fix --dry-run                     # preview every planned adapter change (read-only)
-agentos doctor --fix --adopt-custom-adapters       # adopt, then repair as usual
-```
-
-- A plain `doctor --fix` still makes **zero** changes when a file needs adoption — it refuses and names the flag, exactly as it does for an ownership conflict.
-- `--adopt-custom-adapters` only runs together with `--fix` (the same rule is enforced for library callers, not just the CLI), and `--fix --dry-run` prints each file's classification and, for adoptable files, the exact byte span that would be replaced. The preview covers adapter changes and, with `--prune-retired`, retired-card pruning; it is not a preview of every diagnostic `doctor --fix` performs.
-- Only a *single* matching section is adoptable. Two candidate sections, or a section shown inside a fenced code block, stay a conflict — AgentOS never guesses which bytes are its own.
-- Adoption recognizes only the enumerated historical bodies, byte-exact apart from the template placeholders (`Workspace: …`, `Repos: …`, child `name`/`path`) which match a single line each. A hand-written file that reproduces one of those bodies exactly is treated as AgentOS-owned, which is the same rule whole-file recognition has always used.
+**Custom content around a legacy section.** A root `AGENTS.md` that holds project knowledge *with* a stale AgentOS bootloader section interleaved in it is classified **`adopt`**: AgentOS can see the exact byte span of the historical section. 3.0.0 no longer rewrites such a file (`doctor --fix --adopt-custom-adapters` was removed): a plain `doctor --fix` makes **zero** changes and names the two ways out, either run `npx agentos-for-projects@2 doctor --fix --adopt-custom-adapters` once (2.x replaces only that span and keeps every custom byte, with one `.agentos.bak`), or move your text outside a fresh managed block by hand. `doctor --fix --dry-run` and `doctor --explain <file>` show the span. Two candidate sections, or a section inside a fenced code block, stay a conflict.
 
 A marker only counts if it appears as its own standalone line (after stripping a trailing `\r`) outside a fenced code block. Fence tracking follows CommonMark closely enough for this purpose: an opening run of 3+ backticks or tildes only closes on a later run of the *same character* with length *at least* the opener's and only spaces/tabs after it — a shorter run, a different delimiter, a would-be closer with trailing text, or marker text embedded in a longer line is never treated as forming or extending an owned block; its mere presence makes the file a conflict instead. Adapter files must be valid UTF-8; invalid byte sequences fail closed before mutation rather than being decoded and rewritten with replacement characters.
 
@@ -72,18 +62,16 @@ Limitations:
 - The plan-vs-apply staleness check (above) assumes non-hostile, non-concurrent use, same as the rest of this section: it catches accidental drift and defends in depth, but AgentOS still assumes a single writer per checkout, not protection against an adversarial concurrent process.
 
 
-## Deprecation: legacy upgrade paths (removal planned for 2.0.0)
+## Legacy upgrade paths (removed in 3.0.0)
 
-0.9.0 deprecates four ways of upgrading a workspace that was set up by an old release. **Nothing is removed in 0.9.0 or 1.x and no behavior changes.** Removal was first announced for 0.10.0 and moved to 2.0.0 with the 1.0.0 release. The paths are:
+Four ways of upgrading a workspace set up by a pre-0.9 release were deprecated in 0.9.0 and are **removed in 3.0.0**:
 
-- recognising and migrating adapter files written before the managed-block format, including `doctor --fix --adopt-custom-adapters`;
-- detecting, migrating and pruning retired pre-0.4.0 agent and skill cards, including `doctor --fix --prune-retired`;
+- adopting adapter files that interleave custom text with a legacy section (`doctor --fix --adopt-custom-adapters`);
+- migrating and pruning retired pre-0.4.0 agent and skill cards (`doctor --fix` for agent cards, `doctor --fix --prune-retired` for skill cards);
 - `doctor --fix --normalize-repo-ids`;
 - `agentos migrate claude`.
 
-`doctor` (text and `--json`) prints a `Deprecations` section, and `migration.deprecations` lists it, only when one of these paths applies to the workspace or when you use one of the flags or commands. A workspace with nothing legacy gets exactly the output it got before. A deprecation never changes `ok`, `problems` or the exit code, and `migration.summary.action_required` still counts work, not notices.
-
-**If your workspace is old, migrate it before 2.0.0.** Run `npx agentos-for-projects@1 doctor --fix` once (add `--adopt-custom-adapters`, `--prune-retired` or `--normalize-repo-ids` as the report says), then upgrade. From 2.0.0 an adapter in an old format is reported as ambiguous and must be fixed by hand, and the removed flags are rejected with a message that names the release above. The read-only `migration` inventory is not deprecated.
+Each removed flag or command exits 1 with one line naming the 2.x command that still does it. **If your workspace is that old, run `npx agentos-for-projects@2 doctor --fix` once first** (add `--adopt-custom-adapters`, `--prune-retired` or `--normalize-repo-ids` as its report says), then upgrade. 3.0.0 still reports all of these read-only in the migration inventory below, still resolves retired agent/skill IDs in `project.yaml` to their canonical IDs, and `doctor --fix` still converts an adapter that is exactly one recognised legacy section (`migrate`), because that is the same planner that keeps adapters current.
 
 ## Migration inventory
 
@@ -93,57 +81,29 @@ Scope: the inventory covers **files and IDs** — adapters, repo IDs, retired ca
 
 ```bash
 agentos doctor --json | jq '.migration.summary'
-agentos adapters explain AGENTS.md
+agentos doctor --explain AGENTS.md
 ```
 
 Three classes, matching the real upgrade pain seen when moving a workspace from an older AgentOS:
 
-- **adapters** — every root and child adapter file with its classification (`create`, `noop`, `update`, `migrate`, `append`, `adopt`, `conflict`), the same pure classification `doctor --fix` uses. `safe` means "unambiguous **and** appliable by a default `doctor --fix`", so both `conflict` and `adopt` entries report `safe: false`; an `adopt` entry also carries `requiresOptIn: true` and the legacy byte span. The inventory never guesses ownership.
-- **repoIds** — repository IDs in `.agentos/project.yaml` that are not lowercase-hyphen safe (e.g. `frontend_client` → `frontend-client`), with `collides` telling you whether the normalized ID would clash with an existing key. A non-canonical ID is a reported problem, not a parse failure, so the rest of `doctor` still runs; fix it with `agentos doctor --fix --normalize-repo-ids`.
-- **retiredCards** — retired agent/skill cards with their canonical replacement and an eligibility class:
-  - `prunable` — bytes match a body a real AgentOS version installed (agent cards against the enumerated historical shapes, skill cards against `src/legacy-skill-shapes.ts` content hashes); opt-in cleanup may remove it.
-  - `already-canonical` — same, and the canonical card is already installed, so only the stale file remains.
-  - `customized` — hand-edited, or an older generated body AgentOS cannot prove; never auto-removed.
-  - `manual-review` — a card with no byte-match evidence; a human decides (typically a local fork).
+- **adapters** — every root and child adapter file with its classification (`create`, `noop`, `update`, `migrate`, `append`, `adopt`, `conflict`), the same pure classification `doctor --fix` uses. `safe` means "unambiguous **and** applied by `doctor --fix`", so both `conflict` and `adopt` entries report `safe: false`; an `adopt` entry also carries `requiresOptIn: true` and the legacy byte span, and its `next` names the 2.x command (adoption was removed in 3.0.0). The inventory never guesses ownership.
+- **repoIds** — repository IDs in `.agentos/project.yaml` that are not lowercase-hyphen safe (e.g. `frontend_client` → `frontend-client`), with `collides` telling you whether the normalized ID would clash with an existing key. A non-canonical ID is a reported problem, not a parse failure, so the rest of `doctor` still runs; rename it (and `.agentos/repos/<id>.md`) by hand, or run `npx agentos-for-projects@2 doctor --fix --normalize-repo-ids` once.
+- **retiredCards** — retired agent/skill cards with their canonical replacement, `canonicalInstalled`, an eligibility class and `next`:
+  - `manual-review` — a retired card on disk. 3.0.0 does not migrate or prune it; `next` names the manual step (`agents add <canonical>` / `skills remove` + `skills add`) and the 2.x command that does it.
   - `index-only` — listed in `.agentos/skills.md` with no card on disk.
 
-`agentos adapters explain <file>` answers the same question for exactly one path: target level (root/child), classification, managed-block status with byte offsets, the reason for a conflict, and the next command. If `.agentos/project.yaml` cannot be parsed, it still reports marker structure rather than nothing, and says why the canonical section is unavailable.
+`agentos doctor --explain <file>` (`adapters explain` before 3.0.0) answers the same question for exactly one path: target level (root/child), classification, managed-block status with byte offsets, the reason for a conflict, and the next command. If `.agentos/project.yaml` cannot be parsed, it still reports marker structure rather than nothing, and says why the canonical section is unavailable.
 
 When `.agentos/project.yaml` fails validation there is no canonical section for any path, so the classification falls back to marker structure and uses its own vocabulary: `managed-block` (a valid block exists, staleness unknown), `create` (missing or empty), `migrate` (a recognized historical body), `append` (unrelated custom content), and `conflict`. With a valid config, a path that is not an adapter target is refused outright (with the known-target list) rather than classified.
 
 Nothing in the inventory performs a migration. The `doctor --fix` behavior — fail-closed preflight, one-time `.agentos.bak` backups, byte-preserving managed-block updates — is unchanged.
 
-## Retired card cleanup
+## Retired cards and unsafe repository IDs
 
-When a card's ID is retired (the 0.4.0 catalog consolidation), AgentOS either migrates it or reports it — never guesses:
+3.0.0 reports both read-only and never rewrites them (the 2.x migrations were removed; see [above](#legacy-upgrade-paths-removed-in-300)):
 
-- **Retired agent cards** are migrated by `doctor --fix` when their bytes match an enumerated historical generated body: the canonical card is written and the stale file removed. A hand-edited card is reported and left alone.
-- **Retired skill cards** and a stale local-skills index are handled by an explicit opt-in, because removal is deletion rather than replacement:
-
-```bash
-agentos doctor --fix --prune-retired
-agentos doctor --fix --dry-run --prune-retired   # list the cards it would remove, write nothing
-```
-
-  - Only cards whose bytes hash-match a body AgentOS really installed are removed (see `src/legacy-skill-shapes.ts`, regenerated from this repository's own history). One edited character changes the hash, so a local fork is reported as `manual-review` and never touched.
-  - `.agentos/skills.md`'s local-skills block is rebuilt from what is actually on disk, which drops stale retired bullets and `Details:` lines while leaving the `Policy: on-demand` line and everything outside the managed block intact.
-  - Engine-native copies (`.claude/skills/`, `.opencode/skills/`) are out of scope and never touched.
-
-## Repository ID normalization
-
-An ID like `frontend_client` is **normalizable**: `agentos doctor --fix --normalize-repo-ids [--dry-run]` renames it to `frontend-client`, together with its `.agentos/repos/<id>.md` note, and writes an audit note under `.agentos/runs/`.
-
-```bash
-agentos doctor --fix --normalize-repo-ids --dry-run   # show the mapping, write nothing
-agentos doctor --fix --normalize-repo-ids             # apply
-agentos doctor --fix                                  # refresh adapters that named the old ID
-```
-
-- **Never implicit.** `--normalize-repo-ids` only runs together with `--fix`; a plain `doctor --fix` leaves an unsafe ID alone (it reports it instead). With the flag present, the command performs *only* the normalization — it does not also run the rest of `doctor --fix`, so run `agentos doctor --fix` afterwards to refresh adapters.
-- **IDs stay path-safe.** A repository ID becomes the filename `.agentos/repos/<id>.md` and is written into generated cards and child pointers, so an ID that is not a workspace-relative path fragment (`../x`, `a/b`, `a\b`) or that contains anything outside letters, digits, spaces, dots, underscores and hyphens stays a hard configuration error. Those IDs were already fatal before normalization existed; only *non-canonical but safe* IDs like `frontend_client` became migratable.
-- **Byte-preserving.** Only the renamed key's line changes. Comments, key order, quoting, indentation, and every other byte of `project.yaml` are untouched; the repo note is moved with its bytes intact. Renaming is refused (with zero writes) for a flow-style `repos: {…}` mapping or when the key cannot be located exactly once, because that cannot be edited safely line-by-line — the message says to edit by hand. (Duplicate YAML keys never reach that check: the YAML parser rejects the file as malformed first.)
-- **Ambiguity fails closed.** Two IDs that normalize to the same canonical ID (`frontend_client` + `frontend-client`), or a repo that has *both* the old and the canonical note file, is never resolved by guessing: the command refuses and leaves every byte unchanged. Genuinely unmigratable configs still fail strict validation exactly as before — the only change is that a *normalizable* ID no longer bricks config parsing.
-- **One transaction.** The config rewrite, note move, and audit note commit together or not at all.
+- **Retired agent/skill cards** stay where they are; `doctor` warns with the canonical ID and the manual step. Retired IDs in `agents.enabled` / `agents.capabilities` still resolve to the canonical ID, and `doctor --fix` writes the canonical IDs and cards.
+- **Repository IDs.** A repository ID becomes the filename `.agentos/repos/<id>.md` and is written into generated cards and child pointers, so an ID that is not a workspace-relative path fragment (`../x`, `a/b`, `a\b`) or that contains anything outside letters, digits, spaces, dots, underscores and hyphens is a hard configuration error. A *non-canonical but safe* ID like `frontend_client` is a reported problem (so the rest of `doctor` still runs); two IDs that normalize to the same ID fail strict validation.
 
 
 Project-owned context layer for model-agnostic coding agents.
@@ -177,7 +137,7 @@ AgentOS is a TypeScript CLI/package that supports:
 - Obsidian workspace-folder knowledge/output setup;
 - a managed Project Brain: existing Markdown knowledge registered by reference, changed through validated proposals;
 - deterministic live-context compaction;
-- engine-neutral run handoff notes with read-only Git grounding;
+- checkpoints with read-only Git grounding that the next engine resumes;
 - doctor/status/handoff checks and JSON health output;
 - Claude legacy migration preservation.
 
@@ -237,13 +197,13 @@ agentos status
 agentos doctor
 ```
 
-Generate an engine prompt:
+Generate a short engine start prefix (the full, task-specific bundle is `agentos context <engine> --task <id>`):
 
 ```bash
-agentos prompt claude
-agentos prompt codex
-agentos prompt opencode
-agentos prompt hermes
+agentos context claude --brief
+agentos context codex --brief
+agentos context opencode --brief
+agentos context hermes --brief
 ```
 
 More detail: [docs/quickstart.md](docs/quickstart.md).
@@ -253,7 +213,7 @@ More detail: [docs/quickstart.md](docs/quickstart.md).
 The path below is the one Phynceon's 2026-10-25 cross-engine trial walked (Claude Code 2.1.310 → Codex 0.156.1 and back, on a disposable root repo with `web/`, `api/`, `docs/adr/`; [report](docs/evidence/2026-10-25-cross-engine/REPORT.md), n=1). Steps 1–7 use the trial's commands; steps 8–9 were not part of the trial and are covered by tests only. Engines learn the same loop (status → context → checkpoint/resume → brain propose → agents sync) from the generated `.agentos/guide.md`; `agentos doctor --fix` refreshes it in an existing workspace.
 
 1. **Init** the workspace once: `agentos init --existing`.
-2. **Role**: give the role a manifest card (catalog cards from `init` already have one): `agentos agents add developer` (or `agentos agents manifest developer --from-catalog` for an older card). See [docs/agents.md](docs/agents.md).
+2. **Role**: give the role a manifest card (catalog cards from `init` already have one): `agentos agents add developer` (an older card that matches the catalog gets its manifest from `agentos doctor --fix`). See [docs/agents.md](docs/agents.md).
 3. **Task scope** in `.agentos/project.yaml` — what the task may read and edit; the owner sets it, engines do not edit that file (without it `context` reports an empty edit scope). The trial used:
 
    ```yaml
@@ -288,7 +248,8 @@ What is enforced and what is only instruction, per engine: [docs/engines.md](doc
 - [docs/engines.md](docs/engines.md) — engine adapters and the trial-backed capability matrix
 - [docs/obsidian.md](docs/obsidian.md) — optional Obsidian location for the Brain
 - [docs/migration-project-brain.md](docs/migration-project-brain.md) — moving link-only and vault-canonical setups to the Project Brain; disabling Obsidian without losing records
-- [docs/migration.md](docs/migration.md) — adopting v1 in an existing workspace; keep / simplify / remove inventory
+- [docs/migration.md](docs/migration.md) — adopting v1 in an existing workspace; command inventory (kept / removed in 3.0)
+- [docs/migration-3.0-cli.md](docs/migration-3.0-cli.md) — 3.0 CLI: removed form → new form
 - [docs/acceptance-matrix.md](docs/acceptance-matrix.md) — v1 acceptance per priority and scenario (PASS / FAIL / BLOCKED)
 - [docs/improve-later.md](docs/improve-later.md) — consolidated backlog
 - [docs/compaction.md](docs/compaction.md), [docs/templates.md](docs/templates.md), [docs/safe-imports.md](docs/safe-imports.md), [docs/release-readiness.md](docs/release-readiness.md), [docs/reliability-acceptance.md](docs/reliability-acceptance.md)
@@ -296,63 +257,60 @@ What is enforced and what is only instruction, per engine: [docs/engines.md](doc
 
 ## Commands
 
-`agentos <command> --help` (or `-h`) prints one command's usage.
+`agentos <command> --help` (or `-h`) prints one command's usage. The 11 commands:
 
 ```bash
-agentos init [--new|--existing] [--agents minimal|detected|developer,tester,reviewer,release-manager] [--dry-run]
-agentos status
-agentos handoff
-agentos run handoff [--engine name] [--role role] [--repo repo] [--worktree path] [--phase slug] [--reason reason] [--dry-run]
-agentos doctor [--fix] [--json]
-agentos doctor --fix [--dry-run] [--adopt-custom-adapters] [--prune-retired]
-agentos doctor --fix --normalize-repo-ids [--dry-run]
-agentos adapters explain <file>
-agentos compact [--objective <id>] [--expect-state <sha256>]
-agentos compact [--objective <id>] --dry-run [--diff]
-agentos compact --checkpoint [--dry-run]
-agentos compact --rewrite ...  # compatibility alias for normal compact
-agentos link-obsidian [--vault <path> --dest <folder> --link <note> --create]
-agentos obsidian init [--dir <path>] [--dry-run]
-agentos obsidian link --vault <abs-path> --dest <sub/folder> [--canonical workspace|vault] [--create] [--dry-run]
-agentos obsidian link-workspace --vault <path> --dest <folder> [--create] [--dry-run]
-agentos obsidian status
-agentos skills list
-agentos skills add [--detected] [skill-id|category-pack,...] [--mode summary|full] [--dry-run]
-agentos skills remove <skill-id> [--dry-run]
-agentos agents list
-agentos agents add <agent-id|template-file> [--name id] [--replace] [--dry-run]
-agentos agents show <id> [--json]
-agentos agents enable|disable <id> [--dry-run]
-agentos agents remove <id> [--dry-run]
-agentos agents manifest <id> --from-catalog|--custom [--dry-run]
-agentos agents sync claude-code|codex [--role <id>] [--scope <repo-or-path>,...] [--dry-run] [--replace]
-agentos engines [--json]
-agentos templates list
-agentos templates show <id>
-agentos templates copy <id> [--dry-run] [--replace]
-agentos templates validate <file> --type agent|skill
-agentos templates import <url-or-file> --type agent|skill --name <id> [--mode summary|full] [--dry-run] [--yes] [--replace]
-agentos migrate claude --preserve [--dry-run]
-agentos prompt [claude|codex|opencode|hermes]
-agentos context [claude|codex|opencode|hermes] [--task "<text>"] [--role <agent-id>] [--scope <repo-or-path>,...] [--budget <tokens>] [--json] [--include-superseded] [--require-synced-config] [--require-enforcement] [--require-complete]
+# Setup & health
+agentos init [--new|--existing] [--agents minimal|<agent-id>,...] [--refresh] [--dry-run] [--yes]
+agentos status [--full]
+agentos doctor [--fix] [--dry-run] [--json]
+agentos doctor --explain <file>
+agentos doctor --engines [--json]
+
+# Work loop (agents run these)
+agentos context [claude|codex|opencode|hermes] [--task "<text>"] [--role <agent-id>] [--scope <repo-or-path>,...] [--budget <tokens>] [--json] [--strict] [--include-superseded]
+agentos context [claude|codex|opencode|hermes] --brief
 agentos checkpoint [--task <id>] [--engine <e>] [--role <r>] [--progress "<text>"] [--blocker "<text>"] [--next "<text>"] [--check "<cmd>" [--cwd <dir>]]... [--claim "<text>"]... [--json] [--dry-run]
 agentos checkpoint --recover [--task <id>] [--dry-run]
-agentos checkpoint list [--task <id>] [--json]
-agentos checkpoint show <id> [--json]
+agentos checkpoint list [--task <id>] [--json] | agentos checkpoint show <id> [--json]
 agentos resume [--task <id>] [--engine <e>] [--json]
-agentos brain init [--location workspace|vault] [--dry-run]
-agentos brain register <path> [--kind architecture|decision|adr|convention|feature|note] [--scope <repo-id|.>] [--status proposed|accepted] [--by <name>] [--dry-run]
-agentos brain list [--status <s>] [--kind <k>] [--json] | show <id-or-path> [--json] | search <terms...> [--json] | check [--json]
-agentos brain propose <id-or-path> --from <file|-> [--summary "<text>"] [--supersedes <id>] [--append] [--by <name>] [--task <id>] [--dry-run]
-agentos brain preview <proposal> | validate <proposal> [--json]
-agentos brain apply <proposal> --by <owner> [--dry-run]   # manual owner review by default
-agentos brain verify <id-or-path> [--by <name>] [--dry-run]
-agentos brain index [--adopt] [--dry-run]   # recreate/refresh index.json and the Obsidian index note
+
+# Knowledge
+agentos brain list|show|search|check|register|propose|preview|apply|revert|log|policy|verify|index ...  (agentos brain for details)
+
+# Team
+agentos agents list [--installed]
+agentos agents show <id> [--json] | enable <id> | disable <id> | remove <id> [--dry-run]
+agentos agents add <agent-id|file|url> [--name id] [--dry-run] [--replace] [--yes] [--expected-sha256 hash]
+agentos agents manifest <id> --custom [--dry-run]
+agentos agents sync claude-code|codex [--role <id>] [--scope <repo-or-path>,...] [--dry-run] [--replace]
+agentos skills list [--installed]
+agentos skills show <skill-id>
+agentos skills add [--detected] [skill-id|category-pack,...] [--dry-run] [--replace]
+agentos skills add <file|url> [--name id] [--dry-run] [--yes] [--replace] [--expected-sha256 hash]
+agentos skills remove <skill-id> [--dry-run]
+
+# Optional & maintenance
+agentos obsidian init [--dir <path>] [--dry-run]
+agentos obsidian link --vault <abs-path> --dest <sub/folder> [--canonical workspace|vault] [--no-index] [--create] [--dry-run]
+agentos obsidian link --note <path> [--vault <path> --dest <folder> --create] [--dry-run]
+agentos obsidian status
+agentos compact [--objective <id>] [--expect-state <sha256>]
+agentos compact [--objective <id>] --dry-run [--diff]
+agentos compact --archive-only [--dry-run]
 ```
+
+- `init --yes` (`-y`) skips the confirmation prompt. `--agents minimal` gives developer, tester, reviewer and release-manager, the same team as no `--agents`.
+- `context --strict` is `--require-synced-config --require-enforcement --require-complete` together; the individual flags still work.
+- `status --full` appends the full handoff and the reading list; `context --brief` prints the short generic start prefix.
+- `skills add <file|url>` and `agents add <file|url>` run the safe import (hash pin, safety review, quarantine, `--yes` to write); `--dry-run` is the template structure check (exit 1 with the findings when it fails). An imported skill keeps a summary excerpt of its source.
+- Brain subcommands in detail: `agentos brain` (or [docs/brain.md](docs/brain.md)). `brain verify` is an optional human sign-off; nothing depends on it.
+
+**Removed in 3.0.0** (deprecated in 2.1.0): `handoff`, `prompt`, `adapters explain`, `engines`, `run handoff`, `link-obsidian`, `obsidian link-workspace`, `brain validate`, `brain init` (workspace), `agents manifest --from-catalog`, `templates list|show|copy|validate|import`, `compact --checkpoint|--rewrite`, `skills add --mode`, `init --agents detected` and the legacy migrations. Each exits 1 with one line, `agentos <x> was removed in 3.0.0; use <new>`. Old → new table: [docs/migration-3.0-cli.md](docs/migration-3.0-cli.md).
 
 ## Task-specific context
 
-`agentos prompt` prints a short generic prefix. `agentos context` builds a context bundle for one task and one role, read-only (no file, lock or temp file is created):
+`agentos context --brief` prints a short generic prefix. `agentos context` builds a context bundle for one task and one role, read-only (no file, lock or temp file is created):
 
 ```bash
 agentos context claude --task "rotate auth tokens in the settings page" --role developer --scope web,api/contracts/openapi.yaml
@@ -378,7 +336,7 @@ agentos checkpoint --recover --task token-rotation   # the engine died without a
 ```
 
 - Each checkpoint is an immutable JSON record (`agentos.checkpoint/1`) under `.agentos/checkpoints/<task>/`, plus a `current.json` pointer and one bounded `## Checkpoint (managed)` section in `.agentos/handoff.md` that is replaced in place, never appended. `tasks.md` is not touched.
-- Per repo it stores branch, HEAD and a working-tree fingerprint (staged, unstaged and untracked), using the same bounded, sensitive-path-aware git evidence as `run handoff`. A repo that is a directory inside one enclosing work tree (`web/`, `api/` in a root repo) uses that work tree limited to the directory (`state: enclosing-worktree`); only a path outside any work tree is `unavailable`.
+- Per repo it stores branch, HEAD and a working-tree fingerprint (staged, unstaged and untracked), using bounded, sensitive-path-aware git evidence. A repo that is a directory inside one enclosing work tree (`web/`, `api/` in a root repo) uses that work tree limited to the directory (`state: enclosing-worktree`); only a path outside any work tree is `unavailable`.
 - Verification receipts say exactly what is known: `observed-pass` / `observed-fail` (AgentOS ran the `--check`; output saved as evidence), `claimed` (`--claim`, engine-reported), `not-run` (declared build/test commands of in-scope repos nobody ran), `unavailable` (could not start). Each receipt records the state it tested.
 - `resume` reports `clean`, `drifted` (HEAD moved, fingerprint differs, new changed paths) or `unavailable`, lists what is accomplished (progress plus current passes) and what remains (next action, blockers, failed/claimed/not-run receipts, passes marked `stale (recheck)`), and prints the `agentos context <engine> --task <id>` line to run next. A missing pointer or damaged record is reported as `incomplete` with the files and error, never skipped.
 - `agentos context` includes the current checkpoint; `doctor` fails on a pointer to a missing or invalid record.
@@ -391,7 +349,7 @@ Schema, receipt vocabulary, reconciliation states and limits: [`docs/checkpoints
 `agentos brain` keeps durable project knowledge (architecture, decisions, ADRs, conventions, feature notes) in ordinary Markdown files, registered by reference:
 
 ```bash
-agentos brain init                                   # `agentos init` already ran this: templates for what is missing, existing records/docs adopted
+agentos init                                         # sets up the Brain: templates for what is missing, existing records/docs adopted
 agentos brain register docs/adr/0003-use-postgres.md --kind adr
 agentos brain propose brain:0003-use-postgres --from new-text.md --summary "pin Postgres 16"   # an engine writes the text
 agentos brain preview <proposal>   &&   agentos brain apply <proposal> --by <owner>
@@ -429,51 +387,23 @@ Compaction archives only sections it can recognise as superseded history by thei
 
 Ambiguous, missing, empty, malformed, stale-selector, and stale-`--expect-state` inputs refuse with zero writes. `status` and `doctor` use the same current-objective recognition as compaction.
 
-Two compatibility paths remain explicit:
-
-- `agentos compact --checkpoint` selects the old archive-and-link behavior. It keeps all live text, appends archive links, and may grow live state.
-- `agentos compact --rewrite` is a compatibility alias for normal structural compaction. It is not a safer or different mode.
+`agentos compact --archive-only` selects the old archive-and-link behavior. It keeps all live text, appends archive links, and may grow live state. (`--checkpoint`, its old name, and `--rewrite`, an alias of plain `compact`, were removed in 3.0.0.)
 
 Full archive layout, preservation policy, refusal rules, rollback boundaries, and known limits: [`docs/compaction.md`](docs/compaction.md).
-
-## Run handoff notes
-
-Use `agentos run handoff` when an engine is near quota, hit a provider/rate-limit error, was manually paused, or left partial work that another human/engine may need to continue.
-
-```bash
-agentos run handoff \
-  --engine claude-code \
-  --role developer \
-  --repo photobooth-be \
-  --worktree worktrees/photobooth-be__feat-event-template-system \
-  --phase event-template-system \
-  --reason quota-risk
-```
-
-The command writes an engine-neutral note under `.agentos/runs/`, captures read-only Git state (`status`, `diff --stat`, changed files, bounded diff snippets), and updates `.agentos/tasks.md` plus `.agentos/handoff.md`.
-
-Safety rules:
-
-- AgentOS does **not** automatically switch engines.
-- AgentOS does **not** launch OpenCode/Codex/Claude or close terminals.
-- AgentOS does **not** commit, push, merge, reset, clean, or remove worktrees.
-- The next human/engine must inspect `git status --short --branch`, `git diff --stat`, and `git diff` before editing.
 
 ## Agent profiles
 
 ```bash
 agentos init --existing --agents minimal
-agentos init --existing --agents detected
 agentos init --existing --agents developer,tester,reviewer,release-manager
 ```
 
 Profiles:
 
 - `minimal`: `developer`, `tester`, `reviewer`, `release-manager`.
-- `detected`: the same core team as minimal; frontend/backend specialists were absorbed into the single `developer` role.
 - custom comma list: friendly aliases such as `review`, `release`, `planning`, and `pm`.
 
-`planner` is optional and planning-only. It is not enabled by the default detected profile.
+Without `--agents`, `init` enables the same team as `minimal` (frontend/backend specialists were absorbed into the single `developer` role). `planner` is optional and planning-only; it is not enabled by default.
 
 ### Task scope (optional)
 
@@ -485,7 +415,7 @@ task_scope:
   edit: [web]
 ```
 
-`agentos prompt` then prints the repo inventory, read scope and edit scope separately, so a frontend task can read a backend contract without gaining backend edit scope. `prompt` and `doctor` fail on a malformed `task_scope` (unknown keys, non-lists, absolute or `..` paths). `doctor --fix` never edits `engines.allowed`.
+`agentos context --brief` then prints the repo inventory, read scope and edit scope separately, so a frontend task can read a backend contract without gaining backend edit scope. `context --brief` and `doctor` fail on a malformed `task_scope` (unknown keys, non-lists, absolute or `..` paths). `doctor --fix` never edits `engines.allowed`.
 
 ```bash
 agentos agents add planner
@@ -500,7 +430,7 @@ agentos agents add developer                  # writes the manifest: installed_f
 agentos agents show developer --json
 agentos agents disable tester                 # edits agents.enabled only; the card stays on disk
 agentos agents remove tester --dry-run        # refuses while anything still references tester
-agentos agents manifest reviewer --from-catalog   # legacy card that byte-matches the catalog
+agentos doctor --fix                          # a legacy card that byte-matches the catalog gets its manifest
 ```
 
 - The task decides the scope (`task_scope` / `--scope`). A manifest can only narrow it: `read-only` empties the edit scope; `edit_request` entries outside the task's edit scope are ignored with a warning.
@@ -512,7 +442,7 @@ Keys, lifecycle and preservation rules: [`docs/agents.md`](docs/agents.md).
 
 ## Engines
 
-`agentos engines [--json]` prints what AgentOS can make each engine (`claude-code`, `codex`, `opencode`, `hermes`, `generic`) do, per row `context_rendering`, `native_agent_config`, `tool_restrictions`, `permission_enforcement`, `launch`, `native_session_resume`, with status `verified | advisory | unsupported | unverified` and the evidence. `verified` cells come from the 2026-10-25 trials (n=1 per probe; T7 n=2): Claude Code `permission_enforcement` (deny rules in a trusted workspace: listed paths, siblings, Bash redirects to denied paths, read-only deny-all; T3, T5, T6c, T6d) and `tool_restrictions` (launch-time `--allowedTools`, T1/T2); Codex `permission_enforcement` (launch-time `--sandbox read-only` only; per-path scope unsupported, T4); `native_agent_config` for both (Claude: discovery T5, invocation T8/T9, instruction-following T8; Codex: instruction-following T7); the rendered subagent `tools:` restricted the invoked subagent (T9). `agentos context <engine>` ends with one ADVISORY line saying how far the edit scope is enforced and which paths stay writable. `--require-synced-config` checks configuration presence against the sync record `agents sync` writes (`.agentos/synced/<engine>.json`), for the recorded role and scope: `Synced config: OK (claude-code, role developer, sha256 …)` while every generated file and entry is installed and sync would generate the same now, otherwise `STALE` (with the file and reason: tree, scope or manifest changed, generated entry edited; or a 1.0.0 sync without a record), `INVALID` (with the reason), `MISSING` (never synced) or `UNSUPPORTED` (opencode, hermes, generic). Owner-added entries are not drift. `agentos doctor` runs the same check and prints one warning per stale or invalid engine with the re-sync command (exit status unchanged; `--json` adds `synced_config`). `--require-enforcement` always exits 1 (`Enforcement: UNSUPPORTED — …`) for every engine in v1: AgentOS cannot verify workspace trust, residual paths stay writable, and the rules bind only the engine's own tools. Configuration presence is not proof of enforcement ([`docs/engines.md`](docs/engines.md#enforcement-vs-synced-configuration)).
+`agentos doctor --engines [--json]` (`agentos engines` before 3.0.0) prints what AgentOS can make each engine (`claude-code`, `codex`, `opencode`, `hermes`, `generic`) do, per row `context_rendering`, `native_agent_config`, `tool_restrictions`, `permission_enforcement`, `launch`, `native_session_resume`, with status `verified | advisory | unsupported | unverified` and the evidence. `verified` cells come from the 2026-10-25 trials (n=1 per probe; T7 n=2): Claude Code `permission_enforcement` (deny rules in a trusted workspace: listed paths, siblings, Bash redirects to denied paths, read-only deny-all; T3, T5, T6c, T6d) and `tool_restrictions` (launch-time `--allowedTools`, T1/T2); Codex `permission_enforcement` (launch-time `--sandbox read-only` only; per-path scope unsupported, T4); `native_agent_config` for both (Claude: discovery T5, invocation T8/T9, instruction-following T8; Codex: instruction-following T7); the rendered subagent `tools:` restricted the invoked subagent (T9). `agentos context <engine>` ends with one ADVISORY line saying how far the edit scope is enforced and which paths stay writable. `--require-synced-config` checks configuration presence against the sync record `agents sync` writes (`.agentos/synced/<engine>.json`), for the recorded role and scope: `Synced config: OK (claude-code, role developer, sha256 …)` while every generated file and entry is installed and sync would generate the same now, otherwise `STALE` (with the file and reason: tree, scope or manifest changed, generated entry edited; or a 1.0.0 sync without a record), `INVALID` (with the reason), `MISSING` (never synced) or `UNSUPPORTED` (opencode, hermes, generic). Owner-added entries are not drift. `agentos doctor` runs the same check and prints one warning per stale or invalid engine with the re-sync command (exit status unchanged; `--json` adds `synced_config`). `--require-enforcement` always exits 1 (`Enforcement: UNSUPPORTED — …`) for every engine in v1: AgentOS cannot verify workspace trust, residual paths stay writable, and the rules bind only the engine's own tools. Configuration presence is not proof of enforcement ([`docs/engines.md`](docs/engines.md#enforcement-vs-synced-configuration)).
 
 `agentos agents sync claude-code [--dry-run] [--replace]` writes `.claude/agents/<role>.md` and a `.claude/settings.local.json` permission fragment (added to an existing file; on re-sync only the entries recorded in `.agentos/synced/claude-code.json` are replaced, owner entries stay in place): `Edit(/<path>/**)` allow rules for the edit scope plus `Edit`/`Write`/`NotebookEdit` **deny** rules for everything outside it — listed repo/read paths, every sibling entry at each ancestor level of the edit path, `.claude/` with its settings files, `.agentos/project.yaml` and `.agentos/agents/**` (a read-only role denies `/**`). Listed-path and sibling denies are trial-verified (T5, T6c); new root files/dirs created after the sync, `.agentos/` state and other shell writes are advisory — re-run it after adding top-level directories (`agentos doctor` warns when the synced config is stale). The subagent gets `tools:` from the manifest's `tools_requested` (read-only roles: `Read, Grep, Glob`; the invoked subagent had exactly the listed tools in T9, n=1; the top-level session is not restricted). Hand-edited generated content, or an existing different list without a sync record, refuses the whole sync with zero writes until `--replace` (one backup per overwritten file under `.agentos/runs/replaced-synced/`); `--dry-run` prints the `+`/`-` entries per file. One sync record per engine: syncing another role replaces the previous role's files. Claude Code ignores `.claude/settings.local.json` until the workspace is trusted; run `claude` interactively once or set `projects[<root>].hasTrustDialogAccepted`. `agentos agents sync codex` writes a managed role block (`<!-- agentos:role:start/end -->`) into the in-scope repo's `AGENTS.md` and prints that Codex enforces only its launch-time sandbox. Only `agents sync` writes these files; `context` and `checkpoint` never do.
 
@@ -538,7 +468,7 @@ Add specific skills or category packs:
 agentos skills add debugging
 agentos skills add commit-messages
 agentos skills add frontend-pack
-agentos skills add backend-pack,github-pack --mode full
+agentos skills add backend-pack,github-pack
 ```
 
 Skills are written project-locally:
@@ -547,8 +477,8 @@ Skills are written project-locally:
 .agentos/skills/<category>/<skill>/SKILL.md
 ```
 
-The catalog has 15 framework-neutral workflow skills. Both `skills add` modes and
-`templates copy` install the complete card plus its optional `references/` files
+The catalog has 15 framework-neutral workflow skills. `skills add` installs the
+complete card plus its optional `references/` files
 with byte parity, per-file atomic writes, and best-effort command rollback. Load
 only references matching the assigned repo's actual stack; project conventions
 prevail. Existing differing cards or references require reviewed `--replace`, and
@@ -598,7 +528,7 @@ The child pointer tells OpenCode/Codex/Hermes/Claude to resolve the relative Age
 The pointers lead with the CLI, not with a file list. Some engines (OpenCode run non-interactively, observed) refuse file reads outside the directory they started in, and one refused read can end the session. From a child repo:
 
 - `agentos status` finds the workspace root and prints the repo you are in, the repos in scope, that repo's verification commands, and the open tasks.
-- `agentos handoff` prints the handoff content first. The file reading list follows, marked as applying only when reads outside the directory work.
+- `agentos status --full` adds the handoff content first. The file reading list follows, marked as applying only when reads outside the directory work.
 - Both leave the workspace-root output unchanged.
 
 OpenCode's own permission settings decide whether it may read the parent directory (in testing, `--auto` or an `external_directory` entry with an absolute path allowed it). Those settings are machine-specific, so AgentOS does not generate an `opencode.json`.
@@ -621,24 +551,18 @@ templates/schemas/
 templates/examples/
 ```
 
-Use the registry commands to discover and materialize them:
+Discover and install them with `agents` and `skills` (`templates` was removed in 3.0.0):
 
 ```bash
-agentos templates list
-agentos templates show agent:planner
-agentos templates copy agent:planner --dry-run
-agentos templates copy agent:planner
-agentos templates copy skill:frontend/frontend-design
-agentos templates copy skill:github/commit-messages
-agentos templates validate templates/agents/planner.md --type agent
-```
-
-Agent convenience commands remain available:
-
-```bash
-agentos agents list
+agentos agents list                       # built-in agents
+agentos skills list                       # built-in skills and packs
+agentos agents show planner               # the catalog card when it is not installed
+agentos skills show frontend-design
+agentos agents add planner --dry-run
 agentos agents add planner
-agentos agents add ./my-agent.md --name custom-auditor --dry-run
+agentos skills add frontend-design commit-messages
+agentos agents add ./my-agent.md --name custom-auditor --dry-run   # also prints the template structure check
+agentos skills add templates/skills/frontend/frontend-design.md --dry-run
 ```
 
 Template docs: [docs/templates.md](docs/templates.md).
@@ -647,26 +571,28 @@ Template docs: [docs/templates.md](docs/templates.md).
 
 Import is designed to be review-first and project-local by default.
 
-Dry-run a local or web source:
+Preview a local or web source (nothing is written without `--yes`):
 
 ```bash
-agentos templates import ./external-skill.md --type skill --name external-review --dry-run
-agentos templates import https://example.com/agent.md --type agent --name security-reviewer --dry-run
+agentos skills add ./external-skill.md --name external-review
+agentos agents add https://example.com/agent.md --name security-reviewer
 ```
 
-Write only after review:
+Write only after review, pinned to the reviewed bytes:
 
 ```bash
-agentos templates import ./external-skill.md --type skill --name external-review --yes
+agentos skills add ./external-skill.md --name external-review --yes --expected-sha256 <sha256 from the preview>
 ```
+
+An imported agent is written as a manifest card (`installed_from: import:<url>` or `template:<path>`). A local agent file that is already a valid agent template installs as written (`agents add <file>`), but a BLOCK finding refuses it too.
 
 The importer shows source, SHA256, byte size, target path, and safety findings. Prompt-injection-like instructions block import and are written to `.agentos/imports/quarantine/` for review instead of being materialized as runtime templates. Secret-like words, dangerous command patterns, missing license hints, and large content produce warnings.
 
 AgentOS refuses to overwrite existing copied/imported templates by default. Use `--replace` only after reviewing the existing local file and confirming replacement is intended:
 
 ```bash
-agentos templates copy agent:planner --replace
-agentos templates import ./external-skill.md --type skill --name external-review --yes --replace
+agentos agents add planner --replace
+agentos skills add ./external-skill.md --name external-review --yes --replace
 ```
 
 Safe-import docs: [docs/safe-imports.md](docs/safe-imports.md).
@@ -680,10 +606,10 @@ Obsidian is a second location for the same Project Brain, never a second store; 
 - **Canonical location** (`knowledge.obsidian.canonical`, default `workspace`): every record is one file in one place; the other side holds links, never copies; no sync. With `canonical: vault`, notes in the linked folder are Brain records with portable identity (`id`, vault-relative `sources`); the absolute vault path lives only in the git-ignored, machine-local `.agentos/local.yaml` (`obsidian.vault`; older setups: `project.yaml`, still read). Notes are read and changed only through `agentos brain register|propose|apply`, and only inside `<vault>/<dest>`.
 - **Unavailable vault:** its records are `unavailable` in `brain check`, listed under Missing by `agentos context` (`--require-complete` exits 1), and `doctor` warns. An edit made in Obsidian shows up as `changed`.
 
-The boundary-only form (no index note) still works:
+The boundary-only form (no index note; `obsidian link-workspace` before 3.0.0):
 
 ```bash
-agentos obsidian link-workspace \
+agentos obsidian link --no-index \
   --vault /mnt/c/_/Obsidian/Ralph \
   --dest "Projects/KargaX/AgentOS" \
   --create
@@ -700,13 +626,13 @@ Safety rules:
 - Runtime state stays in `.agentos/`.
 - Durable notes, summaries, plans, decisions, and runbooks belong inside the linked Obsidian workspace when exported or written.
 
-Legacy exact-note linking remains available:
+Exact-note, link-only mode (`link-obsidian --link` before 3.0.0; on a terminal it asks for missing values):
 
 ```bash
-agentos link-obsidian \
+agentos obsidian link \
+  --note "AgentOS Index.md" \
   --vault /mnt/c/_/Obsidian/Ralph \
   --dest "Projects/AgentOS" \
-  --link "AgentOS Index.md" \
   --create
 ```
 
@@ -716,16 +642,9 @@ When `--dest` is omitted, AgentOS defaults to:
 Projects/<ProjectName>/AgentOS
 ```
 
-## Claude legacy migration
+## Claude legacy migration (removed in 3.0.0)
 
-Preserve old Claude files before switching to AgentOS canonical context:
-
-```bash
-agentos migrate claude --preserve --dry-run
-agentos migrate claude --preserve
-```
-
-This renames active `.claude` files to timestamped `.agentos-legacy-*` backups, writes `.claude/README.agentos.md`, and patches `CLAUDE.md` with the AgentOS canonical block.
+`agentos migrate claude --preserve` was removed in 3.0.0 (see [legacy upgrade paths](#legacy-upgrade-paths-removed-in-300)). To move old `.claude` files aside, run `npx agentos-for-projects@2 migrate claude --preserve` once, or rename them by hand.
 
 ## Development
 

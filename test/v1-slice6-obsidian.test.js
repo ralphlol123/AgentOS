@@ -66,7 +66,7 @@ async function vaultRecord(t) {
 
 test('obsidian init creates a plain knowledge folder with a relative-link index and patches project.yaml add-keys-only', async (t) => {
   const { base, root } = await fixture(t);
-  ok(cli(['brain', 'init'], root));
+  ok(cli(['init', '--existing', '--yes'], root)); // `brain init` (workspace) was removed in 3.0.0; init runs the same Brain setup
   const yamlPath = join(root, '.agentos/project.yaml');
   const original = `# hand-written comment kept\n${await read(root, '.agentos/project.yaml')}knowledge:\n  docs:\n    - docs/  # docs comment\n`;
   await writeFile(yamlPath, original);
@@ -107,7 +107,7 @@ test('obsidian init creates a plain knowledge folder with a relative-link index 
 
 test('obsidian link creates only <dest>/ and its index note; every byte elsewhere in the vault is identical', async (t) => {
   const { base, root, vault } = await fixture(t);
-  ok(cli(['brain', 'init'], root));
+  ok(cli(['init', '--existing', '--yes'], root)); // `brain init` (workspace) was removed in 3.0.0; init runs the same Brain setup
   const outsideDest = async () => Object.fromEntries(Object.entries(await snapshot(vault)).filter(([key]) => key !== DEST && !key.startsWith(`${DEST}/`) && key !== 'Projects/Demo'));
   const before = await outsideDest();
   const all = await snapshot(base);
@@ -222,7 +222,7 @@ test('external vault edit -> changed; vault removed -> unavailable in check, mis
 
 // --- F2: manifests on generated cards --------------------------------------------------------------
 
-test('init, doctor --fix and templates copy write catalog cards with manifests; legacy cards stay untouched', async (t) => {
+test('init, doctor --fix and agents add write catalog cards with manifests; doctor --fix (2.1) gives a byte-matched legacy card its manifest', async (t) => {
   const { root } = await fixture(t);
   for (const id of ['developer', 'tester', 'reviewer', 'release-manager']) {
     const card = await read(root, `.agentos/agents/${id}.md`);
@@ -241,10 +241,12 @@ test('init, doctor --fix and templates copy write catalog cards with manifests; 
   await writeFile(join(root, '.agentos/agents/reviewer.md'), legacy);
   ok(cli(['doctor', '--fix'], root));
   assert.match(await read(root, '.agentos/agents/tester.md'), /^---\nid: tester\n[\s\S]*installed_from: catalog:tester/);
-  assert.equal(await read(root, '.agentos/agents/reviewer.md'), legacy, 'legacy card untouched');
-  assert.ok(json(['doctor'], root).out.diagnostics.some((d) => /legacy agent card \.agentos\/agents\/reviewer\.md/.test(d)));
+  const upgraded = await read(root, '.agentos/agents/reviewer.md');
+  assert.match(upgraded, /^---\nid: reviewer\n[\s\S]*installed_from: catalog:reviewer/, 'byte-matched legacy card upgraded');
+  assert.equal(upgraded.replace(/^---\n[\s\S]*?\n---\n/, ''), legacy, 'body byte-identical');
+  assert.ok(!json(['doctor'], root).out.diagnostics.some((d) => /legacy agent card/.test(d)));
 
-  ok(cli(['templates', 'copy', 'agent:planner'], root));
+  ok(cli(['agents', 'add', 'planner'], root));
   const planner = await read(root, '.agentos/agents/planner.md');
   assert.match(planner, /^---\nid: planner\n[\s\S]*\n---\n/);
   assert.match(planner, /^  installed_from: catalog:planner$/m);

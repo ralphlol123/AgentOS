@@ -12,51 +12,45 @@ templates/
   examples/
 ```
 
-These files are the canonical source for both catalogs and installation paths. `skills add` and `templates copy` install the same complete skill workflow; `agents add`, initialization, and `templates copy` use the same role contracts. The consolidated catalog contains 15 workflow skills and 9 unchanged agent roles. Data and security roles are available explicitly but are not added to the detected/minimal team by this cleanup.
+These files are the canonical source for both catalogs and installation paths. `skills add` installs the complete skill workflow; `agents add` and initialization use the same role contracts. The consolidated catalog contains 15 workflow skills and 9 unchanged agent roles. Data and security roles are available explicitly but are not added to the detected/minimal team by this cleanup.
 
-Project-local runtime copies live under `.agentos/` and may be customized per workspace. Re-init and `doctor --fix` preserve existing cards. Add refuses differing cards without `--replace`; template copy refuses any existing target without `--replace`. Review before replacing: older built-in copies may now appear as `custom-or-imported` because their bytes differ from the canonical source. This slice does not migrate or delete them. Retired skill IDs are unavailable for new installs in this intermediate slice; aliases and migration diagnostics are deferred to slice 4. Existing local or engine-native cards remain on disk.
+Project-local runtime copies live under `.agentos/` and may be customized per workspace. Re-init and `doctor --fix` preserve existing cards. Add refuses differing cards without `--replace`. Review before replacing: older built-in copies may now appear as `custom-or-imported` because their bytes differ from the canonical source. This slice does not migrate or delete them. Retired skill IDs are unavailable for new installs in this intermediate slice; aliases and migration diagnostics are deferred to slice 4. Existing local or engine-native cards remain on disk.
 
-## Template registry commands
+## Catalog commands
 
-List all repository templates:
-
-```bash
-agentos templates list
-```
-
-Show a template by ID:
+List the built-in agents and skills (`templates list` was removed in 3.0.0):
 
 ```bash
-agentos templates show agent:planner
-agentos templates show skill:frontend/frontend-design
-agentos templates show skill:github/commit-messages
+agentos agents list
+agentos skills list
 ```
 
-Copy a template into the current project's `.agentos/` runtime context:
+Read one card (the installed card, else the catalog template):
 
 ```bash
-agentos templates copy agent:security-reviewer --dry-run
-agentos templates copy agent:security-reviewer
-agentos templates copy agent:security-reviewer --replace
-agentos templates copy skill:frontend/frontend-design
-agentos templates copy skill:github/commit-messages
+agentos agents show planner
+agentos skills show frontend-design
+agentos skills show commit-messages
 ```
 
-Validate a local template file before copying/importing it:
+Install a card into the current project's `.agentos/` runtime context:
 
 ```bash
-agentos templates validate templates/agents/planner.md --type agent
-agentos templates validate templates/skills/frontend/frontend-design.md --type skill
+agentos agents add security-reviewer --dry-run
+agentos agents add security-reviewer
+agentos agents add security-reviewer --replace
+agentos skills add frontend-design
+agentos skills add commit-messages
 ```
 
-Template IDs use:
+Check a local template file before installing it (prints the `Validation:` findings, exits 1 when they fail; writes nothing):
 
-```text
-agent:<agent-name>
-skill:<category>/<skill-name>
+```bash
+agentos agents add templates/agents/planner.md --dry-run
+agentos skills add templates/skills/frontend/frontend-design.md --dry-run
 ```
 
-`templates copy` writes agents to `.agentos/agents/<id>.md` and skills to `.agentos/skills/<category>/<skill>/SKILL.md`. Agent copies are registered in `.agentos/project.yaml`; skill copies update `.agentos/skills.md`. Existing files are not overwritten unless `--replace` is provided.
+`agents add` writes `.agentos/agents/<id>.md` (with its manifest) and registers it in `.agentos/project.yaml`; `skills add` writes `.agentos/skills/<category>/<skill>/SKILL.md` and updates `.agentos/skills.md`. Existing differing files are not overwritten unless `--replace` is provided. `agents show`/`skills show` also accept `agent:<agent-name>` and `skill:<category>/<skill-name>` IDs.
 
 ## Agent templates
 
@@ -152,17 +146,7 @@ agentos skills add debugging
 agentos skills add commit-messages
 ```
 
-The default `summary` mode remains accepted for compatibility:
-
-```bash
-agentos skills add frontend-testing --mode summary
-```
-
-Both modes retain every procedure, verification, safety gate, and note. Only the `mode` frontmatter value differs; no first-three-steps truncation remains. `templates copy` preserves the canonical `full` metadata:
-
-```bash
-agentos skills add frontend-testing --mode full
-```
+Every installed card retains every procedure, verification, safety gate, and note (`mode: summary` in its frontmatter; `--mode` was removed in 3.0.0, and cards written with `mode: full` by older releases still count as `source-match`).
 
 Local skill files are written to:
 
@@ -178,8 +162,8 @@ AgentOS also updates:
 
 ## Optional references and replacement safety
 
-Package references live in `templates/skills/<category>/<id>/references/`. Both
-`skills add` modes and `templates copy` install their exact bytes beside `SKILL.md`,
+Package references live in `templates/skills/<category>/<id>/references/`.
+`skills add` installs their exact bytes beside `SKILL.md`,
 under `.agentos/skills/<category>/<id>/references/`. References are support files,
 not additional catalog entries. The current package supplies NestJS, Nuxt, GitHub,
 GitHub Actions, Conventional Commits, and backend/security review guidance; no

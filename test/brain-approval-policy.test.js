@@ -79,11 +79,11 @@ test('manual remains the default; --auto refuses without writes and explicit own
   assert.match(await read(root, RECORD), /by ralph \(proposed by choco\)/);
 });
 
-test('allowed agent appends without owner intervention; preview, validate and dry-run agree; audit and idempotency survive', async t => {
+test('allowed agent appends without owner intervention; preview and dry-run agree; audit and idempotency survive', async t => {
   const { root, from } = await workspace(t);
   checkpoint(root); const proposal = stage(root, from);
   const before = await snapshot(root);
-  for (const command of ['preview', 'validate', 'apply']) {
+  for (const command of ['preview', 'apply']) {
     const { r, data } = json(root, 'brain', command, proposal, '--auto', '--by', 'choco', ...(command === 'apply' ? ['--dry-run'] : []));
     ok(r); assert.equal(data.approval.eligible, true);
     assert.deepEqual(await snapshot(root), before, `${command} preview writes nothing`);

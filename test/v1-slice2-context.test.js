@@ -262,7 +262,7 @@ test('context creates, changes or locks nothing in any mode (whole parent tree, 
 
 // --- prompt stays byte-identical -------------------------------------------------------------------
 
-test('prompt output on the slice-1 fixtures is byte-identical to slice 1 (78638c0)', async (t) => {
+test('context --brief output (formerly prompt) on the slice-1 fixtures is byte-identical to slice 1 (78638c0)', async (t) => {
   const golden = JSON.parse(await readFile('test/fixtures/prompt-golden-v1-slice1.json', 'utf8'));
   const TASKS = '# Tasks\n\n## Now\n\n- [ ] Ship the objective parser.\n';
   const make = {
@@ -286,9 +286,12 @@ test('prompt output on the slice-1 fixtures is byte-identical to slice 1 (78638c
     await setup(root);
     const real = await realpath(root); // macOS: /var/... is reported as /private/var/...
     for (const engine of ['claude', 'codex', 'opencode', 'hermes', 'generic']) {
-      const r = cli(['prompt', engine], root);
-      const stdout = r.stdout.split(real).join('<ROOT>').split(root).join('<ROOT>').replace(/^Project: [^;]+;/m, 'Project: <NAME>;');
-      assert.deepEqual({ status: r.status, stdout }, golden[`${name}/${engine}`], `${name}/${engine}`);
+      // `context <engine> --brief` replaced `prompt <engine>` (removed in 3.0.0) and keeps its pinned bytes.
+      for (const args of [['context', engine, '--brief']]) {
+        const r = cli(args, root);
+        const stdout = r.stdout.split(real).join('<ROOT>').split(root).join('<ROOT>').replace(/^Project: [^;]+;/m, 'Project: <NAME>;');
+        assert.deepEqual({ status: r.status, stdout }, golden[`${name}/${engine}`], `${args.join(' ')} (${name})`);
+      }
     }
   }
 });

@@ -57,7 +57,6 @@ test('the guide names the everyday loop: context, checkpoint/resume, brain, agen
     [/`agentos brain apply /, 'brain apply'],
     [/`agentos agents sync <engine> --role/, 'agents sync'],
     [/Synced config: STALE/, 'the doctor STALE warning'],
-    [/`agentos run handoff/, 'run handoff and how it differs'],
     [/`<command> --help`/, 'per-command --help (D1)'],
     [/`--cwd <dir>`[^.\n]*root-relative[^.\n]*absolute inside the workspace/, 'checkpoint --cwd semantics (D2)'],
     [/`Edit scope: not set`/, 'the unset edit scope line (D5)'],
@@ -65,6 +64,14 @@ test('the guide names the everyday loop: context, checkpoint/resume, brain, agen
   // Engines propose; the owner applies. Engines never edit project.yaml themselves.
   assert.match(guide, /owner[^.\n]*task_scope|task_scope[^.\n]*owner/i);
   assert.match(guide, /never[^.\n]*apply|apply[^.\n]*owner/i);
+});
+
+test('2.1: the guide and every generated adapter name only current command forms', async (t) => {
+  const root = await workspace(t);
+  const deprecated = /`agentos (handoff|prompt|adapters|engines|run handoff|link-obsidian|templates|migrate)\b|obsidian link-workspace|brain validate|manifest [^`]*--from-catalog|compact --(checkpoint|rewrite)/;
+  for (const file of [GUIDE, 'AGENTS.md', 'CLAUDE.md', '.hermes.md']) {
+    assert.doesNotMatch(await readFile(join(root, file), 'utf8'), deprecated, file);
+  }
 });
 
 test('the guide stays within its byte budget', async (t) => {

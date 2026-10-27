@@ -51,7 +51,3 @@ export function markdownSection(text: string, title: string): string | undefined
   const next = headings.slice(index + 1).find(h => h.level <= current.level);
   return text.slice(current.end, next?.start ?? text.length).trim();
 }
-export function appendContextRecord(original: string, title: string, body: string): string {
-  const nl = original.includes('\r\n') ? '\r\n' : '\n';
-  return `${original}${nl}${nl}## ${title}${nl}${nl}${body.replace(/\r?\n/g, nl)}${nl}`;
-}

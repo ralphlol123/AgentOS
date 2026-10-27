@@ -151,14 +151,14 @@ test('rehearsal: plain compact reduces a representative multi-repo workspace wit
   assert.equal((await readdir(join(root, '.agentos/runs'), { withFileTypes: true })).filter((e) => e.name.startsWith('compact-rewrite-')).length, 1);
 });
 
-test('rehearsal: the compatibility alias and explicit checkpoint remain separate', async (t) => {
+test('rehearsal: plain compact and --archive-only remain separate', async (t) => {
   const state = representativeState({ previous: 4, detailsPerTask: 1 });
   const { root } = await fixture(t, state);
-  const alias = cli(root, ['compact', '--rewrite']);
-  assert.equal(alias.status, 0, alias.stdout + alias.stderr);
-  assert.match(alias.stdout, /Mode: structural rewrite/);
+  const plain = cli(root, ['compact']);
+  assert.equal(plain.status, 0, plain.stdout + plain.stderr);
+  assert.match(plain.stdout, /Mode: structural rewrite/);
 
-  const checkpoint = cli(root, ['compact', '--checkpoint']);
+  const checkpoint = cli(root, ['compact', '--archive-only']);
   assert.equal(checkpoint.status, 0, checkpoint.stdout + checkpoint.stderr);
   assert.match(checkpoint.stdout, /Mode: archival checkpoint/);
   const doctor = cli(root, ['doctor']);
@@ -169,7 +169,7 @@ test('rehearsal: the compatibility alias and explicit checkpoint remain separate
 test('rehearsal: unclear sections are reported, not silently dropped', async (t) => {
   const state = representativeState({ objectives: 1, previous: 1, detailsPerTask: 1 });
   const { root } = await fixture(t, state);
-  const result = await compactAgentOS({ cwd: root, rewrite: true, dryRun: true });
+  const result = await compactAgentOS({ cwd: root, dryRun: true });
   assert.equal(result.ok, true, result.text);
   assert.equal(result.missing.length, 2);
   assert.match(result.text, new RegExp(`missing canonical sections: ${result.missing.length}`));
