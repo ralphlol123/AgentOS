@@ -4,6 +4,11 @@ All notable changes to AgentOS for Projects are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- `agentos upgrade [--check] [--to <version>] [--dry-run] [--yes] [--json]`: finds the latest version on the npm registry (`AGENTOS_REGISTRY_URL` for mirrors, 10 s timeout), detects how this CLI was installed (Bun/npm/pnpm global, project-local, unknown), runs that manager's global install, verifies `agentos --version` on PATH is the target, then runs the new binary's `doctor --fix` in the current workspace. `--check` exits 0 up to date / 10 update available / 1 error. Asks first on a terminal; without a terminal it needs `--yes`, and a major version always needs `--yes` or a typed `yes`. Project-local and unknown installs refuse and print the command to run. Installer failure or a version mismatch stops before the workspace refresh.
+- `build`, `prepare` and `prepack` delete `dist/` before compiling, so stale files from removed sources can no longer be packed.
+
 ## [3.0.0] - 2026-10-27
 
 ### Breaking changes / Removed

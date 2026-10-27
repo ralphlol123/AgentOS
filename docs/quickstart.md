@@ -29,6 +29,14 @@ agentos --version
 agentos help
 ```
 
+## Upgrade
+
+```bash
+agentos upgrade
+```
+
+Installs the latest release with the manager that installed AgentOS (`bun add -g` / `npm install -g` / `pnpm add -g`), checks the new `agentos --version`, then runs the new binary's `agentos doctor --fix` in the current workspace. `--check` only reports (exit 10 when an update exists), `--dry-run` shows the plan, `--yes` skips the prompt (required for a major version without a terminal), `--to <version>` pins. Outside a workspace, run `agentos doctor --fix` in each workspace afterwards.
+
 ## New project
 
 ```bash
