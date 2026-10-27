@@ -7,12 +7,12 @@
     "agentos": "dist/cli.js"
   },
   "scripts": {
-    "build": "node ./node_modules/typescript/bin/tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/cli.js',0o755)\"",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && node ./node_modules/typescript/bin/tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/cli.js',0o755)\"",
     "test": "node ./node_modules/typescript/bin/tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/cli.js',0o755)\" && node --test test/*.test.js",
     "smoke": "node ./node_modules/typescript/bin/tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/cli.js',0o755)\" && node ./test/smoke.js",
     "test:package-managers": "node ./node_modules/typescript/bin/tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/cli.js',0o755)\" && node ./test/package-managers.js",
-    "prepare": "node ./node_modules/typescript/bin/tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/cli.js',0o755)\"",
-    "prepack": "node ./node_modules/typescript/bin/tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/cli.js',0o755)\"",
+    "prepare": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && node ./node_modules/typescript/bin/tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/cli.js',0o755)\"",
+    "prepack": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && node ./node_modules/typescript/bin/tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('dist/cli.js',0o755)\"",
     "check": "node ./node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
     "pack:dry-run": "npm pack --dry-run",
     "publish:dry-run": "npm publish --dry-run --access public",
