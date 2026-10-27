@@ -64,7 +64,7 @@ Closed during v1 (evidence in the plan file and the named tests):
 
 - The `engines.allowed does not list opencode` doctor warning is noise for owners who limited engines on purpose.
 - `task_scope` entries are not checked for existence by `doctor`.
-- Equivalent aliases (`--mode summary|full`, `--agents minimal|detected`, `compact --rewrite`) and overlapping commands (`handoff`/`run handoff` vs `checkpoint`/`resume`, `prompt` vs `context`, `link-obsidian`/`obsidian link-workspace` vs `obsidian link`): see [migration.md](migration.md#keep--simplify--remove-inventory). Deprecate with one release of notice.
-- Deprecated migration writers: **GATED** (unchanged; gate in [migration.md](migration.md#keep--simplify--remove-inventory)).
+- Done in 2.1.0: the overlapping commands are deprecated with one notice each and removed in 3.0.0; the equivalent aliases (`--mode`, `--agents detected`, `compact --rewrite`) stay silent. See [migration.md](migration.md#command-inventory) and [migration-2.1-cli.md](migration-2.1-cli.md).
+- Legacy migration writers: removed in 3.0.0 (owner decision 2026-10-27; [migration.md](migration.md#command-inventory)).
 - `src/core.ts` (~5k lines): extract along slice boundaries.
 - `bun` is not on the developer sandbox PATH; gates run as the identical `npm run` scripts there.
