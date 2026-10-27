@@ -11,7 +11,7 @@
  */
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFile, readdir, realpath, stat } from 'node:fs/promises';
+import { lstat, readFile, readdir, readlink, realpath, stat } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { collectRunHandoffGitState, runReadOnlyGit } from './git-evidence.js';
 import { assertRelativeBoundaryPath, isWithin } from './task-scope.js';
@@ -84,6 +84,32 @@ export function resolveTask(task: string | undefined, objective: { text: string 
 
 // --- git state ------------------------------------------------------------------------------------
 
+/** Bounded content digest for changed files. Line counts alone miss same-size edits between a check and
+ * an automatic Brain update. Null means insufficient evidence; automatic application must require review.
+ * Protected/excluded files are never read. Untracked directories must be staged to enumerate their files. */
+async function changedContent(worktree: string, paths: string[]) {
+  if (paths.length > 256) return null;
+  const digest = createHash('sha256');
+  let remaining = 16 * 1024 * 1024;
+  try {
+    const root = await realpath(worktree);
+    for (const path of [...paths].sort()) {
+      const abs = resolve(worktree, path);
+      if (!isWithin(worktree, abs)) return null;
+      digest.update(JSON.stringify(path));
+      const info = await lstat(abs).catch((error) => { if (error.code === 'ENOENT') return null; throw error; });
+      if (!info) { digest.update('\0deleted\0'); continue; }
+      if (info.isSymbolicLink()) { digest.update(`\0link:${await readlink(abs)}\0`); continue; }
+      if (!info.isFile() || info.size > 1024 * 1024 || info.size > remaining || !isWithin(root, await realpath(abs))) return null;
+      const body = await readFile(abs);
+      if (body.length > 1024 * 1024 || body.length > remaining) return null;
+      remaining -= body.length;
+      digest.update(`\0${info.mode & 0o111}\0${createHash('sha256').update(body).digest('hex')}\0`);
+    }
+    return digest.digest('hex');
+  } catch { return null; }
+}
+
 /** Branch, HEAD and working-tree fingerprint for one repo. Paths under `.agentos/` are AgentOS state (checkpoint
  *  writes them), not engine work, so they are left out of the fingerprint and the changed paths.
  *  A repo path that is a directory inside an enclosing work tree (web/ in a root repo) uses that work tree, limited
@@ -114,12 +140,13 @@ export async function repoState(root: string, repo: { name: string; path: string
   const numstatLines = (numstat.ok ? numstat.stdout : '').split('\n').filter((line) => line && state(line.split('\t').slice(2).join('\t')));
   const omitted = new Set(git.omittedFiles.map(rel));
   const changed = git.changedFiles.map(rel).filter(state).sort();
+  const content = git.errors.length ? null : await changedContent(cwd, git.changedFiles.filter((path) => state(rel(path)) && !omitted.has(rel(path))));
   return {
     ...base, available: true, ...(prefix ? { state: 'enclosing-worktree' as const } : {}),
     branch: branch.ok ? branch.stdout.trim() : null,
     head: head.ok ? head.stdout.trim() : null,
-    // sha256 over porcelain status (staged, unstaged, untracked), changed names and per-file line counts
-    fingerprint: sha256(JSON.stringify({ status: statusLines, changed, numstat: numstatLines, errors: git.errors.length })),
+    // Content-bound as well as status-bound. Old receipts will require a fresh check after upgrading.
+    fingerprint: content === null ? null : sha256(JSON.stringify({ status: statusLines, changed, numstat: numstatLines, content })),
     changed_paths: changed.filter((path) => !omitted.has(path)),
     omitted_paths: changed.filter((path) => omitted.has(path)).length,
   };
@@ -274,7 +301,7 @@ export function replaceCheckpointBlock(content: string, lines: string[]) {
 // --- write ------------------------------------------------------------------------------------------
 
 /** The knowledge-review step (goal Slice 5). An instruction the engine reads and acts on; AgentOS decides nothing. */
-export const knowledgeLine = (task: string) => `Knowledge: did this work change durable project knowledge (architecture, a decision, a convention)? If yes, stage one focused proposal: \`agentos brain propose <record-id> --from <file> --task ${task}\` (ids: \`agentos brain list\`). Progress only: stage nothing. Never run \`agentos brain apply\`: the owner applies with \`--by <owner>\`.`;
+export const knowledgeLine = (task: string) => `Knowledge: did this work change durable project knowledge (architecture, a decision, a convention)? If yes, stage one focused proposal: \`agentos brain propose <record-id> --from <file> --task ${task}\` (ids: \`agentos brain list\`). Progress only: stage nothing. Inspect \`agentos brain policy\`: manual review by default; agents may use \`brain apply --auto --by <self>\` only under the owner policy. Refusals stay pending; never bypass them or change the policy.`;
 
 export async function writeCheckpoint(ctx: CheckpointContext, options: CheckpointOptions) {
   if (options.recover && (options.progress || options.next || options.blocker || options.checks?.length || options.claims?.length)) {
@@ -401,6 +428,7 @@ function reconcile(saved: RepoState[], current: RepoState[]) {
   const repos = saved.map((before) => {
     const now = current.find((repo) => repo.name === before.name);
     if (!now || !now.available) return { name: before.name, status: 'unavailable', reason: now?.reason ?? 'repo no longer declared in project.yaml', head_moved: null, branch_changed: null, fingerprint_changed: false, new_changed_paths: [], resolved_paths: [] };
+    if (!now.fingerprint) return { name: before.name, status: 'unavailable', reason: 'bounded working-tree content evidence is incomplete', head_moved: null, branch_changed: null, fingerprint_changed: false, new_changed_paths: [], resolved_paths: [] };
     const head_moved = before.head !== now.head ? { from: before.head, to: now.head } : null;
     const branch_changed = before.branch !== now.branch ? { from: before.branch, to: now.branch } : null;
     const fingerprint_changed = before.fingerprint !== now.fingerprint;
@@ -445,7 +473,8 @@ export async function resumeCheckpoint(ctx: CheckpointContext, options: { engine
   const { record, path } = loaded;
   const { repos, state } = await workspaceState(ctx);
   const reconciliation = reconcile(record.repos, repos);
-  const receipts = record.receipts.map((receipt) => ({ ...receipt, stale: receipt.state_tested !== null && receipt.state_tested !== state }));
+  const completeState = repos.length > 0 && repos.every((repo) => repo.available && repo.fingerprint);
+  const receipts = record.receipts.map((receipt) => ({ ...receipt, stale: receipt.state_tested !== null && (!completeState || receipt.state_tested !== state) }));
   const done = receipts.filter((receipt) => receipt.status === 'observed-pass' && !receipt.stale);
   const left = receipts.filter((receipt) => !done.includes(receipt));
   const data = {

@@ -5,7 +5,8 @@ import { appendContextRecord, literalMarkdown, markdownHeadings, markdownSection
 import { HANDOFF_ROLES, recognizeSections, resolveObjective, sectionText } from './context-sections.js';
 import { assertRelativeBoundaryPath, isWithin, validateTaskScope } from './task-scope.js';
 import { buildContextBundle, findAcceptance } from './context-builder.js';
-import { applyBrain, splitFrontmatter, brainContextRecords, brainDoctor, brainMissing, checkBrain, dirState, indexBrain, initBrain, ioReason, listBrain, newIndexNote, loadBrain, previewBrain, proposeBrain, registerBrain, searchBrain, showBrain, validateBrain, verifyBrain, type BrainCtx, type VaultBinding } from './brain.js';
+import { applyBrain, splitFrontmatter, brainContextRecords, brainDoctor, brainMissing, checkBrain, dirState, indexBrain, initBrain, ioReason, listBrain, newIndexNote, loadBrain, previewBrain, proposeBrain, policyBrain, registerBrain, searchBrain, showBrain, validateBrain, verifyBrain, type BrainCtx, type VaultBinding } from './brain.js';
+import { approvalGuidance } from './brain-policy.js';
 import { checkpointContextRecord, checkpointProblems, listCheckpoints, resolveTask, resumeCheckpoint, showCheckpoint, writeCheckpoint, type CheckpointContext } from './checkpoint.js';
 import { planCompactRewrite } from './compact-rewrite.js';
 import { STATE_SIZE_WARN_CHARS, largestSections, sectionSizes, tasksShapeWarnings } from './state-size.js';
@@ -4399,7 +4400,7 @@ const DISCOVERY_LINE = 'Next: open your engine here and run `agentos status`. To
 const STATE_RULE_LINE = 'State files: rewrite `.agentos/handoff.md` to the current state, never append to it; delete finished tasks from `.agentos/tasks.md`. Before an older entry leaves either file, copy it into a note under `.agentos/runs/`; never discard history.';
 const GUIDE_POINTER_LINE = 'Commands and workflows: `.agentos/guide.md` (load on demand). Run `agentos status` first.';
 // The startup loop, in each engine's own bootloader. The task id is the shared identity across engines.
-const startupLoop = (engine: string) => `Startup loop: \`agentos status\` → \`agentos context ${engine} --task <id>\` → work → \`agentos checkpoint --task <id> --progress "<done>" --next "<remaining>"\`. If the work changed durable knowledge: \`agentos brain propose <record> --from <file> --task <id>\` (never \`brain apply\`: the owner applies). Next session or engine: \`agentos resume --task <id>\` (same <id>; no checkpoint yet means a clean start).`;
+const startupLoop = (engine: string) => `Startup loop: \`agentos status\` → \`agentos context ${engine} --task <id>\` → work → \`agentos checkpoint --task <id> --progress "<done>" --next "<remaining>"\`. If the work changed durable knowledge: \`agentos brain propose <record> --from <file> --task <id>\`; inspect \`agentos brain policy\` (manual by default). Agents may apply only with \`--auto --by <self>\` when the owner policy permits; otherwise leave it pending. Next session or engine: \`agentos resume --task <id>\` (same <id>; no checkpoint yet means a clean start).`;
 
 // Shared by the AGENTS.md and CLAUDE.md child pointers. The CLI comes first on purpose: some engines
 // (observed: OpenCode run non-interactively) refuse reads outside their start directory, and a refused
@@ -4416,7 +4417,7 @@ function guideMd() {
   return [
     '# AgentOS Guide',
     '',
-    'How to operate an AgentOS workspace from any coding engine. This is a command map, not project state: `agentos status` prints the objective, open tasks and verification commands; read `.agentos/handoff.md` and `.agentos/tasks.md` only when file reads work.',
+    'How to operate AgentOS: `agentos status` shows the objective, open tasks and checks; read `.agentos/handoff.md` and `.agentos/tasks.md` only when file reads work.',
     '',
     '## Start',
     '',
@@ -4444,7 +4445,7 @@ function guideMd() {
     '- Before stopping or switching engines: `agentos checkpoint --task <id> --progress "<done>" --next "<remaining>" --check "<cmd>"`. Each `--check` runs as a receipt, from the workspace root or the `--cwd <dir>` after it (root-relative, or absolute inside the workspace); `--claim "<text>"` records what AgentOS did not observe.',
     '- Next engine: `agentos resume --task <id>`, then `context`. No checkpoint was written: `agentos checkpoint --recover --task <id>`.',
     '- Prefer these to `agentos run handoff`: it writes only a prose note, no receipts for `resume` to reconcile.',
-    '- After the checkpoint, ask: did this work change durable knowledge (architecture, decision, convention)? If yes: `agentos brain propose <id-or-path> --from <file|-> --task <id> --summary "<why>"` (ids: `agentos brain list`); else nothing. Engines propose, never apply; the owner runs `agentos brain preview <proposal>`, then `agentos brain apply <proposal> --by <owner>`.',
+    '- Durable changes: `agentos brain propose <id-or-path> --from <file|-> --task <id> --summary "<why>"`; progress only: nothing. Review: `agentos brain preview <proposal>`. Manual default: owner runs `agentos brain apply <proposal> --by <owner>`. With owner-enabled `agentos brain policy`, agents may use `agentos brain apply <proposal> --auto --by <self>`. Refusals stay pending; never drop --auto, impersonate the owner or change policy.',
     '- Engine role config (`claude-code`, `codex`): `agentos agents sync <engine> --role <id> --dry-run`, then without `--dry-run`. When `agentos doctor` prints `Synced config: STALE`, re-run the command it prints; add `--replace` only when that line does.',
     '',
     '## Which command for which job',
@@ -4691,7 +4692,7 @@ async function contextInputFor(root: string, engine: string, options: any) {
     enabledAgents: Array.isArray(agents.enabled) ? agents.enabled.map((id) => normalizeAgentAlias(String(id))) : [],
     defaultRole: agents.capabilities?.implementation ? normalizeAgentAlias(String(agents.capabilities.implementation)) : undefined,
     header: promptHeaderLines(engine, root, projectText),
-    rules: [PROMPT_RULES, ...engineSpecificRules(engine), obsidianPromptLine(root, projectText)].filter(Boolean),
+    rules: [PROMPT_RULES, ...engineSpecificRules(engine), obsidianPromptLine(root, projectText), approvalGuidance(project.knowledge?.brain?.approval)].filter(Boolean),
     task: options.task, role: options.role ? normalizeAgentAlias(String(options.role)) : undefined, scope: options.scope, budget: options.budget, includeSuperseded: Boolean(options.includeSuperseded),
     brain: brainContextRecords(brainRecords),
     missing: await brainMissing(root, brainRecords, binding, obsidian.off),
@@ -5287,7 +5288,9 @@ async function brainCtxFor(root: string, cwd: string): Promise<BrainCtx> {
   const projectText = await readCoreProjectYaml(root);
   const { binding, off, config } = obsidianIntegration(root, projectText);
   const note = binding && config?.managed && config.index ? { abs: join(binding.dir, config.index), name: indexNoteName(root, projectText) } : null;
-  return { root, cwd, repos: brainScopes(projectText), vault: binding, vaultOff: off, note };
+  const project = parseProjectYaml(projectText);
+  return { root, cwd, repos: brainScopes(projectText), vault: binding, vaultOff: off, note, approval: project.knowledge?.brain?.approval,
+    evidence: { repos: parseReposFromProjectYaml(projectText, { includeRoot: true }), excluded: project.handoff?.exclude_paths ?? [] } };
 }
 const brainScopes = (projectText: string) => parseReposFromProjectYaml(projectText, { includeRoot: true }).map((repo) => repo.name);
 const BRAIN_WRITES = new Set(['init', 'register', 'propose', 'apply', 'verify', 'index']);
@@ -5297,10 +5300,12 @@ export async function brainAgentOS(options: any = {}) {
   const cwd = options.cwd ?? process.cwd();
   const root = await findAgentOSRoot(cwd);
   if (!root) return { ok: false, text: 'AgentOS brain: FAIL\nNo .agentos directory found here or in parent directories.' };
-  const ctx = await brainCtxFor(root, cwd);
+  if (options.auto && !['apply', 'preview', 'validate'].includes(options.subcommand)) throw new Error('--auto is supported only by brain apply, preview and validate.');
   const [ref] = options.args ?? [];
-  const run = () => {
+  const run = async () => {
+    const ctx = await brainCtxFor(root, cwd); // Read current policy inside the writer lock on mutation paths.
     switch (options.subcommand) {
+      case 'policy': return policyBrain(ctx, options);
       case 'init': return initBrain(ctx, options);
       case 'register': return registerBrain(ctx, ref, options);
       case 'list': return listBrain(ctx, options);
@@ -5326,8 +5331,9 @@ export const BRAIN_USAGE = [
   '       agentos brain register <path> [--kind architecture|decision|adr|convention|feature|note] [--scope <repo-id|.>] [--status proposed|accepted] [--by <name>] [--dry-run]',
   '       agentos brain list [--status <s>] [--kind <k>] | show <id-or-path> | search <terms…> | check   (read-only; all take --json)',
   '       agentos brain propose <id-or-path> --from <file|-> [--summary "<text>"] [--supersedes <id>[,<id>]] [--append] [--by <name>] [--task <id>] [--dry-run]   (--task: tie to that task\'s checkpoint; same event stages once)',
-  '       agentos brain preview <proposal> | validate <proposal>   (read-only)',
-  '       agentos brain apply <proposal> --by <owner> [--dry-run]   (owner step; engines never apply)',
+  '       agentos brain policy [--json]   (read owner-configured knowledge.brain.approval; default manual)',
+  '       agentos brain preview <proposal> | validate <proposal> [--auto --by <actor>]   (read-only)',
+  '       agentos brain apply <proposal> --by <actor> [--auto] [--dry-run]   (manual owner review by default; agents must use --auto)',
   '       agentos brain verify <id-or-path> [--by <name>] [--dry-run]',
   '       agentos brain index [--adopt] [--dry-run]   (recreate/refresh the derived index.json and Obsidian index note; --adopt an older unmarked note)',
 ].join('\n');
