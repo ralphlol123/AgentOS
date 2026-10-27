@@ -97,7 +97,7 @@ for (const manager of managers) {
   if (!/AgentOS dry run/.test(output)) throw new Error(`${manager.name} did not execute agentos dry-run`);
   const installedBin = join(cwd, 'node_modules/.bin/agentos');
   const invoke = args => run(installedBin, args, { cwd });
-  assert.equal(invoke(['--version']), '3.0.0', `${manager.name}: packed installed CLI version`);
+  assert.equal(invoke(['--version']), '3.1.0', `${manager.name}: packed installed CLI version`);
   // Async on purpose: spawnSync would block the in-process registry stub.
   const check = await promisify(execFile)(installedBin, ['upgrade', '--check', '--json'], { cwd, env: { ...process.env, AGENTOS_REGISTRY_URL: registryUrl } }).catch((error) => error);
   assert.equal(check.code, 10, `${manager.name}: upgrade --check exits 10 when an update exists\n${check.stdout}${check.stderr}`);
@@ -184,5 +184,5 @@ for (const manager of managers) {
     throw new Error(`${manager.name}: ambiguous plain compact did not refuse with candidates\n${ambiguous.stdout}\n${ambiguous.stderr}`);
   }
   assert.deepEqual(await snapshot(cwd), beforeAmbiguous, `${manager.name}: ambiguous default compact wrote to disk`);
-  console.log(`PASS ${manager.name}: installed 3.0.0 bin; upgrade --check; init; default preview/apply/status/doctor/no-op; removed-alias refusal; checkpoint; ambiguity refusal; 15 cards/9 references`);
+  console.log(`PASS ${manager.name}: installed 3.1.0 bin; upgrade --check; init; default preview/apply/status/doctor/no-op; removed-alias refusal; checkpoint; ambiguity refusal; 15 cards/9 references`);
 }
