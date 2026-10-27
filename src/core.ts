@@ -3953,7 +3953,7 @@ async function ensureProjectYamlAgents(path, agentSelection) {
 async function writeIfMissing(path, content) { if (!await exists(path)) await writeFileAtomic(path, content); }
 async function exists(path) { try { await access(path); return true; } catch (error) { if (error.code === 'ENOENT') return false; throw error; } }
 async function safeRead(path) { try { return await readFile(path, 'utf8'); } catch (error) { if (error.code === 'ENOENT') return ''; throw error; } }
-async function findAgentOSRoot(start) {
+export async function findAgentOSRoot(start) {
   let dir = resolve(start);
   while (true) {
     try {
