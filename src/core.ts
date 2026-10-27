@@ -1809,6 +1809,9 @@ async function skillsAgentOSUnlocked(options: any = {}) {
   if (options.list) return options.installed ? installedCards(root, 'skill') : listSkillTemplates(root);
   const dryRun = Boolean(options.dryRun);
   if (options.remove) return removeLocalSkills(root, options.remove, dryRun);
+  if (options.show !== undefined) return showSkill(root, options.show);
+  const single = typeof options.add === 'string' && !options.detected && !options.add.includes(',') ? options.add.trim() : '';
+  if (single && (isImportUrl(single) || isPathLike(single))) return importTemplateSource(root, { ...options, source: single, type: 'skill' }, 'skills add');
   const mode: 'summary' | 'full' = options.mode === 'full' ? 'full' : 'summary';
 
   const repos = parseReposFromProjectYaml(await safeRead(join(root, '.agentos/project.yaml')), { includeRoot: true });
@@ -1867,7 +1870,7 @@ async function installedCards(root: string, type: 'agent' | 'skill') {
 function listSkillTemplates(root) {
   const lines = ['AgentOS skill templates', `Root: ${root}`, '', 'Built-in packs:', ...SKILL_CATEGORIES.map((category) => `- ${category}-pack`), '', 'Built-in skills:'];
   for (const skill of SKILL_CATALOG) lines.push(`- ${skill.id} (${skill.category}) — ${skill.summary}`);
-  lines.push('', 'Canonical source templates: agentos templates list (same complete workflows).', 'Installed cards: agentos skills list --installed', 'Use: agentos skills add <skill-id|category-pack> [--mode summary|full]', 'Remove: agentos skills remove <skill-id> [--dry-run]');
+  lines.push('', 'Read one: agentos skills show <skill-id>', 'Installed cards: agentos skills list --installed', 'Use: agentos skills add <skill-id|category-pack|file|url> [--dry-run]', 'Remove: agentos skills remove <skill-id> [--dry-run]');
   return { ok: true, root, skills: SKILL_CATALOG.map((s) => s.id), text: lines.join('\n') };
 }
 
@@ -1942,15 +1945,29 @@ async function agentsAgentOSUnlocked(options: any = {}) {
   if (!root) return { ok: false, text: 'AgentOS agents: FAIL\nNo .agentos directory found.' };
   await assertWorkspaceBoundaries(root);
   if (options.list) return options.installed ? installedCards(root, 'agent') : listAgentTemplates(root);
-  const actx = { root, catalog: Object.fromEntries(Object.values(AGENT_DEFINITIONS).map((agent: any) => [agent.id, { content: agentMd(agent) }])), repos: brainScopes(await safeRead(join(root, '.agentos/project.yaml'))) };
+  const actx = { root, catalog: catalogAgentCards(), repos: brainScopes(await safeRead(join(root, '.agentos/project.yaml'))) };
   const lifecycleId = options.id === undefined ? undefined : String(options.id);
-  if (options.command === 'show') return showAgent(actx, lifecycleId, options);
+  if (options.command === 'show') {
+    // Not installed: show the catalog card (what `templates show` printed) instead of failing.
+    const catalog = lifecycleId && !(ROLE_ID.test(lifecycleId) && await exists(join(root, '.agentos/agents', `${lifecycleId}.md`))) ? catalogTemplateEntry('agent', lifecycleId) : null;
+    return catalog ? catalogCardView(root, catalog, options.json) : showAgent(actx, lifecycleId, options);
+  }
   if (options.command === 'enable' || options.command === 'disable') return setAgentEnabled(actx, lifecycleId, options.command === 'enable', options);
   if (options.command === 'remove') return removeAgent(actx, lifecycleId, options);
   if (options.command === 'manifest') return manifestAgent(actx, lifecycleId, options);
   if (options.command === 'sync') return syncAgentsUnlocked(root, options);
   const raw = String(options.add || '').trim();
   if (!raw) throw new Error('agentos agents add requires an agent id or template file.');
+  // A URL, or a file that is not a valid agent template, goes through the safe import (`templates import` before 2.1).
+  const fileText = !isImportUrl(raw) && isPathLike(raw) ? await readFile(resolve(raw), 'utf8') : null;
+  const checked = fileText === null ? null : validateTemplateContent('agent', fileText);
+  if (isImportUrl(raw) || (checked && !checked.ok)) return importTemplateSource(root, { ...options, source: raw, type: 'agent' }, 'agents add');
+  if (fileText !== null) {
+    // A valid template file installs as written, but never skips the import safety review or a pinned hash.
+    if (options.expectedSha256 && createHash('sha256').update(fileText).digest('hex') !== String(options.expectedSha256).toLowerCase()) throw new Error('Source SHA256 differs from the reviewed hash; no files written. Review the new source before accepting.');
+    const blocked = reviewImportedTemplate(fileText).filter((item) => item.startsWith('BLOCK:'));
+    if (blocked.length) return { ok: false, root, text: ['AgentOS agents add: REFUSED', `Source: ${raw}`, ...blocked.map((item) => `- ${item}`), 'Nothing was written.'].join('\n') };
+  }
   const dryRun = Boolean(options.dryRun);
   const id = normalizeAgentAlias(options.name || (isPathLike(raw) ? basename(raw, extname(raw)) : raw));
   if (!ROLE_ID.test(id)) throw new Error(`Invalid agent id: ${id} (expected lowercase letters, digits and hyphens).`);
@@ -1977,6 +1994,7 @@ async function agentsAgentOSUnlocked(options: any = {}) {
   const lines = [
     `AgentOS agents add${dryRun ? ' dry run' : ''}`, `Root: ${root}`, `Agent: ${id}`,
     ...(deprecation.deprecated ? [`Note: ${agentDeprecationNotice(deprecation.from!, id)}`] : []),
+    ...(checked ? [`Validation: OK`, ...checked.messages.map((m) => `- ${m}`)] : []),
     '', `${verb}: ${relPath} (manifest: installed_from ${installedFrom}, version ${PACKAGE_VERSION}; ${install.reason})`,
     ...(install.action === 'replace' || install.action === 'upgrade' ? diffSummary(install.diff) : []),
     ...(backup ? [`${dryRun ? 'Would keep' : 'Kept'} the old card: ${backup}`] : []),
@@ -2263,7 +2281,7 @@ async function syncAgentsUnlocked(root: string, options: any) {
 function listAgentTemplates(root) {
   const lines = ['AgentOS agent templates', `Root: ${root}`, '', 'Built-in agents:'];
   for (const agent of Object.values(AGENT_DEFINITIONS) as any[]) lines.push(`- ${agent.id}${agent.planningOnly ? ' (planning-only)' : ''} — ${agent.mandate}`);
-  lines.push('', 'Canonical source templates: templates/agents/ — same role contracts via agentos templates list.', 'Installed cards: agentos agents list --installed', 'Use: agentos agents add <agent-id|template-file> [--name id] [--dry-run]');
+  lines.push('', 'Canonical source templates: templates/agents/ (read one: agentos agents show <id>).', 'Installed cards: agentos agents list --installed', 'Use: agentos agents add <agent-id|template-file|url> [--name id] [--dry-run]');
   return { ok: true, root, agents: Object.keys(AGENT_DEFINITIONS), text: lines.join('\n') };
 }
 
@@ -2289,31 +2307,45 @@ async function templatesAgentOSUnlocked(options: any = {}) {
   if (command === 'copy') return templatesCopyAgentOS(root, options);
   if (command === 'validate') return templatesValidateAgentOS(root, options);
   if (command !== 'import') return { ok: false, text: 'Usage: agentos templates list | show <id> | copy <id> [--dry-run] | validate <file> --type agent|skill | import <url-or-file> --type agent|skill --name <id> [--mode summary|full] [--dry-run] [--yes]' };
+  return importTemplateSource(root, options, 'templates import');
+}
+
+const isImportUrl = (value: unknown) => /^https?:\/\//i.test(String(value ?? '').trim());
+
+/** Safe import of an external file or URL: hash pin, safety review, quarantine of blocked content, no overwrite
+ *  without --replace, dry run unless --yes. Shared by `templates import` (deprecated) and `agents|skills add
+ *  <file|url>`; the add forms also print the template structure check (`templates validate`) and write an agent
+ *  as a manifest card instead of a legacy card. */
+async function importTemplateSource(root: string, options: any, label: 'templates import' | 'agents add' | 'skills add') {
+  const viaAdd = label !== 'templates import';
   const source = String(options.source || '').trim();
   const type = String(options.type || '').trim().toLowerCase();
   const name = safeId(options.name || basename(source, extname(source)) || 'imported-template');
   const mode: 'summary' | 'full' = options.mode === 'full' ? 'full' : 'summary';
   const dryRun = options.dryRun === true || !options.yes;
   const replace = Boolean(options.replace);
-  if (!source) throw new Error('agentos templates import requires a URL or file path.');
+  if (!source) throw new Error(`agentos ${label} requires a URL or file path.`);
   if (!['agent', 'skill'].includes(type)) throw new Error('agentos templates import requires --type agent or --type skill.');
   let fetched;
   try {
     fetched = await readImportSource(source);
   } catch (error) {
-    return { ok: false, root, dryRun, text: [`AgentOS templates import: FAIL`, `Root: ${root}`, `Source: ${source}`, '', `Source fetch failed: ${error.message}`, '', 'Check the URL/path and retry. No files were written.'].join('\n') };
+    return { ok: false, root, dryRun, text: [`AgentOS ${label}: FAIL`, `Root: ${root}`, `Source: ${source}`, '', `Source fetch failed: ${error.message}`, '', 'Check the URL/path and retry. No files were written.'].join('\n') };
   }
   if (options.expectedSha256 && (!/^[a-f0-9]{64}$/i.test(options.expectedSha256) || fetched.sha256 !== String(options.expectedSha256).toLowerCase())) throw new Error('Source SHA256 differs from the reviewed hash; no files written. Review the new source before accepting.');
   const review = reviewImportedTemplate(fetched.content);
   if (/^http:/i.test(source)) review.push('WARN: HTTP source is not transport-authenticated; prefer HTTPS and verify the reviewed SHA256.');
   const relPath = type === 'agent' ? `.agentos/agents/${name}.md` : `.agentos/skills/imported/${name}/SKILL.md`;
   const targetPath = join(root, relPath);
-  const converted = type === 'agent' ? importedAgentTemplate(name, fetched, review) : importedSkillTemplate(name, mode, fetched, review);
+  let converted = type === 'agent' ? importedAgentTemplate(name, fetched, review) : importedSkillTemplate(name, mode, fetched, review);
+  if (viaAdd && type === 'agent') converted = renderCard(manifestFor(name, converted, provenanceFor(`${isImportUrl(source) ? 'import' : 'template'}:${source}`, converted)), converted);
+  const validation = validateTemplateContent(type, fetched.content);
   const writeVerb = replace ? 'Replaced' : 'Wrote';
-  const lines = [`AgentOS templates import${dryRun ? ' dry run' : ''}`, `Root: ${root}`, `Source: ${source}`, `Detected type: ${type}`, `Name: ${name}`, `SHA256: ${fetched.sha256}`, `Bytes: ${Buffer.byteLength(fetched.content)}`, '', 'Review:', ...review.map((item) => `- ${item}`), ''];
+  const lines = [`AgentOS ${label}${dryRun ? ' dry run' : ''}`, `Root: ${root}`, `Source: ${source}`, `Detected type: ${type}`, `Name: ${name}`, `SHA256: ${fetched.sha256}`, `Bytes: ${Buffer.byteLength(fetched.content)}`, '', 'Review:', ...review.map((item) => `- ${item}`), '',
+    ...(viaAdd ? [`Validation: ${validation.ok ? 'OK' : 'FAIL'}`, ...validation.messages.map((m) => `- ${m}`), `Imported as reference material inside a generated ${type} card.`, ''] : [])];
   if (review.some((item) => item.startsWith('BLOCK:'))) {
     if (dryRun) { lines.push('Blocked preview: no files written. Re-run with --yes without --dry-run only to save a quarantine review; blocked content never becomes a runtime template.'); return { ok: false, root, dryRun, text: lines.join('\n'), review }; }
-    const quarantineRel = await quarantineImportedTemplate(root, name, type, fetched, review);
+    const quarantineRel = await quarantineImportedTemplate(root, name, type, fetched, review, label);
     lines.push(`Quarantined: ${quarantineRel}`, '', 'Blocked import recovery:', '- Inspect the quarantine review file.', '- Remove or rewrite blocked instructions at the source.', '- Re-run a dry-run import and confirm no BLOCK findings remain.', '- Only then re-run with --yes to materialize a runtime template.');
     return { ok: false, root, dryRun, text: lines.join('\n'), review, quarantine: quarantineRel };
   }
@@ -2333,7 +2365,39 @@ async function templatesAgentOSUnlocked(options: any = {}) {
   } else {
     lines.push(`Dry run only. Re-run with --yes --expected-sha256 ${fetched.sha256} to accept exactly the reviewed source.`);
   }
-  return { ok: true, root, dryRun, text: lines.join('\n'), review };
+  return { ok: true, root, dryRun, text: lines.join('\n'), review, ...(viaAdd ? { validation } : {}) };
+}
+
+/** A built-in agent or skill template by id (`skill:<category>/<id>` and `agent:<id>` also work; retired IDs resolve with a note). */
+function catalogTemplateEntry(type: 'agent' | 'skill', raw: string) {
+  const wanted = String(raw ?? '').trim().replace(new RegExp(`^${type}:`), '');
+  const entries = TEMPLATE_ENTRIES.filter((entry) => entry.type === type);
+  const direct = entries.find((entry) => entry.id === `${type}:${wanted}` || entry.name === wanted);
+  if (direct) return { entry: direct, deprecated: false };
+  const alias = type === 'skill' ? resolveSkillAlias(wanted) : resolveAgentAlias(wanted);
+  const entry = entries.find((e) => e.name === alias.id);
+  return entry ? { entry, deprecated: alias.deprecated, from: alias.from, canonical: alias.id } : null;
+}
+
+/** `agents show` / `skills show` for a card that is not installed: the catalog template, read-only. */
+async function catalogCardView(root: string, resolved: NonNullable<ReturnType<typeof catalogTemplateEntry>>, json = false) {
+  const { entry } = resolved;
+  const content = await readFile(entry.absPath, 'utf8');
+  const note = resolved.deprecated ? (entry.type === 'skill' ? skillDeprecationNotice(resolved.from!, resolved.canonical!) : agentDeprecationNotice(resolved.from!, resolved.canonical!)) : null;
+  const data = { id: entry.name, installed: false, template: entry.id, path: entry.relPath, content, ...(note ? { note } : {}) };
+  return { ok: true, root, ...data, text: json ? JSON.stringify({ ok: true, ...data }, null, 2)
+    : [`AgentOS ${entry.type} ${entry.name} (catalog card, not installed; install with \`agentos ${entry.type}s add ${entry.name}\`)`, `Template: ${entry.id}`, `Path: ${entry.relPath}`, '', content].join('\n') + (note ? `\nNote: ${note}` : '') };
+}
+
+/** `agentos skills show <id>`: the installed card, else the catalog template. Read-only. */
+async function showSkill(root: string, raw: string) {
+  const wanted = String(raw ?? '').trim().replace(/^skill:/, '');
+  if (!wanted) throw new Error('Usage: agentos skills show <skill-id>');
+  const resolved = catalogTemplateEntry('skill', wanted);
+  const local = (await listLocalSkillFiles(root)).find((item) => item.id === wanted || item.id === resolved?.entry.name);
+  if (local) return { ok: true, root, id: local.id, installed: true, path: local.relPath, text: [`AgentOS skill ${local.id}`, `Path: ${local.relPath} (installed)`, '', await readFile(local.abs, 'utf8')].join('\n') };
+  if (!resolved) return { ok: false, root, text: `AgentOS skills show: FAIL\nUnknown skill: ${wanted}. Run \`agentos skills list\`.` };
+  return catalogCardView(root, resolved);
 }
 
 async function templatesListAgentOS(root) {
@@ -2439,7 +2503,7 @@ async function findTemplateRegistryEntry(id) {
   return null;
 }
 
-async function quarantineImportedTemplate(root, name, type, fetched, review) {
+async function quarantineImportedTemplate(root, name, type, fetched, review, label = 'templates import') {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const safeName = safeId(name || 'imported-template');
   const relPath = `.agentos/imports/quarantine/${stamp}-${safeName}.md`;
@@ -2460,7 +2524,7 @@ async function quarantineImportedTemplate(root, name, type, fetched, review) {
     '',
     '1. Inspect the original content below.',
     '2. Remove or rewrite blocked prompt-injection-like instructions at the source.',
-    '3. Re-run `agentos templates import ... --dry-run` and confirm no BLOCK findings remain.',
+    `3. Re-run \`agentos ${label} ... --dry-run\` and confirm no BLOCK findings remain.`,
     '4. Re-run with `--yes` only after the review is clean.',
     '',
     '## Original content',
@@ -3843,7 +3907,7 @@ async function buildRetiredCardInventory(root: string) {
       eligibility,
       canonicalInstalled,
       next: eligibility === 'customized'
-        ? `review by hand, then replace with \`agentos templates copy agent:${canonical}\` and delete this card`
+        ? `review by hand, then replace with \`agentos agents add ${canonical}\` and delete this card`
         : `run \`agentos doctor --fix\` to migrate this clearly-generated card`,
     });
   }
@@ -5247,7 +5311,7 @@ export async function migrateClaudeAgentOS(options: any = {}) {
 export async function skillsAgentOS(options: any = {}) {
   const root = await findAgentOSRoot(options.cwd ?? process.cwd());
   const action = () => skillsAgentOSUnlocked(options);
-  return root && (!options.dryRun && !options.list) ? withWorkspaceWriter(root, action) : action();
+  return root && (!options.dryRun && !options.list && options.show === undefined) ? withWorkspaceWriter(root, action) : action();
 }
 
 export async function agentsAgentOS(options: any = {}) {
