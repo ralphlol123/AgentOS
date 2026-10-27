@@ -5,8 +5,8 @@ import { appendContextRecord, literalMarkdown, markdownHeadings, markdownSection
 import { HANDOFF_ROLES, recognizeSections, resolveObjective, sectionText } from './context-sections.js';
 import { assertRelativeBoundaryPath, isWithin, validateTaskScope } from './task-scope.js';
 import { buildContextBundle, findAcceptance } from './context-builder.js';
-import { applyBrain, splitFrontmatter, brainContextRecords, brainDoctor, brainMissing, checkBrain, dirState, indexBrain, initBrain, ioReason, listBrain, newIndexNote, loadBrain, previewBrain, proposeBrain, policyBrain, registerBrain, searchBrain, showBrain, validateBrain, verifyBrain, type BrainCtx, type VaultBinding } from './brain.js';
-import { approvalGuidance } from './brain-policy.js';
+import { applyBrain, splitFrontmatter, brainContextRecords, brainDoctor, brainMissing, checkBrain, dirState, indexBrain, initBrain, ioReason, listBrain, logBrain, newIndexNote, loadBrain, previewBrain, revertBrain, proposeBrain, policyBrain, registerBrain, searchBrain, showBrain, validateBrain, verifyBrain, type BrainCtx, type VaultBinding } from './brain.js';
+import { approvalGuidance, isAutonomous } from './brain-policy.js';
 import { checkpointContextRecord, checkpointProblems, listCheckpoints, resolveTask, resumeCheckpoint, showCheckpoint, writeCheckpoint, type CheckpointContext } from './checkpoint.js';
 import { planCompactRewrite } from './compact-rewrite.js';
 import { STATE_SIZE_WARN_CHARS, largestSections, sectionSizes, tasksShapeWarnings } from './state-size.js';
@@ -851,15 +851,20 @@ export async function __applyAdapterPlansForTests(plans: AdapterPlanEntry[]) {
   return applyAdapterPlans(plans);
 }
 
-function rootAdapterTargets(cwd: string, workspaceKind: string, repos: any[]) {
+/** Generated agent instructions follow the owner's Brain policy: autonomous wording only for a valid autonomous policy. */
+function autonomousFrom(projectText: string | null) {
+  try { return Boolean(projectText) && isAutonomous(parseProjectYaml(projectText).knowledge?.brain?.approval); } catch { return false; }
+}
+
+function rootAdapterTargets(cwd: string, workspaceKind: string, repos: any[], autonomous = false) {
   return [
-    { path: join(cwd, 'AGENTS.md'), label: 'AGENTS.md', section: agentsBootloader({ workspaceKind, repos }) },
-    { path: join(cwd, 'CLAUDE.md'), label: 'CLAUDE.md', section: claudeAdapter() },
-    { path: join(cwd, '.hermes.md'), label: '.hermes.md', section: hermesAdapter() },
+    { path: join(cwd, 'AGENTS.md'), label: 'AGENTS.md', section: agentsBootloader({ workspaceKind, repos, autonomous }) },
+    { path: join(cwd, 'CLAUDE.md'), label: 'CLAUDE.md', section: claudeAdapter(autonomous) },
+    { path: join(cwd, '.hermes.md'), label: '.hermes.md', section: hermesAdapter(autonomous) },
     // The engine-agnostic operating guide is a managed target like the bootloaders, so it is
     // created by init, reported stale by doctor, and refreshed by doctor --fix. `level` is explicit
     // because the path contains a slash but the file belongs to the workspace root, not a child repo.
-    { path: join(cwd, GUIDE_PATH), label: GUIDE_PATH, section: guideMd(), level: 'root' },
+    { path: join(cwd, GUIDE_PATH), label: GUIDE_PATH, section: guideMd(autonomous), level: 'root' },
   ];
 }
 
@@ -899,7 +904,7 @@ async function initAgentOSUnlocked(options: any = {}) {
   if (existing && options.agents && JSON.stringify([...resolveAgentSelection(options.agents, repos).enabled].sort()) !== JSON.stringify([...agentSelection.enabled].sort())) throw new Error('Existing agent configuration is preserved. Use agents add to extend it, or edit project.yaml explicitly.');
   const policy = adapterPolicy(existingText);
   const childRepos = repos.filter(repo => repo.path !== '.');
-  const adapterTargets = [...rootAdapterTargets(cwd, workspaceKind, repos), ...childAdapterTargets(cwd, policy.pointers ? childRepos : [])];
+  const adapterTargets = [...rootAdapterTargets(cwd, workspaceKind, repos, autonomousFrom(existingText)), ...childAdapterTargets(cwd, policy.pointers ? childRepos : [])];
   const adapterPlans = await planAdapterFiles(adapterTargets);
   const planned = [...new Set([
     ...plannedFiles(mode),
@@ -2975,7 +2980,7 @@ async function doctorAgentOSUnlocked(options: any = {}) {
   if (!projectConfigError) {
     const allRepos = parseReposFromProjectYaml(project, { includeRoot: true });
     const workspaceKind = firstYamlValue(project, 'workspace_kind') ?? 'unknown';
-    const adapterTargets = [...rootAdapterTargets(root, workspaceKind, allRepos), ...childAdapterTargets(root, policy.pointers ? repos.filter(repo => repo.path !== '.') : [])];
+    const adapterTargets = [...rootAdapterTargets(root, workspaceKind, allRepos, autonomousFrom(project)), ...childAdapterTargets(root, policy.pointers ? repos.filter(repo => repo.path !== '.') : [])];
     const duplicateAdapterTargets = detectDuplicateAdapterTargets(adapterTargets);
     const duplicateAdapterPaths = new Set(duplicateAdapterTargets.map((d) => d.resolvedPath));
     for (const duplicate of duplicateAdapterTargets) {
@@ -3348,7 +3353,7 @@ async function fixAgentOSAdapters(root, options: { allowAdopt?: boolean } = {}) 
   await assertRepoBoundaries(root, allRepos);
 
   const workspaceKind = firstYamlValue(project, 'workspace_kind') ?? 'unknown';
-  const adapterTargets = [...rootAdapterTargets(root, workspaceKind, allRepos), ...childAdapterTargets(root, policy.pointers ? childRepos : [])];
+  const adapterTargets = [...rootAdapterTargets(root, workspaceKind, allRepos, autonomousFrom(project)), ...childAdapterTargets(root, policy.pointers ? childRepos : [])];
   // Preflight every root/child adapter before any mutation (including the
   // project.yaml/skills.md/agents/engines writes below) so an ambiguous file
   // anywhere makes this command a strict no-op rather than a partial repair.
@@ -3587,7 +3592,7 @@ async function legacyStateBeforeFix(root: string): Promise<Deprecation[]> {
     const policy = adapterPolicy(project);
     const allRepos = parseReposFromProjectYaml(project, { includeRoot: true });
     const workspaceKind = firstYamlValue(project, 'workspace_kind') ?? 'unknown';
-    const targets = [...rootAdapterTargets(root, workspaceKind, allRepos), ...childAdapterTargets(root, policy.pointers ? allRepos.filter((repo) => repo.path !== '.') : [])];
+    const targets = [...rootAdapterTargets(root, workspaceKind, allRepos, autonomousFrom(project)), ...childAdapterTargets(root, policy.pointers ? allRepos.filter((repo) => repo.path !== '.') : [])];
     for (const target of targets) inventory.adapters.push({ classification: (await planAdapterReconciliation(target.path, target.section)).action });
     inventory.repoIds = buildRepoIdInventory(project);
   } catch { /* config problems are reported by the normal doctor path */ }
@@ -3930,7 +3935,7 @@ async function previewAdapterPlans(root, options: { adoptCustomAdapters?: boolea
   await assertRepoBoundaries(root, allRepos);
   const workspaceKind = firstYamlValue(project, 'workspace_kind') ?? 'unknown';
   const targets = [
-    ...rootAdapterTargets(root, workspaceKind, allRepos),
+    ...rootAdapterTargets(root, workspaceKind, allRepos, autonomousFrom(project)),
     ...childAdapterTargets(root, policy.pointers ? allRepos.filter((repo) => repo.path !== '.') : []),
   ];
   const duplicatePaths = new Set(detectDuplicateAdapterTargets(targets).map((duplicate) => duplicate.resolvedPath));
@@ -4028,7 +4033,7 @@ async function explainAdapterAgentOS(fileRaw: string, options: any = {}) {
     const repos = parseReposFromProjectYaml(project, { includeRoot: true });
     const workspaceKind = firstYamlValue(project, 'workspace_kind') ?? 'unknown';
     const targets = [
-      ...rootAdapterTargets(root, workspaceKind, repos),
+      ...rootAdapterTargets(root, workspaceKind, repos, autonomousFrom(project)),
       ...childAdapterTargets(root, policy.pointers ? repos.filter((repo) => repo.path !== '.') : []),
     ];
     match = targets.find((candidate) => resolve(candidate.path) === target) || null;
@@ -4271,7 +4276,7 @@ function repoYamlObject(r) {
   ].filter(Boolean));
 }
 
-function agentsBootloader({ workspaceKind, repos }) {
+function agentsBootloader({ workspaceKind, repos, autonomous = false }) {
   return [
     '# AGENTS.md',
     '',
@@ -4283,7 +4288,7 @@ function agentsBootloader({ workspaceKind, repos }) {
     'Read first: `.agentos/project.yaml`, `.agentos/memory.md`, `.agentos/handoff.md`, `.agentos/tasks.md`. Then load `.agentos/knowledge.md`, `.agentos/skills.md`, and only the repo/agent files relevant to the assigned task.',
     '',
     GUIDE_POINTER_LINE,
-    startupLoop('codex|opencode'),
+    startupLoop('codex|opencode', autonomous),
     '',
     'Rules: declare role + repo scope before editing; edit only in scope; never touch secrets/.env/migrations/prod config without approval; do not commit/push unless explicitly asked; verify.',
     '',
@@ -4297,7 +4302,7 @@ function repoSummary(repos) {
   return summary || 'current repo (single-repo workspace)';
 }
 
-function claudeAdapter() {
+function claudeAdapter(autonomous = false) {
   return [
     '# CLAUDE.md',
     '',
@@ -4308,7 +4313,7 @@ function claudeAdapter() {
     STATE_RULE_LINE,
     '',
     GUIDE_POINTER_LINE,
-    startupLoop('claude-code'),
+    startupLoop('claude-code', autonomous),
     '',
     'If launched from a child repo, follow pointer files back to the parent AgentOS root.',
     '',
@@ -4377,7 +4382,7 @@ function subrepoClaudePointer(repo) {
   ].join('\n').replaceAll('../', `${parent}/`).replaceAll('`..`', `\`${parent}\``);
 }
 
-function hermesAdapter() {
+function hermesAdapter(autonomous = false) {
   return [
     '# Hermes Agent Adapter',
     '',
@@ -4385,7 +4390,7 @@ function hermesAdapter() {
     'Hermes rules: load relevant skills; verify real file/git/terminal/browser state; do not trust subagent reports without checking.',
     STATE_RULE_LINE,
     GUIDE_POINTER_LINE,
-    startupLoop('hermes'),
+    startupLoop('hermes', autonomous),
     '',
   ].join('\n');
 }
@@ -4399,8 +4404,10 @@ const DISCOVERY_LINE = 'Next: open your engine here and run `agentos status`. To
 // workspace's handoff.md reached 404K chars and tasks.md 342K, and every engine reads both first.
 const STATE_RULE_LINE = 'State files: rewrite `.agentos/handoff.md` to the current state, never append to it; delete finished tasks from `.agentos/tasks.md`. Before an older entry leaves either file, copy it into a note under `.agentos/runs/`; never discard history.';
 const GUIDE_POINTER_LINE = 'Commands and workflows: `.agentos/guide.md` (load on demand). Run `agentos status` first.';
+const MANUAL_LOOP = 'If the work changed durable knowledge: `agentos brain propose <record> --from <file> --task <id>`; inspect `agentos brain policy` (manual by default). Agents may apply only with `--auto --by <self>` when the owner policy permits; otherwise leave it pending.';
+const AUTONOMOUS_LOOP = 'If the work changed durable knowledge (Brain policy: autonomous): stage one focused proposal, `agentos brain propose <record> --from <file> --task <id>`, then `agentos brain apply <proposal> --auto --by <self>`. Cite only facts from files you read; leave unknowns unknown. On refusal leave it pending.';
 // The startup loop, in each engine's own bootloader. The task id is the shared identity across engines.
-const startupLoop = (engine: string) => `Startup loop: \`agentos status\` → \`agentos context ${engine} --task <id>\` → work → \`agentos checkpoint --task <id> --progress "<done>" --next "<remaining>"\`. If the work changed durable knowledge: \`agentos brain propose <record> --from <file> --task <id>\`; inspect \`agentos brain policy\` (manual by default). Agents may apply only with \`--auto --by <self>\` when the owner policy permits; otherwise leave it pending. Next session or engine: \`agentos resume --task <id>\` (same <id>; no checkpoint yet means a clean start).`;
+const startupLoop = (engine: string, autonomous = false) => `Startup loop: \`agentos status\` → \`agentos context ${engine} --task <id>\` → work → \`agentos checkpoint --task <id> --progress "<done>" --next "<remaining>"\`. ${autonomous ? AUTONOMOUS_LOOP : MANUAL_LOOP} Next session or engine: \`agentos resume --task <id>\` (same <id>; no checkpoint yet means a clean start).`;
 
 // Shared by the AGENTS.md and CLAUDE.md child pointers. The CLI comes first on purpose: some engines
 // (observed: OpenCode run non-interactively) refuse reads outside their start directory, and a refused
@@ -4413,7 +4420,7 @@ const CHILD_CLI_FIRST_LINES = [
 // The single engine-agnostic operating guide. Every command named in backticks here must exist in
 // the CLI help; test/engine-discovery.test.js checks that, and test/workflow-guidance.test.js checks every
 // command and flag against the option allowlist and the ~4.5 KB budget, so the guide cannot drift from the binary.
-function guideMd() {
+function guideMd(autonomous = false) {
   return [
     '# AgentOS Guide',
     '',
@@ -4445,7 +4452,9 @@ function guideMd() {
     '- Before stopping or switching engines: `agentos checkpoint --task <id> --progress "<done>" --next "<remaining>" --check "<cmd>"`. Each `--check` runs as a receipt, from the workspace root or the `--cwd <dir>` after it (root-relative, or absolute inside the workspace); `--claim "<text>"` records what AgentOS did not observe.',
     '- Next engine: `agentos resume --task <id>`, then `context`. No checkpoint was written: `agentos checkpoint --recover --task <id>`.',
     '- Prefer these to `agentos run handoff`: it writes only a prose note, no receipts for `resume` to reconcile.',
-    '- Durable changes: `agentos brain propose <id-or-path> --from <file|-> --task <id> --summary "<why>"`; progress only: nothing. Review: `agentos brain preview <proposal>`. Manual default: owner runs `agentos brain apply <proposal> --by <owner>`. With owner-enabled `agentos brain policy`, agents may use `agentos brain apply <proposal> --auto --by <self>`. Refusals stay pending; never drop --auto, impersonate the owner or change policy.',
+    autonomous
+      ? '- Durable changes (Brain policy: autonomous): stage one focused proposal, `agentos brain propose <id-or-path> --from <file|-> --task <id> --summary "<why>"`, then `agentos brain apply <proposal> --auto --by <self>`; progress only: nothing. Cite only facts from files you read; leave unknowns unknown. Refusals stay pending; never drop --auto or change policy. Undo: `agentos brain revert <id> --last --auto --by <self>`.'
+      : '- Durable changes: `agentos brain propose <id-or-path> --from <file|-> --task <id> --summary "<why>"`; progress only: nothing. Review: `agentos brain preview <proposal>`. Manual default: owner runs `agentos brain apply <proposal> --by <owner>`. With owner-enabled `agentos brain policy`, agents may use `agentos brain apply <proposal> --auto --by <self>`. Refusals stay pending; never drop --auto, impersonate the owner or change policy.',
     '- Engine role config (`claude-code`, `codex`): `agentos agents sync <engine> --role <id> --dry-run`, then without `--dry-run`. When `agentos doctor` prints `Synced config: STALE`, re-run the command it prints; add `--replace` only when that line does.',
     '',
     '## Which command for which job',
@@ -5268,7 +5277,7 @@ async function checkpointContextFor(root: string, options: any): Promise<Checkpo
   for (const path of excluded) assertRelativeBoundaryPath(path);
   const bundle = await buildContextBundle({ ...input, task: task.id.replace(/-/g, ' ') });
   return {
-    root, engine, repos: input.repos, excluded, handoffText, objective, task, bundle,
+    root, engine, repos: input.repos, excluded, handoffText, objective, task, bundle, autonomous: isAutonomous(input.project.knowledge?.brain?.approval),
     projectName: firstYamlValue(input.projectText, 'name') ?? basename(root),
     acceptance: findAcceptance(await safeRead(join(root, '.agentos/tasks.md')), handoffText),
   };
@@ -5293,14 +5302,14 @@ async function brainCtxFor(root: string, cwd: string): Promise<BrainCtx> {
     evidence: { repos: parseReposFromProjectYaml(projectText, { includeRoot: true }), excluded: project.handoff?.exclude_paths ?? [] } };
 }
 const brainScopes = (projectText: string) => parseReposFromProjectYaml(projectText, { includeRoot: true }).map((repo) => repo.name);
-const BRAIN_WRITES = new Set(['init', 'register', 'propose', 'apply', 'verify', 'index']);
+const BRAIN_WRITES = new Set(['init', 'register', 'propose', 'apply', 'verify', 'index', 'revert']);
 
 /** `agentos brain`: writes (init/register/propose/apply/verify/index) take the workspace lock unless --dry-run; the rest are read-only. */
 export async function brainAgentOS(options: any = {}) {
   const cwd = options.cwd ?? process.cwd();
   const root = await findAgentOSRoot(cwd);
   if (!root) return { ok: false, text: 'AgentOS brain: FAIL\nNo .agentos directory found here or in parent directories.' };
-  if (options.auto && !['apply', 'preview', 'validate'].includes(options.subcommand)) throw new Error('--auto is supported only by brain apply, preview and validate.');
+  if (options.auto && !['apply', 'preview', 'validate', 'revert'].includes(options.subcommand)) throw new Error('--auto is supported only by brain apply, preview, validate and revert.');
   const [ref] = options.args ?? [];
   const run = async () => {
     const ctx = await brainCtxFor(root, cwd); // Read current policy inside the writer lock on mutation paths.
@@ -5318,6 +5327,8 @@ export async function brainAgentOS(options: any = {}) {
       case 'check': return checkBrain(ctx, options);
       case 'verify': return verifyBrain(ctx, ref, options);
       case 'index': return indexBrain(ctx, options);
+      case 'revert': return revertBrain(ctx, ref, options);
+      case 'log': return logBrain(ctx, ref, options);
       default: return { ok: false, text: BRAIN_USAGE };
     }
   };
@@ -5334,6 +5345,8 @@ export const BRAIN_USAGE = [
   '       agentos brain policy [--json]   (read owner-configured knowledge.brain.approval; default manual)',
   '       agentos brain preview <proposal> | validate <proposal> [--auto --by <actor>]   (read-only)',
   '       agentos brain apply <proposal> --by <actor> [--auto] [--dry-run]   (manual owner review by default; agents must use --auto)',
+  '       agentos brain revert <id-or-path> --last|--to <hash> --by <name> [--auto] [--force] [--dry-run]   (restore a snapshot saved by apply; --force over an unverified edit)',
+  '       agentos brain log [<id-or-path>] [--json]   (recent applies and reverts: actor, approval mode, hashes)',
   '       agentos brain verify <id-or-path> [--by <name>] [--dry-run]',
   '       agentos brain index [--adopt] [--dry-run]   (recreate/refresh the derived index.json and Obsidian index note; --adopt an older unmarked note)',
 ].join('\n');

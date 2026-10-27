@@ -4,6 +4,13 @@ All notable changes to AgentOS for Projects are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **Autonomous Brain mode.** `knowledge.brain.approval.mode: autonomous` (owner-set; `actors` required, optional `records` and `exclude`) lets an allowed agent apply its own proposal with `agentos brain apply <proposal> --auto --by <self>` for any workspace record kind, `replace` or `append`, including supersession. Still refused and left pending: validation rejections or conflicts, vault-canonical or excluded records, a checkpoint with an `observed-fail` receipt, bodies over 64,000 bytes. Applied proposals record `approval_mode: autonomous`; an invalid policy behaves as manual. Under this policy, the adapters, guide, checkpoint footer and context rules tell engines to apply their own proposals (run `agentos doctor --fix` after changing it). `manual` and `auto-append` are unchanged. See `docs/brain.md#autonomous-mode`.
+- **Brain snapshots.** Every apply (any mode) saves the target's previous file to `.agentos/brain/history/<record>/<body sha256>.md`. The history line now ends with `; approval <mode>`.
+- **`agentos brain revert <id> --last|--to <hash> --by <name> [--auto] [--force] [--dry-run]`** restores a snapshot under the writer lock, snapshots the replaced version (so a revert is revertible), and refuses missing or mismatched snapshots and hand-edited records unless `--force`.
+- **`agentos brain log [<id>]`** lists recent applies and reverts with actor, approval mode and hashes.
+
 ## [2.0.0] - 2026-10-27
 
 Project Brain (PR #57) and the opt-in Brain approval policy for automatic append updates (PR #60). The Brain works without Obsidian, and Obsidian stays an optional second location. Upgrade: run `agentos doctor --fix` once to refresh the adapters and `.agentos/guide.md`, then check the breaking changes below. Migration: `docs/migration-project-brain.md`. Acceptance: `docs/project-brain-acceptance.md`.

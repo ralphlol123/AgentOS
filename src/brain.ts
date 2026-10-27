@@ -14,7 +14,7 @@ import { lstat, readFile, readdir } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { parseDocument, stringify as stringifyYaml } from 'yaml';
 import { checkpointEvidence, loadCurrent, slugTask, type CheckpointContext } from './checkpoint.js';
-import { automaticApproval, parseApprovalPolicy, AUTO_APPEND_BYTES, AUTO_RECORD_BYTES } from './brain-policy.js';
+import { automaticApproval, inAutonomousScope, parseApprovalPolicy, AUTO_APPEND_BYTES, AUTO_RECORD_BYTES, AUTONOMOUS_RECORD_BYTES } from './brain-policy.js';
 import { subjectOf, taskTerms, termHits } from './context-builder.js';
 import { markdownHeadings } from './markdown.js';
 import { assertRelativeBoundaryPath, isWithin } from './task-scope.js';
@@ -30,11 +30,13 @@ export const BRAIN_DIR = '.agentos/brain';
 const PROPOSALS = `${BRAIN_DIR}/proposals`;
 const APPLIED = `${PROPOSALS}/applied`;
 const INDEX = `${BRAIN_DIR}/index.json`;
+/** Previous full record files, one per body hash: `<HISTORY>/<record-slug>/<sha256 of the body>.md`. Never records. */
+const HISTORY = `${BRAIN_DIR}/history`;
 const UNKNOWN = '(unknown — fill in)';
 const MAX_BYTES = 100000;
 const SINGLE_WRITER = 'One writer per workspace: proposals are applied one at a time under the workspace lock.';
 const SKIP_DIRS = new Set(['.git', 'node_modules', 'dist', 'build', 'coverage', 'vendor', 'worktrees', '.worktrees']);
-const SKIP_PATHS = new Set(['.agentos/runs', '.agentos/checkpoints', PROPOSALS, '.agentos/imports', '.agentos/skills', '.agentos/agents']);
+const SKIP_PATHS = new Set(['.agentos/runs', '.agentos/checkpoints', PROPOSALS, HISTORY, '.agentos/imports', '.agentos/skills', '.agentos/agents']);
 
 export interface BrainRecord {
   id: string | null; path: string; kind: string | null; scope: string | null; status: string; state: 'ok' | 'changed' | 'invalid';
@@ -670,11 +672,18 @@ export async function verifyBrain(ctx: BrainCtx, ref: string | undefined, option
 /** Inspect policy without changing project configuration or records. */
 export function policyBrain(ctx: BrainCtx, options: { json?: boolean }) {
   const parsed = parseApprovalPolicy(ctx.approval);
-  return out(options.json, !parsed.errors.length, { policy: parsed.policy, policy_hash: parsed.errors.length ? null : parsed.hash,
-    errors: parsed.errors, limits: { append_bytes: AUTO_APPEND_BYTES, record_bytes: AUTO_RECORD_BYTES }, authentication: false }, [
-    `AgentOS Brain approval: ${parsed.errors.length ? 'INVALID (automatic application disabled)' : parsed.policy.mode}`,
-    `Actors: ${parsed.policy.actors.join(', ') || '(none)'}`, `Records: ${parsed.policy.records.join(', ') || '(none)'}`,
-    ...parsed.errors, 'Only the owner configures knowledge.brain.approval in project.yaml. Names are supplied labels, not authenticated identities.',
+  const { policy } = parsed;
+  const autonomous = policy.mode === 'autonomous' && !parsed.errors.length;
+  const scope = `${policy.records.join(', ') || 'every workspace record'}${policy.exclude.length ? ` except ${policy.exclude.join(', ')}` : ''}`;
+  return out(options.json, !parsed.errors.length, { policy, policy_hash: parsed.errors.length ? null : parsed.hash, errors: parsed.errors,
+    limits: { append_bytes: AUTO_APPEND_BYTES, record_bytes: AUTO_RECORD_BYTES, autonomous_record_bytes: AUTONOMOUS_RECORD_BYTES },
+    ...(autonomous ? { scope } : {}), revert: REVERT_HINT, authentication: false }, [
+    `AgentOS Brain approval: ${parsed.errors.length ? 'INVALID (automatic application disabled)' : policy.mode}`,
+    `Actors: ${policy.actors.join(', ') || '(none)'}`,
+    ...(autonomous ? [`Scope: ${scope} (workspace-canonical only; vault records need owner review)`,
+      `Autonomous: an allowed agent applies its own proposal for any record kind (replace, append, supersession) with \`agentos brain apply <proposal> --auto --by <self>\`. Refused and left pending: validation rejections or conflicts, a checkpoint with an observed-fail check, bodies over ${AUTONOMOUS_RECORD_BYTES} bytes.`]
+      : [`Records: ${policy.records.join(', ') || '(none)'}`]),
+    ...parsed.errors, `Every apply snapshots the previous version. Roll back: \`${REVERT_HINT}\`; history: \`agentos brain log [<id>]\`.`, 'Only the owner configures knowledge.brain.approval in project.yaml. Names are supplied labels, not authenticated identities.',
     'Agents apply only with --auto --by <self>; refusals remain pending for owner review. This policy is not a sandbox.',
   ]);
 }
@@ -891,11 +900,12 @@ export async function applyBrain(ctx: BrainCtx, ref: string | undefined, options
   const supersedes = [...new Set([...asList(target.fields.supersedes), ...result.supersede.map((record) => record.id)])];
   const targetText = patchFrontmatter(`${split.head}${split.fm}${split.close}${result.newBody}`, {
     status: 'accepted', source_hash: newHash, updated_at: now, ...(supersedes.length ? { supersedes } : {}),
-    history: [...(target.fields.history ?? []), `${now} applied ${proposal.rel} by ${by || '(--by not set)'} (proposed by ${proposal.fields.proposed_by ?? 'unknown'}): ${short(target.source_hash)} -> ${short(newHash)}${approval ? `; approval auto-append (${approval.policy_hash})` : ''}`],
+    history: [...(target.fields.history ?? []), `${now} applied ${proposal.rel} by ${by || '(--by not set)'} (proposed by ${proposal.fields.proposed_by ?? 'unknown'}): ${short(target.source_hash)} -> ${short(newHash)}; approval ${approval ? `${approval.mode} (${approval.policy_hash})` : 'manual'}`],
   });
   const appliedRel = `${APPLIED}/${basename(proposal.rel)}`;
-  const appliedText = patchFrontmatter(proposal.text, { status: 'applied', applied_at: now, applied_by: by || '(--by not set)', approval_mode: approval ? 'auto-append' : 'manual', ...(approval ? { approval_policy_hash: approval.policy_hash } : {}) });
+  const appliedText = patchFrontmatter(proposal.text, { status: 'applied', applied_at: now, applied_by: by || '(--by not set)', approval_mode: approval?.mode ?? 'manual', ...(approval ? { approval_policy_hash: approval.policy_hash } : {}) });
   const stale = options.dryRun ? NO_COMMIT : await commit(ctx, async () => {
+    for (const record of [target, ...result.supersede]) await saveSnapshot(ctx, record);
     await writeFileAtomic(target.abs, targetText);
     for (const old of result.supersede) await writeFileAtomic(old.abs, patchFrontmatter(old.text, { status: 'superseded', superseded_by: target.id, updated_at: now }));
     await mkdirTracked(join(ctx.root, APPLIED));
@@ -905,6 +915,90 @@ export async function applyBrain(ctx: BrainCtx, ref: string | undefined, options
   return out(options.json, true, { ...data, applied_path: appliedRel, applied_by: by || null, source_hash: newHash, ...stale.flags }, [
     `AgentOS brain apply${options.dryRun ? ' (dry run; nothing written)' : ''}: ${proposal.rel}`, ...planLines(proposal, result),
     `Applied by: ${by || '(not set; a real apply needs --by <owner>)'} (proposed by ${proposal.fields.proposed_by ?? 'unknown'})`, 'Validation:', ...validationLines(result),
+    ...(stale.flags.index_stale ? [] : [`${options.dryRun ? 'Would regenerate' : 'Regenerated'}: ${INDEX}`]), ...stale.lines, SINGLE_WRITER,
+  ]);
+}
+
+// --- snapshots, revert, log -------------------------------------------------------------------------
+
+const REVERT_HINT = 'agentos brain revert <id> --last|--to <hash> --by <name> [--dry-run]';
+const historyDir = (id: string) => `${HISTORY}/${slug(id.slice('brain:'.length)) || 'record'}`;
+
+/** Save a record's full file before it is overwritten, named by its body hash (Windows-safe: hex only). Inside the
+ *  caller's transaction. ponytail: same body + different frontmatter keeps only the newest file for that hash. */
+async function saveSnapshot(ctx: BrainCtx, record: BrainRecord) {
+  await mkdirTracked(join(ctx.root, HISTORY));
+  await mkdirTracked(join(ctx.root, historyDir(record.id)));
+  await writeFileAtomic(join(ctx.root, historyDir(record.id), `${record.current_hash}.md`), record.text);
+}
+
+/** Apply and revert history lines (the frontmatter `history` list is the log; nothing else is stored). */
+const LOG_LINE = /^(\S+) (applied (\S+)|reverted to ([a-f0-9]{64})) by (.+?)(?: \(proposed by [^)]*\))?: ([a-f0-9]{8}|\(none\)) -> ([a-f0-9]{8}|\(none\))(?:; approval ([a-z-]+))?/;
+function logEntries(record: BrainRecord) {
+  return asList(record.fields.history).flatMap((line) => {
+    const m = line.match(LOG_LINE);
+    return m ? [{ at: m[1], id: record.id, action: m[3] ? 'applied' : 'reverted', actor: m[5], mode: m[8] ?? 'manual', from: m[6], to: m[7], proposal: m[3] as string | undefined, hash: m[4] as string | undefined }] : [];
+  });
+}
+
+/** `agentos brain log [<id>]`: recent applies and reverts, newest first. Read-only. */
+export async function logBrain(ctx: BrainCtx, ref: string | undefined, options: { json?: boolean }) {
+  const records = valid(await loadBrain(ctx.root, ctx.repos, ctx.vault));
+  const only = ref ? findRecord(records, ctx, ref) : null;
+  if (ref && !only) return out(options.json, false, { entries: [] }, [`No Brain record ${ref}. List them with \`agentos brain list\`.`]);
+  const entries = (only ? [only] : records).flatMap(logEntries).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 50);
+  return out(options.json, true, { entries }, entries.length
+    ? entries.map((e) => `- ${e.at} ${e.id} ${e.action === 'applied' ? `applied ${e.proposal}` : `reverted to ${e.hash.slice(0, 12)}`} by ${e.actor} (${e.mode}): ${e.from} -> ${e.to}`)
+    : ['No applies or reverts recorded yet.']);
+}
+
+interface RevertOptions { to?: unknown; last?: boolean; by?: unknown; auto?: boolean; force?: boolean; dryRun?: boolean; json?: boolean }
+
+/** `agentos brain revert`: restore a snapshot through the same commit path as apply (writer lock, snapshot of the replaced
+ *  state, index refresh). The restored file keeps the current history plus one `reverted to` line, so a revert is revertible. */
+export async function revertBrain(ctx: BrainCtx, ref: string | undefined, options: RevertOptions) {
+  if (!ref || Boolean(options.last) === (options.to !== undefined)) throw new Error(`Usage: ${REVERT_HINT} [--auto] [--force]   (exactly one of --last or --to)`);
+  const by = typeof options.by === 'string' ? options.by.trim() : '';
+  if (!by && !options.dryRun) throw new Error('agentos brain revert needs --by <name>: the reverter is recorded in history. Nothing was written.');
+  const record = findRecord(await loadBrain(ctx.root, ctx.repos, ctx.vault), ctx, ref);
+  if (!record) throw new Error(`No Brain record ${ref}.`);
+  if (record.state === 'invalid') throw new Error(`${record.path} has invalid metadata:\n${record.problems.join('\n')}\nFix it by hand first. Nothing was written.`);
+  const refuse = (reasons: string[], data: Record<string, any> = {}) => out(options.json, false, { id: record.id, reasons, ...data }, ['AgentOS brain revert: REFUSED', ...reasons.map((reason) => `- ${reason}`), 'Nothing was written.']);
+  const parsed = parseApprovalPolicy(ctx.approval);
+  if (options.auto) {
+    const reasons = [...parsed.errors];
+    if (parsed.policy.mode !== 'autonomous') reasons.push('--auto revert needs an owner-configured autonomous policy; otherwise the owner reverts.');
+    if (!parsed.policy.actors.includes(by)) reasons.push('The reverting actor must be explicitly allowed by the owner policy.');
+    if (!inAutonomousScope(parsed.policy, record.id)) reasons.push(`${record.id} is excluded or outside the owner policy's records.`);
+    if (record.location !== 'workspace') reasons.push(`${record.id} is vault-canonical; vault records need owner review.`);
+    if (reasons.length) return refuse(reasons, { review_required: true });
+  }
+  if (record.state === 'changed' && !options.force) return refuse([`${record.id} was edited since its source_hash (stale: verified ${short(record.source_hash)}, body now ${short(record.current_hash)}); review it, or pass --force (the edit is snapshotted first).`]);
+  let prefix = '';
+  if (options.last) {
+    const last = logEntries(record).at(-1);
+    if (!last || last.to !== short(record.source_hash)) return refuse([`The history of ${record.id} does not end with an apply or revert of its current version; pick a snapshot with --to <hash> (\`agentos brain log ${record.id}\`).`]);
+    prefix = last.from;
+  } else prefix = String(options.to).toLowerCase();
+  if (!/^[a-f0-9]{8,64}$/.test(prefix)) return refuse(['--to needs a snapshot hash (8 to 64 hex characters).']);
+  const dir = historyDir(record.id);
+  const names = (await readdir(join(ctx.root, dir)).catch(() => [] as string[])).filter((name) => /^[a-f0-9]{64}\.md$/.test(name) && name.startsWith(prefix));
+  if (names.length !== 1) return refuse([names.length ? `Snapshot prefix ${prefix} is ambiguous in ${dir}/; give more characters.` : `No snapshot ${prefix} for ${record.id} under ${dir}/.`]);
+  const hash = names[0].slice(0, 64);
+  const text = await readUtf8(join(ctx.root, dir, names[0]));
+  if (sha256(splitFrontmatter(text).body) !== hash) return refuse([`Snapshot ${dir}/${names[0]} does not match its hash (changed on disk); restore it or pick another.`]);
+  if (hash === record.current_hash) return out(options.json, true, { id: record.id, noop: true, hash }, [`AgentOS brain revert: ${record.id} is already at ${short(hash)}; nothing written.`]);
+  const now = new Date().toISOString();
+  const forced = record.state === 'changed' ? '; forced over an unverified edit' : '';
+  const mode = options.auto ? `autonomous (${parsed.hash})` : 'manual';
+  const next = patchFrontmatter(text, { updated_at: now, history: [...asList(record.fields.history), `${now} reverted to ${hash} by ${by || '(--by not set)'}: ${short(record.current_hash)} -> ${short(hash)}; approval ${mode}${forced}`] });
+  const restored = parseRecord(record.path, next, ctx.repos, record.location, record.abs);
+  if (restored.state === 'invalid' || restored.id !== record.id) return refuse([`The snapshot would not be a valid ${record.id} at ${record.path}: ${restored.problems.join('; ') || `its id is ${restored.id}`}`]);
+  const stale = options.dryRun ? NO_COMMIT : await commit(ctx, async () => { await saveSnapshot(ctx, record); await writeFileAtomic(record.abs, next); });
+  return out(options.json, true, { dryRun: Boolean(options.dryRun), id: record.id, path: record.path, from: record.current_hash, to: hash, snapshot: `${dir}/${record.current_hash}.md`, ...stale.flags }, [
+    `AgentOS brain revert${options.dryRun ? ' (dry run; nothing written)' : ''}: ${record.id} (${record.path}) ${short(record.current_hash)} -> ${short(hash)}`,
+    `${options.dryRun ? 'Would snapshot' : 'Snapshotted'} the replaced version: ${dir}/${record.current_hash}.md (revert it with \`agentos brain revert ${record.id} --last --by <name>\`)`,
+    'Body diff:', ...diffLines(record.body, restored.body),
     ...(stale.flags.index_stale ? [] : [`${options.dryRun ? 'Would regenerate' : 'Regenerated'}: ${INDEX}`]), ...stale.lines, SINGLE_WRITER,
   ]);
 }
