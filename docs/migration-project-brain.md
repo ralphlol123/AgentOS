@@ -1,4 +1,4 @@
-# Migrating to the Project Brain (1.1 → Unreleased)
+# Migrating to the Project Brain (1.1 → 2.0.0)
 
 The Project Brain ([brain.md](brain.md)) works without Obsidian; Obsidian is an optional second *location* ([obsidian.md](obsidian.md)). Nothing below runs automatically: `doctor --fix` never moves records or rewrites `knowledge.obsidian`. Each path was run on a scratch workspace with the branch build (2026-10-26).
 

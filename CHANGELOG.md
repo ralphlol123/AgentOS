@@ -4,18 +4,9 @@ All notable changes to AgentOS for Projects are documented here.
 
 ## [Unreleased]
 
-### Added
+## [2.0.0] - 2026-10-27
 
-- Opt-in `knowledge.brain.approval` policy (`manual` by default, or `auto-append` with exact actor/record allowlists). `brain policy` explains it; `brain preview|validate|apply --auto --by <self>` evaluates it. Small append-only updates to accepted workspace notes/features can apply after current observed-pass checkpoint evidence. Architecture, decisions, conventions, replacements, supersession, stale/missing evidence and detected conflicts require review. Refusals preserve pending proposals. History and applied metadata retain declared actors, approval mode and policy hash; this is not authenticated identity or a sandbox.
-- Engine bootloaders, context, checkpoint output and the packaged Brain guide explain policy-based upkeep. Existing manual application and checkpoints stay available; agents must not change policy or bypass a refusal.
-
-### Fixed
-
-- Checkpoint fingerprints include bounded changed-file content hashes, so same-length code edits invalidate test receipts. Incomplete content evidence is treated as stale and cannot authorize automatic Brain application. Older checkpoints remain readable but need fresh checks before their receipts are current.
-
-## [2.0.0] - 2026-10-26
-
-Project Brain (PR #57). The Brain works without Obsidian, and Obsidian stays an optional second location. Upgrade: run `agentos doctor --fix` once to refresh the adapters and `.agentos/guide.md`, then check the breaking changes below. Migration: `docs/migration-project-brain.md`. Acceptance: `docs/project-brain-acceptance.md`.
+Project Brain (PR #57) and the opt-in Brain approval policy for automatic append updates (PR #60). The Brain works without Obsidian, and Obsidian stays an optional second location. Upgrade: run `agentos doctor --fix` once to refresh the adapters and `.agentos/guide.md`, then check the breaking changes below. Migration: `docs/migration-project-brain.md`. Acceptance: `docs/project-brain-acceptance.md`.
 
 ### Breaking changes
 
@@ -27,6 +18,7 @@ Project Brain (PR #57). The Brain works without Obsidian, and Obsidian stays an 
 - **`checkpoint --check <cmd> --cwd <dir>`** refuses a directory outside the workspace, also with `--dry-run` (which used to echo it), and `--cwd` is now workspace-root-relative from any subdirectory.
 - **`agentos context` output changes:** without a `task_scope` it prints `Edit scope: not set (…)` instead of `(none; read-only task)`; it opens with a project overview from `.agentos/memory.md`; a record already shown by section is omitted as `covered` (`--json`: reason `covered` with `via`) instead of `no-match`.
 - **`agentos <command> --help` / `-h`** prints that command's usage and exits 0, running nothing, instead of failing with `Unknown option: --help`.
+- **Checkpoints from before 2.0.0 lose their current test receipts.** Fingerprints now hash changed-file contents, so `resume` lists an older checkpoint's passes as `stale (recheck)` even on an unchanged tree, and while changed files exceed the read bounds or cannot be read, every receipt is stale. Re-run the checks (`agentos checkpoint --task <id> --check "<cmd>"`) after upgrading.
 
 ### Added
 
@@ -36,6 +28,8 @@ Project Brain (PR #57). The Brain works without Obsidian, and Obsidian stays an 
 - **Checkpoint-driven knowledge proposals (Project Brain goal slice 5).** `agentos brain propose <id> --from <file> --task <id>` ties a proposal to the task's current checkpoint (`task`, `checkpoint`, `evidence`: changed paths and receipt states); a progress-only checkpoint (no changed file, no `observed-pass` check) stages nothing, and re-staging the same event is a no-op (`duplicate: true`). The checkpoint output, the startup loop and `.agentos/guide.md` ask the engine to review whether completed work changed durable knowledge — an instruction, not a runtime hook; AgentOS calls no model and `apply` stays the owner's step. Run `agentos doctor --fix` to refresh the adapters and guide. See `docs/brain.md#knowledge-upkeep-at-completion`.
 - `docs/migration-project-brain.md`: moving `link-obsidian` setups to `obsidian link` and `local.yaml`, relocating vault-canonical records before disabling the integration (a manual, reviewed move; never a second copy), and WSL paths.
 - CI: a native Windows job (Node 24, `windows-latest`).
+- Opt-in `knowledge.brain.approval` policy (`manual` by default, or `auto-append` with exact actor/record allowlists). `brain policy` explains it; `brain preview|validate|apply --auto --by <self>` evaluates it. Small append-only updates to accepted workspace notes/features can apply after current observed-pass checkpoint evidence. Architecture, decisions, conventions, replacements, supersession, stale/missing evidence and detected conflicts require review. Refusals preserve pending proposals. History and applied metadata retain declared actors, approval mode and policy hash; this is not authenticated identity or a sandbox.
+- Engine bootloaders, context, checkpoint output and the packaged Brain guide explain policy-based upkeep. Existing manual application and checkpoints stay available; agents must not change policy or bypass a refusal.
 
 ### Changed
 
@@ -51,6 +45,7 @@ Project Brain (PR #57). The Brain works without Obsidian, and Obsidian stays an 
 - **Reliability (slice 2).** `obsidian status` resolves a relative vault against the workspace root, so it agrees from any subdirectory. An unreadable directory or vault folder (EACCES, I/O) is no longer read as empty: records `index.json` last knew there are `unreadable`/Missing, and absent, unreadable and emptied vault folders are reported differently.
 - A stale proposal rejection names the actual cause (the record body drifted, or the base was re-verified). `brain list` no longer doubles the parentheses for unreadable records.
 - **Project Brain independent of Obsidian (Project Brain slice 1).** An absent, disabled (`knowledge.obsidian.enabled: false`, new) or invalid `knowledge.obsidian` block no longer blocks `brain`, `context`, `checkpoint` or `resume`; an invalid block is a `doctor` problem and a `context --json` warning. With `canonical: workspace` a missing linked folder is a warning, not Missing, so `context --require-complete` passes. Records whose only copy is in an offline vault, or in a vault the integration no longer reads, stay under Missing. A corrupted `.agentos/project.yaml` now fails those commands instead of reading as an empty project. A Brain write is kept when regenerating `.agentos/brain/index.json` fails (reported as stale). See `docs/brain.md#independent-of-obsidian`, `docs/project-brain-acceptance.md`.
+- Checkpoint fingerprints include bounded changed-file content hashes, so same-length code edits invalidate test receipts. Incomplete content evidence is treated as stale and cannot authorize automatic Brain application. Older checkpoints remain readable but need fresh checks before their receipts are current.
 
 ## [1.1.0] - 2026-10-26
 
