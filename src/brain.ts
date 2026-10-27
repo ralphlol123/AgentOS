@@ -13,7 +13,8 @@ import { createHash } from 'node:crypto';
 import { lstat, readFile, readdir } from 'node:fs/promises';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { parseDocument, stringify as stringifyYaml } from 'yaml';
-import { checkpointEvidence, loadCurrent, slugTask } from './checkpoint.js';
+import { checkpointEvidence, loadCurrent, slugTask, type CheckpointContext } from './checkpoint.js';
+import { automaticApproval, parseApprovalPolicy, AUTO_APPEND_BYTES, AUTO_RECORD_BYTES } from './brain-policy.js';
 import { subjectOf, taskTerms, termHits } from './context-builder.js';
 import { markdownHeadings } from './markdown.js';
 import { assertRelativeBoundaryPath, isWithin } from './task-scope.js';
@@ -24,7 +25,7 @@ export const STATUSES = ['proposed', 'accepted', 'verified', 'superseded'];
 /** Metadata keys plus four descriptive keys common in ADR/Obsidian notes. Anything else (task_scope, rules,
  *  permissions, engine settings) is refused: a Brain note is data, never instructions. */
 export const RECORD_KEYS = ['id', 'kind', 'scope', 'status', 'sources', 'source_hash', 'verified_at', 'verified_by', 'supersedes', 'superseded_by', 'updated_at', 'history', 'title', 'date', 'tags', 'aliases'];
-const PROPOSAL_KEYS = ['target', 'target_path', 'base_hash', 'proposed_by', 'status', 'mode', 'summary', 'supersedes', 'task', 'checkpoint', 'evidence', 'created_at', 'applied_at', 'applied_by'];
+const PROPOSAL_KEYS = ['target', 'target_path', 'base_hash', 'proposed_by', 'status', 'mode', 'summary', 'supersedes', 'task', 'checkpoint', 'evidence', 'created_at', 'applied_at', 'applied_by', 'approval_mode', 'approval_policy_hash'];
 export const BRAIN_DIR = '.agentos/brain';
 const PROPOSALS = `${BRAIN_DIR}/proposals`;
 const APPLIED = `${PROPOSALS}/applied`;
@@ -47,7 +48,7 @@ export interface BrainRecord {
 export interface VaultBinding { vault: string; dest: string; dir: string; canonical: 'workspace' | 'vault' }
 /** `vaultOff`: why the optional Obsidian integration is not used (disabled or invalid config); see docs/obsidian.md.
  *  `note`: the linked folder's index note (absolute path) and the project title for its heading, when one is configured. */
-export interface BrainCtx { root: string; cwd: string; repos: string[]; vault?: VaultBinding | null; vaultOff?: string | null; note?: { abs: string; name: string } | null }
+export interface BrainCtx { root: string; cwd: string; repos: string[]; vault?: VaultBinding | null; vaultOff?: string | null; note?: { abs: string; name: string } | null; approval?: unknown; evidence?: Pick<CheckpointContext, 'repos' | 'excluded'> }
 
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
 const norm = (text: string) => text.replace(/\s+/g, ' ').trim();
@@ -666,6 +667,18 @@ export async function verifyBrain(ctx: BrainCtx, ref: string | undefined, option
   ]);
 }
 
+/** Inspect policy without changing project configuration or records. */
+export function policyBrain(ctx: BrainCtx, options: { json?: boolean }) {
+  const parsed = parseApprovalPolicy(ctx.approval);
+  return out(options.json, !parsed.errors.length, { policy: parsed.policy, policy_hash: parsed.errors.length ? null : parsed.hash,
+    errors: parsed.errors, limits: { append_bytes: AUTO_APPEND_BYTES, record_bytes: AUTO_RECORD_BYTES }, authentication: false }, [
+    `AgentOS Brain approval: ${parsed.errors.length ? 'INVALID (automatic application disabled)' : parsed.policy.mode}`,
+    `Actors: ${parsed.policy.actors.join(', ') || '(none)'}`, `Records: ${parsed.policy.records.join(', ') || '(none)'}`,
+    ...parsed.errors, 'Only the owner configures knowledge.brain.approval in project.yaml. Names are supplied labels, not authenticated identities.',
+    'Agents apply only with --auto --by <self>; refusals remain pending for owner review. This policy is not a sandbox.',
+  ]);
+}
+
 // --- proposals --------------------------------------------------------------------------------------
 
 interface Proposal { rel: string; applied: boolean; text: string; fields: Record<string, any>; body: string; problems: string[] }
@@ -695,6 +708,9 @@ function validateProposal(ctx: BrainCtx, records: BrainRecord[], proposal: Propo
   const reject = (check: string, message: string) => rejections.push({ check, message });
   const f = proposal.fields;
   for (const problem of proposal.problems) reject('schema', problem);
+  for (const key of ['applied_at', 'applied_by', 'approval_mode', 'approval_policy_hash']) {
+    if (f[key] !== undefined) reject('schema', `${proposal.rel}: ${key} is written only when a proposal is applied`);
+  }
   if (f.status !== 'proposed' && !proposal.problems.length) reject('schema', `${proposal.rel}: status is ${JSON.stringify(f.status)}, expected proposed`);
   if (!['replace', 'append'].includes(f.mode)) reject('schema', `${proposal.rel}: mode must be replace or append`);
   if (!proposal.body.trim()) reject('schema', `${proposal.rel}: the proposal has no content`);
@@ -819,40 +835,55 @@ export async function proposeBrain(ctx: BrainCtx, ref: string | undefined, optio
     `AgentOS brain propose${options.dryRun ? ' (dry run)' : ''}: ${options.dryRun ? 'would write' : 'wrote'} ${rel}`,
     `Target: ${target.id} (${target.path}); base_hash ${short(target.source_hash)}; proposed_by ${fields.proposed_by}`, ...validationLines(result),
     `Next: agentos brain preview ${rel}`,
+    'Agents: inspect `agentos brain policy`. Only an owner-enabled policy permits `agentos brain apply <proposal> --auto --by <self>`; a refusal stays pending. Never drop --auto to bypass review.',
   ]);
 }
 
-export async function previewBrain(ctx: BrainCtx, ref: string | undefined, options: { json?: boolean }) {
+async function autoReview(ctx: BrainCtx, proposal: Proposal, records: BrainRecords, result: ReturnType<typeof validateProposal>, actor?: string) {
+  const incomplete = Boolean(records.unreadable?.length) || records.some((record) => record.state === 'invalid')
+    || (await brainMissing(ctx.root, records, ctx.vault, ctx.vaultOff)).length > 0
+    || (await lastKnown(ctx.root)).some((known) => !records.some((record) => record.id === known.id && record.path === known.path && record.location === (known.location ?? 'workspace')));
+  return automaticApproval(ctx, proposal, result.target, result.newBody, actor, { ...result, incomplete });
+}
+
+export async function previewBrain(ctx: BrainCtx, ref: string | undefined, options: { json?: boolean; auto?: boolean; by?: string }) {
   if (!ref) throw new Error('Usage: agentos brain preview <proposal> [--json]');
   const proposal = await loadProposal(ctx, ref);
   if (proposal.applied) return out(options.json, true, { applied: true, path: proposal.rel }, [`${proposal.rel}: already applied; nothing to preview.`]);
-  const result = validateProposal(ctx, await loadBrain(ctx.root, ctx.repos, ctx.vault), proposal);
-  return out(options.json, true, { path: proposal.rel, target: result.target?.id ?? null, rejections: result.rejections, flags: result.flags, supersedes: result.supersede.map((record) => record.id), new_body: result.newBody },
-    [`AgentOS brain preview: ${proposal.rel} (read-only)`, ...planLines(proposal, result), 'Validation:', ...validationLines(result)]);
+  const records = await loadBrain(ctx.root, ctx.repos, ctx.vault);
+  const result = validateProposal(ctx, records, proposal);
+  const approval = options.auto ? await autoReview(ctx, proposal, records, result, options.by) : null;
+  return out(options.json, !approval || approval.eligible, { path: proposal.rel, target: result.target?.id ?? null, rejections: result.rejections, flags: result.flags, supersedes: result.supersede.map((record) => record.id), new_body: result.newBody, ...(approval ? { approval } : {}) },
+    [`AgentOS brain preview: ${proposal.rel} (read-only)`, ...planLines(proposal, result), 'Validation:', ...validationLines(result), ...approvalLines(approval)]);
 }
 
-export async function validateBrain(ctx: BrainCtx, ref: string | undefined, options: { json?: boolean }) {
+export async function validateBrain(ctx: BrainCtx, ref: string | undefined, options: { json?: boolean; auto?: boolean; by?: string }) {
   if (!ref) throw new Error('Usage: agentos brain validate <proposal> [--json]');
   const proposal = await loadProposal(ctx, ref);
   if (proposal.applied) return out(options.json, true, { applied: true, path: proposal.rel, rejections: [], flags: [] }, [`${proposal.rel}: already applied.`]);
-  const result = validateProposal(ctx, await loadBrain(ctx.root, ctx.repos, ctx.vault), proposal);
-  const ok = result.rejections.length === 0;
-  return out(options.json, ok, { path: proposal.rel, target: result.target?.id ?? null, rejections: result.rejections, flags: result.flags },
-    [`AgentOS brain validate: ${proposal.rel}: ${ok ? 'OK' : 'REJECTED'}`, ...validationLines(result)]);
+  const records = await loadBrain(ctx.root, ctx.repos, ctx.vault);
+  const result = validateProposal(ctx, records, proposal);
+  const approval = options.auto ? await autoReview(ctx, proposal, records, result, options.by) : null;
+  const ok = result.rejections.length === 0 && (!approval || approval.eligible);
+  return out(options.json, ok, { path: proposal.rel, target: result.target?.id ?? null, rejections: result.rejections, flags: result.flags, ...(approval ? { approval } : {}) },
+    [`AgentOS brain validate: ${proposal.rel}: ${ok ? 'OK' : 'REJECTED'}`, ...validationLines(result), ...approvalLines(approval)]);
 }
 
-/** Applying is the owner's step: a real apply needs an explicit `--by <applier>` (never defaulted to the proposer). Instruction-level and
- *  auditable, not enforcement: anyone who can run the CLI can pass `--by`. */
-export async function applyBrain(ctx: BrainCtx, ref: string | undefined, options: { by?: unknown; dryRun?: boolean; json?: boolean }) {
-  if (!ref) throw new Error('Usage: agentos brain apply <proposal> --by <owner> [--dry-run] [--json]');
+/** Manual application remains the owner workflow; --auto adds a policy check, never authentication. */
+const approvalLines = (approval: Awaited<ReturnType<typeof automaticApproval>> | null) => approval
+  ? [`Automatic application: ${approval.eligible ? 'ELIGIBLE' : 'REVIEW REQUIRED'}`, ...approval.reasons.map((reason) => `- ${reason}`)] : [];
+
+export async function applyBrain(ctx: BrainCtx, ref: string | undefined, options: { by?: unknown; auto?: boolean; dryRun?: boolean; json?: boolean }) {
+  if (!ref) throw new Error('Usage: agentos brain apply <proposal> --by <actor> [--auto] [--dry-run] [--json]');
   const by = typeof options.by === 'string' ? options.by.trim() : '';
-  if (!by && !options.dryRun) throw new Error('agentos brain apply needs --by <owner>: applying a proposal is the owner\'s step and the applier is recorded in history. Engines stage with `agentos brain propose` and never apply. Nothing was written.');
+  if (!by && !options.dryRun) throw new Error('agentos brain apply needs --by <owner>: the applier is recorded in history. Agents use --auto with their own allowed identity; without --auto application requires owner review. Nothing was written.');
   const proposal = await loadProposal(ctx, ref);
   if (proposal.applied) return out(options.json, true, { applied: true, noop: true, path: `${APPLIED}/${basename(proposal.rel)}` }, [`AgentOS brain apply: ${basename(proposal.rel)} was already applied (${APPLIED}/); no-op, nothing written.`]);
   const records = await loadBrain(ctx.root, ctx.repos, ctx.vault);
   const result = validateProposal(ctx, records, proposal);
-  const data = { dryRun: Boolean(options.dryRun), path: proposal.rel, target: result.target?.id ?? null, rejections: result.rejections, flags: result.flags };
-  if (result.rejections.length) return out(options.json, false, data, ['AgentOS brain apply: REFUSED', ...validationLines(result), 'Nothing was written.']);
+  const approval = options.auto ? await autoReview(ctx, proposal, records, result, by) : null;
+  const data = { dryRun: Boolean(options.dryRun), path: proposal.rel, target: result.target?.id ?? null, rejections: result.rejections, flags: result.flags, ...(approval ? { approval } : {}) };
+  if (result.rejections.length || (approval && !approval.eligible)) return out(options.json, false, { ...data, review_required: Boolean(approval && !approval.eligible) }, ['AgentOS brain apply: REFUSED', ...validationLines(result), ...approvalLines(approval), 'Nothing was written; leave the proposal pending for owner review.']);
   const { target } = result;
   const now = new Date().toISOString();
   const newHash = sha256(result.newBody);
@@ -860,10 +891,10 @@ export async function applyBrain(ctx: BrainCtx, ref: string | undefined, options
   const supersedes = [...new Set([...asList(target.fields.supersedes), ...result.supersede.map((record) => record.id)])];
   const targetText = patchFrontmatter(`${split.head}${split.fm}${split.close}${result.newBody}`, {
     status: 'accepted', source_hash: newHash, updated_at: now, ...(supersedes.length ? { supersedes } : {}),
-    history: [...(target.fields.history ?? []), `${now} applied ${proposal.rel} by ${by || '(--by not set)'} (proposed by ${proposal.fields.proposed_by ?? 'unknown'}): ${short(target.source_hash)} -> ${short(newHash)}`],
+    history: [...(target.fields.history ?? []), `${now} applied ${proposal.rel} by ${by || '(--by not set)'} (proposed by ${proposal.fields.proposed_by ?? 'unknown'}): ${short(target.source_hash)} -> ${short(newHash)}${approval ? `; approval auto-append (${approval.policy_hash})` : ''}`],
   });
   const appliedRel = `${APPLIED}/${basename(proposal.rel)}`;
-  const appliedText = patchFrontmatter(proposal.text, { status: 'applied', applied_at: now, applied_by: by || '(--by not set)' });
+  const appliedText = patchFrontmatter(proposal.text, { status: 'applied', applied_at: now, applied_by: by || '(--by not set)', approval_mode: approval ? 'auto-append' : 'manual', ...(approval ? { approval_policy_hash: approval.policy_hash } : {}) });
   const stale = options.dryRun ? NO_COMMIT : await commit(ctx, async () => {
     await writeFileAtomic(target.abs, targetText);
     for (const old of result.supersede) await writeFileAtomic(old.abs, patchFrontmatter(old.text, { status: 'superseded', superseded_by: target.id, updated_at: now }));

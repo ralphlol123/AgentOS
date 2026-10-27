@@ -1,7 +1,7 @@
 <!-- agentos:managed:start -->
 # AgentOS Guide
 
-How to operate an AgentOS workspace from any coding engine. This is a command map, not project state: `agentos status` prints the objective, open tasks and verification commands; read `.agentos/handoff.md` and `.agentos/tasks.md` only when file reads work.
+How to operate AgentOS: `agentos status` shows the objective, open tasks and checks; read `.agentos/handoff.md` and `.agentos/tasks.md` only when file reads work.
 
 ## Start
 
@@ -29,7 +29,7 @@ How to operate an AgentOS workspace from any coding engine. This is a command ma
 - Before stopping or switching engines: `agentos checkpoint --task <id> --progress "<done>" --next "<remaining>" --check "<cmd>"`. Each `--check` runs as a receipt, from the workspace root or the `--cwd <dir>` after it (root-relative, or absolute inside the workspace); `--claim "<text>"` records what AgentOS did not observe.
 - Next engine: `agentos resume --task <id>`, then `context`. No checkpoint was written: `agentos checkpoint --recover --task <id>`.
 - Prefer these to `agentos run handoff`: it writes only a prose note, no receipts for `resume` to reconcile.
-- After the checkpoint, ask: did this work change durable knowledge (architecture, decision, convention)? If yes: `agentos brain propose <id-or-path> --from <file|-> --task <id> --summary "<why>"` (ids: `agentos brain list`); else nothing. Engines propose, never apply; the owner runs `agentos brain preview <proposal>`, then `agentos brain apply <proposal> --by <owner>`.
+- Durable changes: `agentos brain propose <id-or-path> --from <file|-> --task <id> --summary "<why>"`; progress only: nothing. Review: `agentos brain preview <proposal>`. Manual default: owner runs `agentos brain apply <proposal> --by <owner>`. With owner-enabled `agentos brain policy`, agents may use `agentos brain apply <proposal> --auto --by <self>`. Refusals stay pending; never drop --auto, impersonate the owner or change policy.
 - Engine role config (`claude-code`, `codex`): `agentos agents sync <engine> --role <id> --dry-run`, then without `--dry-run`. When `agentos doctor` prints `Synced config: STALE`, re-run the command it prints; add `--replace` only when that line does.
 
 ## Which command for which job

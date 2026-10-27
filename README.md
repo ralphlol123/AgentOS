@@ -273,7 +273,7 @@ The path below is the one Phynceon's 2026-10-25 cross-engine trial walked (Claud
 
    `--claim "<text>"` records something the engine reports but AgentOS did not observe.
 7. **Fresh Codex**: `agentos resume --task greeting` (accomplished / remaining / receipts / reconciliation, read-only), then `agentos context codex --task greeting`. The trial ran `codex exec -a never` with both as the prompt; Codex continued from the `observed-pass`/`claimed`/`not-run` receipts and wrote its own checkpoint (`--engine codex`).
-8. **Brain**: record what the task taught as a proposal; the engine proposes, the owner reviews and applies: `agentos brain propose <id-or-path> --from - --task <id> --summary "<why>"` (the checkpoint output asks for this review; progress-only work stages nothing), `agentos brain preview <proposal>`, `agentos brain apply <proposal> --by <owner>` (owner only; the applier is recorded). See [docs/brain.md](docs/brain.md).
+8. **Brain**: record what the task taught as a proposal; the engine proposes; the owner reviews and applies by default: `agentos brain propose <id-or-path> --from - --task <id> --summary "<why>"` (the checkpoint output asks for this review; progress-only work stages nothing), `agentos brain preview <proposal>`, `agentos brain apply <proposal> --by <owner>` (manual by default; the declared applier is recorded). See [docs/brain.md](docs/brain.md).
 9. **Obsidian (optional)**: `agentos obsidian init` (plain `knowledge/` folder) or `agentos obsidian link --vault <abs-path> --dest <sub/folder> [--canonical workspace|vault] --create`. See [docs/obsidian.md](docs/obsidian.md).
 
 What is enforced and what is only instruction, per engine: [docs/engines.md](docs/engines.md). Proven / not proven per scenario: [docs/acceptance-matrix.md](docs/acceptance-matrix.md).
@@ -345,7 +345,7 @@ agentos brain register <path> [--kind architecture|decision|adr|convention|featu
 agentos brain list [--status <s>] [--kind <k>] [--json] | show <id-or-path> [--json] | search <terms...> [--json] | check [--json]
 agentos brain propose <id-or-path> --from <file|-> [--summary "<text>"] [--supersedes <id>] [--append] [--by <name>] [--task <id>] [--dry-run]
 agentos brain preview <proposal> | validate <proposal> [--json]
-agentos brain apply <proposal> --by <owner> [--dry-run]   # owner step; engines never apply
+agentos brain apply <proposal> --by <owner> [--dry-run]   # manual owner review by default
 agentos brain verify <id-or-path> [--by <name>] [--dry-run]
 agentos brain index [--adopt] [--dry-run]   # recreate/refresh index.json and the Obsidian index note
 ```
@@ -403,6 +403,7 @@ agentos brain verify brain:0003-use-postgres --by ralph
 - Lifecycle `proposed → accepted → verified → superseded`. Changes go through proposals under `.agentos/brain/proposals/`; `apply` validates identity, scope, schema, references, exact duplicates and stale writes (a proposal whose `base_hash` no longer matches is refused with both hashes, zero writes), flags ambiguous same-subject records, then updates the target, supersession links and the index in one transaction and keeps the proposal under `applied/`. Applying twice is a no-op.
 - A different `source_hash` means "source changed since verification — recheck", not "wrong". Humans may edit bodies freely; `brain check` and `doctor` report it, `brain verify` refreshes the hash explicitly. Invalid frontmatter is reported with `file:line` and the file is left alone (`doctor` problem).
 - `agentos context` lists Brain records by reference: superseded ones omitted by default, proposed ones labelled and ranked lower, changed ones labelled.
+- Optional `knowledge.brain.approval` policy: `agentos brain policy` shows the owner-approved actors and records. Agents can append eligible checkpoint-backed observations with `brain apply <proposal> --auto --by <self>`; decisions, replacements, stale evidence and detected conflicts remain pending for review. Manual review remains the default. See [automatic application](docs/brain.md#optional-automatic-application).
 - One writer per workspace; no database, embeddings or vault ingestion.
 
 Metadata keys, validation table and limits: [`docs/brain.md`](docs/brain.md).

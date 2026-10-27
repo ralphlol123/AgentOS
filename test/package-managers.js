@@ -91,6 +91,9 @@ for (const manager of managers) {
   const invoke = args => run(installedBin, args, { cwd });
   assert.equal(invoke(['--version']), '2.0.0', `${manager.name}: packed installed CLI version`);
   invoke(['init', '--new']);
+  const approval = JSON.parse(invoke(['brain', 'policy', '--json']));
+  assert.equal(approval.policy.mode, 'manual', `${manager.name}: packed CLI defaults to manual Brain approval`);
+  assert.equal(approval.authentication, false);
   invoke(['skills', 'add', 'core-pack,frontend-pack,backend-pack,fullstack-pack,github-pack']);
   invoke(['templates', 'copy', 'skill:core/code-review', '--replace']);
   // Packed/installed CLI must drive the ordinary default workflow itself, not only the alias.
@@ -131,6 +134,7 @@ for (const manager of managers) {
   }
   let references = 0, cards = 0;
   const packageRoot = join(cwd, 'node_modules/agentos-for-projects');
+  assert.match(await readFile(join(packageRoot, 'docs/brain.md'), 'utf8'), /Optional automatic application/);
   for (const category of ['core', 'frontend', 'backend', 'fullstack', 'github']) {
     const sourceDir = join(packageRoot, 'templates/skills', category);
     for (const file of await readdir(sourceDir)) {
