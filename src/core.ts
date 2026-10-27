@@ -13,7 +13,7 @@ import { STATE_SIZE_WARN_CHARS, largestSections, sectionSizes, tasksShapeWarning
 import { dumpYaml, patchProjectYaml } from './project-yaml-edit.js';
 import { deprecation, mergeDeprecations, noticeLine, renderDeprecations, type Deprecation } from './legacy-deprecation.js';
 import { renderUnifiedDiff } from './compact-report.js';
-import { agentCardDoctor, diffSummary, manifestAgent, manifestFor, PACKAGE_VERSION, parseAgentCard, planCardInstall, provenanceFor, removeAgent, renderCard, ROLE_ID, setAgentEnabled, showAgent } from './agents.js';
+import { agentCardDoctor, upgradeLegacyCatalogCards, diffSummary, manifestAgent, manifestFor, PACKAGE_VERSION, parseAgentCard, planCardInstall, provenanceFor, removeAgent, renderCard, ROLE_ID, setAgentEnabled, showAgent } from './agents.js';
 import { advisories, CLAUDE_RESIDUAL, ENGINE_ADAPTERS, engineAdapter, ROLE_BLOCK_END, ROLE_BLOCK_START, type NativeFile } from './engines.js';
 import { editedEntries, jsonArrays, jsonAt, parseSyncRecord, recordDigest, replaceRecordedEntries, serializeJsonLike, SYNC_RECORD_DIR, syncFreshness, syncRecord, syncRecordPath, type Installed, type Now, type SyncRecord, type SyncRecordFile } from './synced-config.js';
 import { resolveCompactMode } from './cli-options.js';
@@ -2039,7 +2039,7 @@ async function nativeConfigPlan(root: string, engine: string, adapter: ReturnTyp
   const role = bundle.role;
   if (!role) throw new Error('No role: pass --role <agent-id>.');
   const card = parseAgentCard(role, await safeRead(join(root, '.agentos/agents', `${role}.md`)));
-  if (!card.manifest) return { refused: `.agentos/agents/${role}.md has ${card.state === 'invalid' ? 'an invalid manifest' : 'no manifest'}; native config is generated from the manifest. Run \`agentos agents manifest ${role} --from-catalog\` (or --custom) first.` };
+  if (!card.manifest) return { refused: `.agentos/agents/${role}.md has ${card.state === 'invalid' ? 'an invalid manifest' : 'no manifest'}; native config is generated from the manifest. Run \`agentos doctor --fix\` (a card that matches the catalog) or \`agentos agents manifest ${role} --custom\` first.` };
   const repoPath = (entry: string) => (input.repos.find((repo) => repo.name === entry)?.path ?? entry).replace(/^\.\/(?=.)/, '').replace(/\/+$/, '') || '.';
   const entry = async (path: string) => ({ path, dir: path === '.' || (await stat(join(root, path)).then((info) => info.isDirectory()).catch(() => true)) });
   const edit = await Promise.all(bundle.scope.edit.map((scope) => entry(repoPath(scope))));
@@ -2892,6 +2892,7 @@ async function doctorAgentOSUnlocked(options: any = {}) {
       await withMutationTransaction(async () => {
         await fixAgentOSAdapters(root, { allowAdopt: Boolean(options.adoptCustomAdapters) });
         migrationNotes.push(...(await fixLegacyCatalogState(root, { pruneRetired: Boolean(options.pruneRetired) })));
+        migrationNotes.push(...(await upgradeLegacyCatalogCards(root, catalogAgentCards())));
       });
     } catch (error) {
       if (error instanceof ProjectConfigError) projectConfigError = error;
@@ -3043,7 +3044,7 @@ async function doctorAgentOSUnlocked(options: any = {}) {
   for (const note of migrationNotes) diagnostics.push(`migrated: ${note}`);
   await checkTasksAndHandoff(root, problems, warnings, diagnostics);
   problems.push(...await checkpointProblems(root));
-  const cards = await agentCardDoctor(root, Object.fromEntries(Object.values(AGENT_DEFINITIONS).map((agent: any) => [agent.id, { content: agentMd(agent) }])));
+  const cards = await agentCardDoctor(root, catalogAgentCards());
   problems.push(...cards.problems);
   diagnostics.push(...cards.diagnostics);
   const doctorProject = await safeRead(join(root, '.agentos/project.yaml'));
@@ -3067,6 +3068,8 @@ async function doctorAgentOSUnlocked(options: any = {}) {
   const result = doctorResult({ root, fix: Boolean(options.fix), problems, warnings, diagnostics, migration, synced_config });
   return options.json ? withJsonText(result) : result;
 }
+
+const catalogAgentCards = () => Object.fromEntries(Object.values(AGENT_DEFINITIONS).map((agent: any) => [agent.id, { content: agentMd(agent) }]));
 
 function doctorResult({ root, fix, problems, warnings, diagnostics, migration = emptyMigrationInventory(), synced_config = [] as any[] }) {
   const ok = problems.length === 0;

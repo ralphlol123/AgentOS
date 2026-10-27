@@ -131,7 +131,7 @@ test('an invalid manifest is a doctor problem; a legacy card is reported with th
   const { root } = await workspace(t);
   await writeFile(join(root, '.agentos/agents/developer.md'), await TEMPLATE('developer')); // a pre-slice-6 legacy card
   const { out } = json(['doctor'], root);
-  assert.ok(out.diagnostics.some((line) => line.includes('legacy agent card .agentos/agents/developer.md has no manifest') && line.includes('agentos agents manifest developer --from-catalog')), out.diagnostics.join('\n'));
+  assert.ok(out.diagnostics.some((line) => line.includes('legacy agent card .agentos/agents/developer.md has no manifest') && line.includes('`agentos doctor --fix` (it matches the catalog card)')), out.diagnostics.join('\n'));
   assert.equal(out.ok, true, 'legacy cards are not problems');
   ok(cli(['agents', 'add', 'developer'], root));
   await withManifest(root, 'developer', 'sandbox: off');
@@ -409,7 +409,7 @@ test('agents sync refuses a legacy card and a symlinked .claude directory withou
   let before = await snapshot(base);
   const legacy = cli(['agents', 'sync', 'claude-code'], root);
   fails(legacy);
-  assert.match(legacy.stdout, /no manifest.*agentos agents manifest developer --from-catalog/s);
+  assert.match(legacy.stdout, /no manifest.*agentos doctor --fix.*agentos agents manifest developer --custom/s);
   assert.deepEqual(await snapshot(base), before);
   ok(cli(['agents', 'manifest', 'developer', '--from-catalog'], root));
   await symlink(join(base, 'outside'), join(root, '.claude'));
