@@ -25,10 +25,6 @@ Supported consumer package managers: npm, pnpm, Bun
 
 ## Current product surface
 
-- `agentos init [--new|--existing] [--dry-run]`
-- `agentos status`
-- `agentos handoff`
-- `agentos doctor [--fix]`
-- `agentos compact [--dry-run]`
-- `agentos link-obsidian [--vault <path> --dest <folder> --link <note> --create]`
-- `agentos prompt [claude|codex|opencode|hermes]`
+Daily workflow: `agentos status`, `agentos context <engine> --task <id>`, work and milestone `agentos checkpoint --task <id>`, then another engine continues with the same id. `agentos resume --task <id>` provides detailed reconciliation and recovery evidence.
+
+Setup and maintenance: `init`, `doctor`, `upgrade`, `brain`, `agents`, `skills`, `obsidian`, `compact`. The executable help and `.agentos/guide.md` are the command reference.
