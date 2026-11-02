@@ -1,17 +1,24 @@
 # Tasks
 
-Active scope: Project Brain goal (`feat/project-brain`, PR #57) — complete, pending owner review. Finished tasks are in `.agentos/runs/2026-10-26-project-brain-card8-state.md` and the other notes under `.agentos/runs/`.
-
 ## Now
 
-- [ ] Phynceon: review the final head; mark PR #57 ready.
-- [ ] Owner: release version (D6 is breaking for scripts calling `brain apply` without `--by`), D6 policy (instruction + audit enough?), merge decision.
+- [ ] Review `fix/reliable-engine-handoffs` and run a real cross-engine continuation trial using task id `reliable-engine-handoffs`.
+
+## Acceptance criteria
+
+- Context and resume distinguish current passing checks from stale receipts after code or Git changes.
+- Missing Git evidence never counts as current verification.
+- A damaged checkpoint is visible to `context --require-complete`; read-only inspection changes no files.
+- The active checkpoint is retained or context reports budget overflow.
+- Empty Brains are visible and inspection does not initialize them.
+- All engine bootloaders advise milestone checkpoints and consistent task ids.
 
 ## Next
 
-- [ ] Owner: publish after merge.
+- [ ] Decide merge and release only after review and the live continuation trial.
 
 ## Later
 
-- [ ] Removal of the deprecated upgrade paths (2.0.0): owner decision.
-- [ ] Optional refinements in `docs/improve-later.md`.
+- [ ] Improve body-text retrieval and separate task identity from task description.
+- [ ] Consolidate current task views around checkpoints.
+- [ ] Make the default Obsidian layout expose the actual Brain records.
