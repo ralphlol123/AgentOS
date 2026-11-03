@@ -2,29 +2,28 @@
 
 ## Current objective
 
-Every successful `agentos context` result fits its `--budget`: `ok:true` means `budget.estimate <= budget.limit`, and `overflow.needed` is the smallest budget that succeeds. Ranking, matching and `--about` semantics are out of scope and unchanged.
+`context --about` ranks Brain records better with exactly two changes: common English function words are not match terms, and a Brain record that matched an `--about` term is packed before the always-relevant optional items. Mandatory items, scope/status filters, the PR #76 budget guarantee and behaviour without `--about` stay unchanged. Title/heading weighting, term frequency, stemming, date tie-breaks and skip-and-continue packing are out of scope.
 
 ## Scope
 
 - Repo: `agentos-for-projects`, single-repo workspace.
-- Baseline: `f40626f` on main (PR #75 merged), package 3.2.0. Unreleased changes; no version bump or release is requested.
-- Branch: `fix/context-budget-accounting`; task id: `context-budget-accounting`.
-- Allowed changes: the context budget accounting (`src/context-builder.ts`, the advisory trailer in `src/engines.ts`, its wiring in `src/core.ts`), tests, docs/context-builder.md, CHANGELOG Unreleased and this repository's AgentOS state. Out of scope: ranking, scores, tie-breaks, matching, `--about`, the version bump.
+- Baseline: `313107b` on `fix/context-budget-accounting` (PR #76, not merged), package 3.2.0. Unreleased changes; no version bump or release is requested.
+- Branch: `feat/brain-ranking-stoplist-packing` (stacked on PR #76); task id: `brain-ranking-stoplist-packing`.
+- Allowed changes: `STOPWORDS` and the rank order in `src/context-builder.ts`, tests, docs/context-builder.md, CHANGELOG Unreleased and this repository's AgentOS state.
 
 ## Current state
 
-- `c768444`: RED test `test/context-budget-accounting.test.js` (2 tests). At `f40626f` both failed: at `--budget <needed>` the result was `ok:true` with estimate 3781 > limit 2863, and the estimate left out the ADVISORY lines (3866 vs 3964).
-- `44a9582`: `needed` is now the estimate of the smallest full rendering (header, mandatory sections, every optional record listed as Omitted `budget`, Missing, Warnings, plus the engine's ADVISORY trailer from `advisoryTrailer` in src/engines.ts). The final loop drops optional records until the whole rendering fits and never returns `ok:true` over the limit (the old over-budget warning is gone). Selection order is unchanged. `budget.estimate` now counts the ADVISORY lines (`test/v1-slice2-context.test.js` estimate formula updated).
-- `c0b1e75`: docs/context-builder.md § Budget (guarantee, what is and is not measured, real `needed`) and one CHANGELOG Unreleased `### Fixed` line.
-- On AgentOS's own repo (claude-code, `--task split-core-into-modules`): B_min 3899 with `--about milestone`, 3901 without; B_min - 1 is OVERFLOW exit 1. No `ok:true` over limit in sweeps B_min..default size (step 10). At the default budget the rendered text, included and omitted lists are byte-identical to `f40626f`; only the reported estimate rises by the advisory (~99 tokens).
-- Verification at `c0b1e75` (local WSL, npm): `npm run check` clean; `npm test` 830/830; `npm run smoke` exit 0; `npm run test:metadata` 3/3. Bun not run (not installed here).
+- `82b9a17`: RED test `test/brain-ranking-stoplist-packing.test.js` (3 tests). At `313107b` 2 failed (a function-word-only `--about` matched `brain:stale-rates` on how, long, time; under a tight budget `acceptance` was packed before the `--about` Brain hit) and the no-`--about` order guard passed.
+- `1a71fc4`: `STOPWORDS` gains 67 function-word entries (the evaluation's 69-word simulate list minus `get`, `make`, `about`, with `doe` covered by `does`; plus `time`, `long`); entries go through the same `words()` normalisation as terms, so `does` matches and the old `this` entry now takes effect. Ranked records sort Brain `--about` hits first, then the old order. 833/833 tests; no existing test changed.
+- `821f926`: docs/context-builder.md (stopwords, selection step 5, budget line) and a CHANGELOG Unreleased `### Changed` line.
+- 18-query re-run with the real CLI, 313107b vs this branch (evidence outside the repo, in the task folder): hit@1 5→7/18, hit@1 without a tie 4→4, hit@3 11→11, present at tight 10→13, present at tighter 5→10; F2-para and F3-para lose their only (function-word) match and become no-match. At tight budgets acceptance, handoff current state and verification are dropped in some rows (F3-broad, F3-question, F4-*). No `ok:true` over its limit; without `--about` all 54 baseline outputs are byte-identical.
+- Verification at `821f926` (local WSL, npm), TMPDIR=/tmp and a 207-character TMPDIR: `npm run check` clean; `npm test` 833/833; `npm run smoke` exit 0; `npm run test:metadata` 3/3. Bun not run (not installed here).
 - All commits are local; nothing pushed.
-- Not counted in the estimate: the human `Budget:` footer line and the `--require-synced-config` status line (they report on the budget) and the JSON envelope.
-- Previous state: `.agentos/runs/2026-11-03-before-context-budget-accounting.md`.
+- Previous state: `.agentos/runs/2026-11-03-before-brain-ranking-stoplist-packing.md`.
 
 ## Next exact action
 
-Phynceon reviews the local commits on `fix/context-budget-accounting`, then pushes and opens the draft PR.
+Phynceon reviews the local commits on `feat/brain-ranking-stoplist-packing`, then pushes and opens a draft PR stacked on #76.
 
 ## Protected files / do not touch
 
@@ -34,8 +33,9 @@ Phynceon reviews the local commits on `fix/context-budget-accounting`, then push
 
 ## Open decisions
 
-- Release version and merge remain separate from this implementation.
-- Whether a tight budget should shorten the Omitted list (for example counts per reason) so more optional records fit. Not done here: the accounting fix alone makes the budget truthful and leaves the output format unchanged.
+- Release version and merge remain separate from this implementation; PR #76 keeps its own merge gate.
+- Whether Brain-first packing should wait for title/heading weighting (#2): with noisy single-word `--about` queries it packs unrelated Brain records before acceptance and handoff state at tight budgets.
+- Whether `time` and `long` should stay stopwords (named in the task; they can be project terms).
 
 <!-- agentos:checkpoint:start -->
 ## Checkpoint (managed)
