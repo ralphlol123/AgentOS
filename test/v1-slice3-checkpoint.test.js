@@ -391,7 +391,7 @@ test('assertCheckpoint accepts a written record and rejects an unknown receipt s
   assert.throws(() => assertCheckpoint(bad), /status/);
 });
 
-test('context includes the current checkpoint as an always record', async (t) => {
+test('context includes the current checkpoint as a mandatory reconciled record', async (t) => {
   const { root } = await multi(t);
   assert.equal(cli(['checkpoint', '--task', TASK, '--progress', 'Endpoint drafted.', '--blocker', 'design', '--next', 'Wire it.', '--claim', 'x'], root).status, 0);
   const { r, out } = json(['context', 'claude', '--task', TASK], root);
@@ -400,7 +400,9 @@ test('context includes the current checkpoint as an always record', async (t) =>
   assert.ok(item, out.included.map((entry) => entry.id).join(','));
   assert.equal(item.source, `.agentos/checkpoints/${TASK}/current.json`);
   assert.match(out.text, /Progress: Endpoint drafted\./);
-  assert.match(out.text, /Receipts: observed-pass 0, observed-fail 0, claimed 1/);
+  assert.equal(item.reason, 'mandatory');
+  assert.match(out.text, /Current passing checks: 0/);
+  assert.match(out.text, /claimed: `x`/);
   const none = json(['context', 'claude', '--task', 'unrelated'], root).out;
   assert.equal(none.included.find((entry) => entry.id === 'checkpoint'), undefined);
 });

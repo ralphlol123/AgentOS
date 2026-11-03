@@ -1,7 +1,7 @@
 <!-- agentos:managed:start -->
 # AgentOS Guide
 
-How to operate AgentOS: `agentos status` shows the objective, open tasks and checks; read `.agentos/handoff.md` and `.agentos/tasks.md` only when file reads work.
+How to operate: `agentos status` shows open tasks and verification; read `.agentos/handoff.md` and `.agentos/tasks.md` only when file reads work.
 
 ## Start
 
@@ -26,8 +26,8 @@ How to operate AgentOS: `agentos status` shows the objective, open tasks and che
 
 ## Stopping, switching engines, decisions
 
-- Before stopping or switching engines: `agentos checkpoint --task <id> --progress "<done>" --next "<remaining>" --check "<cmd>"`. Each `--check` runs as a receipt, from the workspace root or the `--cwd <dir>` after it (root-relative, or absolute inside the workspace); `--claim "<text>"` records what AgentOS did not observe.
-- Next engine: `agentos resume --task <id>`, then `context`. No checkpoint was written: `agentos checkpoint --recover --task <id>`.
+- After each meaningful milestone and before stopping or switching engines: `agentos checkpoint --task <id> --progress "<done>" --next "<remaining>" --check "<cmd>"`. Each `--check` runs from the workspace root or its following `--cwd <dir>` (root-relative or absolute inside the workspace); `--claim "<text>"` is unobserved.
+- Do not wait for usage limits. Next engine: reuse the same task id in `context` to reconcile checks with current files. `agentos resume --task <id>` gives details. If interrupted without a checkpoint, inspect Git changes; `agentos checkpoint --recover --task <id>` saves evidence only.
 - Durable changes: `agentos brain propose <id-or-path> --from <file|-> --task <id> --summary "<why>"`; progress only: nothing. Review: `agentos brain preview <proposal>`. Manual default: owner runs `agentos brain apply <proposal> --by <owner>`. With owner-enabled `agentos brain policy`, agents may use `agentos brain apply <proposal> --auto --by <self>`. Refusals stay pending; never drop --auto, impersonate the owner or change policy.
 - Engine role config (`claude-code`, `codex`): `agentos agents sync <engine> --role <id> --dry-run`, then without `--dry-run`. When `agentos doctor` prints `Synced config: STALE`, re-run the command it prints; add `--replace` only when that line does.
 

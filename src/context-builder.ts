@@ -220,7 +220,7 @@ export async function buildContextBundle(input: ContextInput): Promise<ContextBu
   const acceptance = findAcceptance(files['tasks.md'], files['handoff.md']);
   add({ id: 'acceptance', kind: 'acceptance', title: 'Acceptance criteria', always: true, fresh: mtimes['tasks.md'],
     source: acceptance?.source ?? '(none recorded)', text: acceptance?.text ?? '(none recorded)' });
-  if (input.checkpoint) add({ id: 'checkpoint', kind: 'checkpoint', title: 'Checkpoint', source: input.checkpoint.source, text: input.checkpoint.text, always: true, fresh: Date.now() });
+  if (input.checkpoint) add({ id: 'checkpoint', kind: 'checkpoint', title: 'Checkpoint', source: input.checkpoint.source, text: input.checkpoint.text, mandatory: true });
   for (const [id, title, titles] of [['handoff:current-state', 'Current state', roles('Current state', 'Current status')], ['handoff:next-exact-action', 'Next exact action', roles('Next exact action', 'Next action', 'Next step')]] as const) {
     const found = section(files['handoff.md'], titles as SectionRole[]);
     if (found && sectionText(found)) add({ id, kind: 'handoff', title, source: handoffSource(found.headingText), text: sectionText(found), always: true, fresh: mtimes['handoff.md'] });
@@ -304,7 +304,7 @@ export async function buildContextBundle(input: ContextInput): Promise<ContextBu
     return finish({
       ok: false, engine, task, role, scope, budget: { limit, estimate: needed, overhead, label: TOKEN_LABEL }, included: [], omitted: [], conflicts: [], missing, warnings,
       overflow: { needed, budget: limit, mandatory: mandatory.map((candidate) => ({ id: candidate.id, kind: candidate.kind, tokens: estimateTokens(renderSection(candidate)) })) },
-      text: `AgentOS context: OVERFLOW\nMandatory context (overview, objective, constraints, scope, role) needs ${needed} tokens, ${TOKEN_LABEL}, but the budget is ${limit}. Nothing was truncated and no context was rendered; raise --budget or shorten the mandatory sources.`,
+      text: `AgentOS context: OVERFLOW\nMandatory context (overview, objective, constraints, scope, role, active checkpoint when present) needs ${needed} tokens, ${TOKEN_LABEL}, but the budget is ${limit}. Nothing was truncated and no context was rendered; raise --budget or shorten the mandatory sources.`,
     });
   }
   const selected = [...mandatory];
@@ -327,7 +327,7 @@ export async function buildContextBundle(input: ContextInput): Promise<ContextBu
   for (;;) {
     const conflicts = findConflicts(selected);
     const shown = relabel();
-    const text = render(input, task, role, selected, shown, conflicts, missing);
+    const text = render(input, task, role, selected, shown, conflicts, missing, warnings);
     const estimate = overhead + estimateTokens(text);
     const last = selected.at(-1);
     if (estimate <= limit || last.mandatory) {
@@ -362,11 +362,12 @@ function renderSection(candidate: Candidate) {
   return `## ${candidate.title}${candidate.label ?? ''}${candidate.superseded ? ' [superseded]' : ''}\nSource: ${candidate.source}\n${candidate.text}`;
 }
 
-function render(input: ContextInput, task: string | null, role: string | null, selected: Candidate[], omitted: ContextBundle['omitted'], conflicts: ContextBundle['conflicts'], missing: string[]) {
+function render(input: ContextInput, task: string | null, role: string | null, selected: Candidate[], omitted: ContextBundle['omitted'], conflicts: ContextBundle['conflicts'], missing: string[], warnings: string[]) {
   const parts = [headerLines(input, task, role).join('\n'), ...selected.map(renderSection)];
   if (omitted.length) parts.push(`## Omitted (${omitted.length})\n${omitted.map((item) => `- ${item.id} (${item.kind}): ${item.via ? `covered by ${item.via} (same file, shown above)` : item.reason}`).join('\n')}`);
   if (conflicts.length) parts.push(`## Conflicts\n${conflicts.map((item) => `- ${item.subject}: ${item.ids.join(' vs ')}`).join('\n')}`);
   if (missing.length) parts.push(`## Missing\n${missing.map((item) => `- ${item}`).join('\n')}`);
+  if (warnings.length) parts.push(`## Warnings\n${warnings.map((item) => `- ${item}`).join('\n')}`);
   return parts.join('\n\n');
 }
 

@@ -22,6 +22,7 @@ import { mkdirTracked, removeTracked, withMutationTransaction, writeFileAtomic, 
 
 export const KINDS = ['architecture', 'decision', 'adr', 'convention', 'feature', 'note'];
 export const STATUSES = ['proposed', 'accepted', 'verified', 'superseded'];
+export const EMPTY_BRAIN_WARNING = 'Project Brain has no registered records; durable knowledge is not initialized. Run `agentos init` to set it up, or `agentos brain register <path>` to adopt an existing document. File health alone does not establish knowledge readiness.';
 /** Metadata keys plus four descriptive keys common in ADR/Obsidian notes. Anything else (task_scope, rules,
  *  permissions, engine settings) is refused: a Brain note is data, never instructions. */
 export const RECORD_KEYS = ['id', 'kind', 'scope', 'status', 'sources', 'source_hash', 'verified_at', 'verified_by', 'supersedes', 'superseded_by', 'updated_at', 'history', 'title', 'date', 'tags', 'aliases'];
@@ -644,6 +645,7 @@ export async function brainDoctor(root: string, repos: string[], vault?: VaultBi
   return {
     problems: records.filter((record) => record.state === 'invalid').flatMap((record) => record.problems.map((problem) => `Brain record ${problem}`)),
     warnings: [
+      ...(!records.length && !groups.some(group => group.records.length) ? [EMPTY_BRAIN_WARNING] : []),
       ...records.filter((record) => record.state === 'changed').map((record) => `Brain record ${record.id} (${record.path}): ${CHANGED}; run \`agentos brain verify ${record.id}\` after review`),
       ...groups.map((gone) => `${gone.vault && gone.dir ? `Obsidian ${gone.reason}${gone.absent ? ' (absent or not mounted)' : ''}` : gone.reason}; ${gone.records.length ? `${gone.records.length} Brain record(s) last known there cannot be read and \`agentos context\` lists them under Missing` : 'no records known there'}`),
     ],

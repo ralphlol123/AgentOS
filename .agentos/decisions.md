@@ -1,3 +1,12 @@
+---
+id: brain:decisions
+kind: decision
+scope: .
+status: accepted
+sources:
+  - .agentos/decisions.md
+source_hash: 326de136fa4a7ef98d9b449c87d43391b36b0c855c3e95871bb4d41b109304fd
+---
 # Decisions
 
 Durable decisions go here with date, reason, alternatives, and status.
@@ -23,3 +32,11 @@ Durable decisions go here with date, reason, alternatives, and status.
 - Decision: AgentOS may create and link specific Obsidian notes, but agents must not bulk-load the vault.
 - Reason: Obsidian should be a durable knowledge library, not unbounded runtime context.
 - Consequence: `.agentos/knowledge.md` is the allowlist/index for relevant external notes.
+
+## 2026-11-03 — Cross-engine continuity is the product goal
+
+- Status: accepted (owner direction in the implementation request).
+- Decision: Preserve project knowledge and task progress so a different engine can continue after the previous engine hits its usage limit. The owner starts the next engine manually.
+- Reason: Useful continuation needs current code, decisions, remaining work and evidence; automatic provider switching and native chat transfer are unnecessary for this goal.
+- Consequence: Prioritize reliable startup context and milestone checkpoints. Keep durable Brain knowledge separate from transient task progress. Obsidian stays optional.
+- Alternatives considered: a universal engine launcher and automatic switching; deferred from the product scope.

@@ -1,0 +1,11 @@
+$ npm run check
+(cwd .)
+--- stdout ---
+
+> agentos-for-projects@3.1.1 check
+> node ./node_modules/typescript/bin/tsc -p tsconfig.json --noEmit
+
+
+--- stderr ---
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+

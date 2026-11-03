@@ -133,6 +133,27 @@ test('root bootloaders point at the guide in a short added line', async (t) => {
   }
 });
 
+test('from a child repo, milestone-checkpoint and same-task-id advice is reachable via the parent files and, when `..` is refused, from the pointer itself', async (t) => {
+  const root = await multiRepo(t);
+  for (const file of CHILD_ADAPTERS) {
+    const child = join(root, file, '..');
+    const text = await read(root, file);
+    // Reads under `..` work: every listed parent path exists, and the parent bootloader and guide carry the advice.
+    const listed = [...text.matchAll(/`(\.\.\/[^`*]+)`/g)].map((m) => m[1]);
+    for (const rel of listed) assert.ok(await exists(resolve(child, rel)), `${file}: ${rel} must exist`);
+    for (const rel of [file.endsWith('CLAUDE.md') ? '../CLAUDE.md' : '../AGENTS.md', '../.agentos/guide.md']) {
+      assert.ok(listed.includes(rel), `${file} must list ${rel}`);
+      const target = await readFile(resolve(child, rel), 'utf8');
+      assert.match(target, /milestone/i, `${file} -> ${rel}`);
+      assert.match(target, /\bsame task id\b/i, `${file} -> ${rel}`);
+    }
+    // Reads under `..` refused: only the CLI-first lines (before the first `../` path) are guaranteed to be read.
+    const cliFirst = text.slice(0, text.indexOf('`../'));
+    assert.match(cliFirst, /checkpoint.{0,80}milestone/i, `${file}: CLI-first lines must advise milestone checkpoints`);
+    assert.match(cliFirst, /\bsame task id\b/i, `${file}: CLI-first lines must advise reusing the same task id`);
+  }
+});
+
 test('child pointers point at the parent guide and carry the CLI fallback', async (t) => {
   const root = await multiRepo(t);
   for (const file of CHILD_ADAPTERS) {

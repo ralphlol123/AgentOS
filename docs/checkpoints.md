@@ -15,6 +15,8 @@ agentos resume [--task <id>] [--engine <e>] [--json]   # read-only
 
 `--dry-run` prints what would be recorded and writes nothing; it does not run `--check` commands (they are listed as `not-run`, note `dry run`).
 
+Save after meaningful milestones (implementation, verification, decisions), not only before stopping: a usage limit can interrupt an engine before its final handoff. The owner starts the next engine manually in the same project and reuses the task id. Generated instructions encourage this cadence; no daemon or hook guarantees a checkpoint. Uncheckpointed progress must be reconstructed from files and Git evidence, with unknown intent left unknown.
+
 ## Task ids
 
 Records are keyed by task id: the slug of `--task`, or, without `--task`, the slug of the first line of the current objective in `.agentos/handoff.md` (the output says which). `agentos context <engine> --task <id>` and `agentos resume --task <id>` find the same task.
@@ -117,7 +119,7 @@ The block is replaced in place on every checkpoint (inserted once at the end of 
 ## Integrations
 
 - Every non-recovered checkpoint output asks the engine to review durable knowledge, stage a focused proposal with `--task`, and inspect `agentos brain policy`. Manual review is the default; an owner-enabled policy permits `brain apply --auto --by <self>` for eligible updates. Refusals stay pending. This is an instruction the engine may follow, not a runtime hook; the checkpoint itself never stages or applies a proposal. See [Brain approval policy](brain.md#optional-automatic-application).
-- `agentos context` adds the current checkpoint for its task (`--task`, else the objective slug) as an `always` record, source `.agentos/checkpoints/<task>/current.json`.
+- `agentos context` adds the current checkpoint for its task (`--task`, else the objective slug) as a mandatory record, source `.agentos/checkpoints/<task>/current.json`. It uses the same reconciliation and receipt freshness calculation as `resume`; the saved passing count is never presented as current verification. Drift and unavailable evidence are warnings; incomplete checkpoints are Missing and fail `--require-complete`. A budget that cannot hold the active checkpoint produces overflow instead of omitting it. Inspection remains read-only.
 - `agentos doctor` reports a `current.json` that points at a missing or invalid record as a problem (exit 1).
 
 ## Not done (backlog)

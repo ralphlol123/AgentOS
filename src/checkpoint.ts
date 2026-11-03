@@ -276,7 +276,7 @@ function repoLine(repos: RepoState[]) {
   return oneLine(repos.map((repo) => repo.available ? `${repo.name}${repo.state ? ' (enclosing work tree)' : ''} ${repo.branch ?? '?'}@${repo.head?.slice(0, 7) ?? '(no commits)'} (${repo.changed_paths.length + repo.omitted_paths} changed)` : `${repo.name} unavailable`).join('; ') || '(none)', 600);
 }
 
-export function summaryLines(record: Checkpoint, recordPath: string) {
+export function summaryLines(record: Checkpoint, recordPath: string, includeReceipts = true) {
   return [
     `- Task: ${record.task.id}`,
     `- Record: \`${recordPath}\`${record.recovered ? ' (recovered from git evidence)' : ''}`,
@@ -284,7 +284,7 @@ export function summaryLines(record: Checkpoint, recordPath: string) {
     `- Progress: ${oneLine(record.progress)}`,
     `- Blockers: ${oneLine(record.blockers.join('; ') || 'none')}`,
     `- Next: ${oneLine(record.next)}`,
-    `- Receipts: ${receiptCounts(record.receipts)}`,
+    ...(includeReceipts ? [`- Receipts: ${receiptCounts(record.receipts)}`] : []),
     `- Resume: \`agentos resume --task ${record.task.id}\``,
   ];
 }
@@ -416,13 +416,24 @@ export async function checkpointProblems(root: string) {
   return problems;
 }
 
-/** Context: the current checkpoint for a task as text, or null when there is none. */
-export async function checkpointContextRecord(root: string, task: string) {
-  const loaded = await loadCurrent(root, task);
+/** Context and resume use the same live evidence. Saved passing counts alone are not current verification. */
+export async function checkpointContextRecord(ctx: Pick<CheckpointContext, 'root' | 'repos' | 'excluded'>, task: string) {
+  const loaded = await loadCurrent(ctx.root, task);
   if (loaded.kind === 'none') return null;
   const source = `.agentos/checkpoints/${task}/current.json`;
-  if (loaded.kind === 'incomplete') return { source, text: `Checkpoint incomplete: ${loaded.evidence.reason}. Run \`agentos resume --task ${task}\` before continuing.` };
-  return { source, text: summaryLines(loaded.record, loaded.path).join('\n') };
+  if (loaded.kind === 'incomplete') {
+    const message = `Checkpoint ${task} incomplete: ${loaded.evidence.reason}. Run \`agentos resume --task ${task}\` before continuing.`;
+    return { source, text: message, missing: [message], warnings: [] };
+  }
+  const { reconciliation, done, left, drift } = await reconcileCheckpoint(ctx, loaded.record);
+  const warnings = reconciliation.status === 'clean' ? [] : [`Checkpoint ${task}: ${reconciliation.status}; inspect current files and recheck stale receipts before continuing.`];
+  return { source, missing: [], warnings, text: [
+    ...summaryLines(loaded.record, loaded.path, false),
+    `Reconciliation: ${reconciliation.status}`, ...drift,
+    `Current passing checks: ${done.length}`, ...done.map(receiptLine),
+    'Checks remaining or stale:', ...(left.length ? left.map(receiptLine) : ['- none']),
+    'Progress and next action are the previous engine\'s saved account; confirm them against current files.',
+  ].join('\n') };
 }
 
 // --- resume -----------------------------------------------------------------------------------------
@@ -442,6 +453,25 @@ function reconcile(saved: RepoState[], current: RepoState[]) {
   });
   const status = repos.some((repo) => repo.status === 'drifted') ? 'drifted' : repos.some((repo) => repo.status === 'unavailable') ? 'unavailable' : 'clean';
   return { status, repos };
+}
+
+/** Shared freshness assessment; reads Git and checkpoint data without changing either. */
+async function reconcileCheckpoint(ctx: Pick<CheckpointContext, 'root' | 'repos' | 'excluded'>, record: Checkpoint) {
+  const { repos, state } = await workspaceState(ctx);
+  const reconciliation = reconcile(record.repos, repos);
+  const completeState = repos.length > 0 && repos.every((repo) => repo.available && repo.fingerprint);
+  const receipts = record.receipts.map((receipt) => ({ ...receipt, stale: receipt.state_tested !== null && (!completeState || receipt.state_tested !== state) }));
+  const done = receipts.filter((receipt) => receipt.status === 'observed-pass' && !receipt.stale);
+  const left = receipts.filter((receipt) => !done.includes(receipt));
+  const short = (sha: string | null) => sha?.slice(0, 7) ?? '(none)';
+  const drift = reconciliation.repos.flatMap((repo) => repo.status === 'unavailable' ? [`- ${repo.name}: unavailable (${repo.reason})`] : [
+    ...(repo.head_moved ? [`- ${repo.name}: HEAD moved ${short(repo.head_moved.from)} -> ${short(repo.head_moved.to)}`] : []),
+    ...(repo.branch_changed ? [`- ${repo.name}: branch ${repo.branch_changed.from} -> ${repo.branch_changed.to}`] : []),
+    ...(repo.fingerprint_changed ? [`- ${repo.name}: working-tree fingerprint differs`] : []),
+    ...(repo.new_changed_paths.length ? [`- ${repo.name}: new changed paths: ${repo.new_changed_paths.join(', ')}`] : []),
+    ...(repo.resolved_paths.length ? [`- ${repo.name}: no longer changed: ${repo.resolved_paths.join(', ')}`] : []),
+  ]);
+  return { reconciliation, done, left, drift };
 }
 
 export async function resumeCheckpoint(ctx: CheckpointContext, options: { engine?: string; json?: boolean }) {
@@ -474,26 +504,13 @@ export async function resumeCheckpoint(ctx: CheckpointContext, options: { engine
     ]);
   }
   const { record, path } = loaded;
-  const { repos, state } = await workspaceState(ctx);
-  const reconciliation = reconcile(record.repos, repos);
-  const completeState = repos.length > 0 && repos.every((repo) => repo.available && repo.fingerprint);
-  const receipts = record.receipts.map((receipt) => ({ ...receipt, stale: receipt.state_tested !== null && (!completeState || receipt.state_tested !== state) }));
-  const done = receipts.filter((receipt) => receipt.status === 'observed-pass' && !receipt.stale);
-  const left = receipts.filter((receipt) => !done.includes(receipt));
+  const { reconciliation, done, left, drift } = await reconcileCheckpoint(ctx, record);
   const data = {
     status: reconciliation.status, task: ctx.task, record_path: path, record, reconciliation,
     accomplished: { progress: record.progress, receipts: done },
     remaining: { next: record.next, blockers: record.blockers, receipts: left },
     next_command: nextCommand,
   };
-  const short = (sha: string | null) => sha?.slice(0, 7) ?? '(none)';
-  const drift = reconciliation.repos.flatMap((repo) => repo.status === 'unavailable' ? [`- ${repo.name}: unavailable (${repo.reason})`] : [
-    ...(repo.head_moved ? [`- ${repo.name}: HEAD moved ${short(repo.head_moved.from)} -> ${short(repo.head_moved.to)}`] : []),
-    ...(repo.branch_changed ? [`- ${repo.name}: branch ${repo.branch_changed.from} -> ${repo.branch_changed.to}`] : []),
-    ...(repo.fingerprint_changed ? [`- ${repo.name}: working-tree fingerprint differs`] : []),
-    ...(repo.new_changed_paths.length ? [`- ${repo.name}: new changed paths: ${repo.new_changed_paths.join(', ')}`] : []),
-    ...(repo.resolved_paths.length ? [`- ${repo.name}: no longer changed: ${repo.resolved_paths.join(', ')}`] : []),
-  ]);
   return out(true, data, [
     `AgentOS resume: ${task}`,
     `Record: ${path} (created ${record.created_at}; engine ${record.engine ?? 'unknown'}; role ${record.role ?? 'none'}${record.recovered ? '; recovered: true' : ''})`,

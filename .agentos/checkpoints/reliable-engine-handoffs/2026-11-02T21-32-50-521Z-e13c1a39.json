@@ -1,0 +1,129 @@
+{
+  "schema": "agentos.checkpoint/1",
+  "id": "2026-11-02T21-32-50-521Z-e13c1a39",
+  "created_at": "2026-11-02T21:32:50.521Z",
+  "recovered": false,
+  "project": {
+    "name": "agentos-for-projects",
+    "root": "/workspace/scratch/f07dbdb87af5/AgentOS"
+  },
+  "task": {
+    "id": "reliable-engine-handoffs",
+    "source": "--task"
+  },
+  "run_id": null,
+  "engine": "codex",
+  "role": "developer",
+  "objective": {
+    "id": "obj-b2afb62be2",
+    "text": "Make engine handoffs trustworthy: an engine saves project knowledge and task progress, and another engine can inspect current files and continue after a usage limit or interruption. Engine launching, automatic switching and chat-session transfer are outside this change."
+  },
+  "acceptance": {
+    "source": ".agentos/tasks.md#Acceptance criteria",
+    "text": "- Context and resume distinguish current passing checks from stale receipts after code or Git changes.\n- Missing Git evidence never counts as current verification.\n- A damaged checkpoint is visible to `context --require-complete`; read-only inspection changes no files.\n- The active checkpoint is retained or context reports budget overflow.\n- Empty Brains are visible and inspection does not initialize them.\n- All engine bootloaders advise milestone checkpoints and consistent task ids."
+  },
+  "scope": {
+    "repos": [
+      "agentos-for-projects=."
+    ],
+    "read": [
+      "."
+    ],
+    "edit": []
+  },
+  "repos": [
+    {
+      "name": "agentos-for-projects",
+      "path": ".",
+      "worktree": "/workspace/scratch/f07dbdb87af5/AgentOS",
+      "branch": "fix/reliable-engine-handoffs",
+      "head": "ed3accd1413b9cba72934b37c99004e3d1e94bd0",
+      "fingerprint": "eff3b9cfae50f5eabcbce21f1c8de0f3537bea5ae37e718662333acc4a6cdcef",
+      "changed_paths": [
+        ".hermes.md",
+        "AGENTS.md",
+        "CHANGELOG.md",
+        "CLAUDE.md",
+        "README.md",
+        "docs/checkpoints.md",
+        "docs/context-builder.md",
+        "docs/quickstart.md",
+        "knowledge/architecture.md",
+        "knowledge/engine-handoff.md",
+        "src/brain.ts",
+        "src/checkpoint.ts",
+        "src/context-builder.ts",
+        "src/core.ts",
+        "test/handoff-continuity.test.js",
+        "test/v1-slice3-checkpoint.test.js"
+      ],
+      "omitted_paths": 0,
+      "available": true
+    }
+  ],
+  "state": "ebb079b355bba1afd7d50a598bad9d82ebd6b2ff7dc4051d8cfe5982809b65d8",
+  "progress": "Implemented startup reconciliation, empty-Brain warnings and milestone guidance; refreshed and registered project knowledge.",
+  "blockers": [],
+  "next": "Review the draft change and run a real cross-engine continuation trial before merge or release.",
+  "knowledge_refs": [
+    {
+      "id": "brain:engine-handoff",
+      "source": "knowledge/engine-handoff.md"
+    },
+    {
+      "id": "decision:2026-11-03-cross-engine-continuity-is-the-product-goal",
+      "source": ".agentos/decisions.md#2026-11-03 — Cross-engine continuity is the product goal"
+    }
+  ],
+  "receipts": [
+    {
+      "status": "observed-pass",
+      "command": "npm run check",
+      "cwd": ".",
+      "exit_code": 0,
+      "observed_at": "2026-11-02T21:32:50.025Z",
+      "evidence": ".agentos/checkpoints/reliable-engine-handoffs/evidence/1727d90401183b26.log",
+      "state_tested": "ebb079b355bba1afd7d50a598bad9d82ebd6b2ff7dc4051d8cfe5982809b65d8"
+    },
+    {
+      "status": "claimed",
+      "command": "Local npm test: 809 passed, 6 skipped; smoke and metadata passed. Full package-manager matrix awaits CI.",
+      "cwd": ".",
+      "exit_code": null,
+      "observed_at": null,
+      "evidence": null,
+      "state_tested": "ebb079b355bba1afd7d50a598bad9d82ebd6b2ff7dc4051d8cfe5982809b65d8",
+      "note": "engine-reported; not observed by AgentOS"
+    },
+    {
+      "status": "not-run",
+      "command": "bun run build",
+      "cwd": ".",
+      "exit_code": null,
+      "observed_at": null,
+      "evidence": null,
+      "state_tested": null,
+      "note": "declared agentos-for-projects.build_command"
+    },
+    {
+      "status": "not-run",
+      "command": "bun run test",
+      "cwd": ".",
+      "exit_code": null,
+      "observed_at": null,
+      "evidence": null,
+      "state_tested": null,
+      "note": "declared agentos-for-projects.test_command"
+    },
+    {
+      "status": "not-run",
+      "command": "bun run test:package-managers",
+      "cwd": ".",
+      "exit_code": null,
+      "observed_at": null,
+      "evidence": null,
+      "state_tested": null,
+      "note": "declared agentos-for-projects.package_manager_test_command"
+    }
+  ]
+}

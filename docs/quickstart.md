@@ -162,11 +162,15 @@ Every root bootloader (`CLAUDE.md`, `AGENTS.md`, `.hermes.md`) names the same lo
 agentos status
 agentos context claude-code --task <id>     # codex | opencode | hermes
 # ... work ...
+# Save after meaningful milestones, not just at the end of the session.
 agentos checkpoint --task <id> --progress "<done>" --next "<remaining>"
-agentos resume --task <id>                  # next session or another engine; same <id>
+agentos context codex --task <id>           # manually open the next engine; same <id>
+agentos resume --task <id>                  # detailed reconciliation or recovery
 ```
 
-`context` opens with a bounded overview from `.agentos/memory.md`. A task without a checkpoint starts clean: `resume` reports a clean start (exit 0) and invents no prior work. The full command map is `.agentos/guide.md` in every workspace (also shipped in the package, with this file, under `node_modules/agentos-for-projects/docs/`).
+`context` opens with a bounded overview from `.agentos/memory.md`. Without a checkpoint or evidence of work, `resume` reports a clean start (exit 0). With changed files or run notes it reports a recovery view and leaves unsaved progress unknown. The full command map is `.agentos/guide.md` in every workspace (also shipped in the package, with this file, under `node_modules/agentos-for-projects/docs/`).
+
+An existing checkpoint is reconciled against current Git state by `context`, just as by `resume`; stale check receipts must be re-run before relying on them. Checkpoint implementation milestones, completed checks and decisions while the engine is still available. Use `--check "<command>"` for checks AgentOS actually runs, and describe unfinished work honestly in `--next`. If interrupted without a checkpoint, inspect files and `resume` recovery evidence; it cannot reconstruct unsaved intentions. These are agent instructions, not background autosaving or an engine launcher.
 
 ## Obsidian (optional)
 

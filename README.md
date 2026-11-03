@@ -1,5 +1,11 @@
 # AgentOS for Projects
 
+AgentOS keeps project knowledge and task progress outside any one AI engine. When Claude Code hits a usage limit, open Codex, OpenCode or another supported engine in the same project and continue with the same task id.
+
+The Project Brain stores durable knowledge. Checkpoints store progress, remaining work, blockers and check evidence. Save checkpoints after meaningful milestones; an interrupted engine may never get a chance to write a final handoff. `agentos context <engine> --task <id>` reconciles an existing checkpoint against current Git state before presenting its checks. `agentos resume --task <id>` provides detailed reconciliation and recovery evidence.
+
+AgentOS does not launch engines, automatically switch providers or transfer native chat sessions. Obsidian is optional. Start with [the quickstart](docs/quickstart.md).
+
 ## Filesystem boundary safety
 
 Mutating commands preflight AgentOS-managed paths before writing. Repository paths must be workspace-relative; traversal (`..`), absolute paths, Windows drive paths, and backslash paths are rejected rather than silently rewritten. Obsidian destinations and note paths follow the same rule relative to the selected vault. Workspace-folder note links must stay beneath the declared destination; legacy explicit note allowlists remain vault-relative.

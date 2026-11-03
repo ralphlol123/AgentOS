@@ -5,7 +5,7 @@ import { literalMarkdown, markdownHeadings, markdownSection } from './markdown.j
 import { HANDOFF_ROLES, recognizeSections, resolveObjective, sectionText } from './context-sections.js';
 import { assertRelativeBoundaryPath, isWithin, validateTaskScope } from './task-scope.js';
 import { buildContextBundle, findAcceptance } from './context-builder.js';
-import { applyBrain, splitFrontmatter, brainContextRecords, brainDoctor, brainMissing, checkBrain, dirState, indexBrain, initBrain, ioReason, listBrain, logBrain, newIndexNote, loadBrain, previewBrain, revertBrain, proposeBrain, policyBrain, registerBrain, searchBrain, showBrain, verifyBrain, type BrainCtx, type VaultBinding } from './brain.js';
+import { applyBrain, splitFrontmatter, brainContextRecords, brainDoctor, brainMissing, checkBrain, dirState, EMPTY_BRAIN_WARNING, indexBrain, initBrain, ioReason, listBrain, logBrain, newIndexNote, loadBrain, previewBrain, revertBrain, proposeBrain, policyBrain, registerBrain, searchBrain, showBrain, verifyBrain, type BrainCtx, type VaultBinding } from './brain.js';
 import { approvalGuidance, isAutonomous } from './brain-policy.js';
 import { checkpointContextRecord, checkpointProblems, listCheckpoints, resolveTask, resumeCheckpoint, showCheckpoint, writeCheckpoint, type CheckpointContext } from './checkpoint.js';
 import { planCompactRewrite } from './compact-rewrite.js';
@@ -962,6 +962,9 @@ export async function statusAgentOS(options: any = {}) {
   const ok = missing.length === 0 && objective.kind === 'resolved';
   const childSection = await childRepoStatusSection(root, options.cwd ?? process.cwd(), project);
   const sizeWarnings = await stateSizeWarnings(root);
+  const { binding, off } = obsidianIntegration(root, project);
+  const knowledge = await brainDoctor(root, brainScopes(project), binding, off);
+  const warnings = [...sizeWarnings, ...knowledge.problems, ...knowledge.warnings];
   return {
     ok,
     text: [
@@ -975,7 +978,7 @@ export async function statusAgentOS(options: any = {}) {
       objective.selected?.text || `- ${objective.diagnostic}`,
       '',
       missing.length ? `Missing files:\n${missing.map((f) => `- ${f}`).join('\n')}` : 'Required files: all present',
-      ...(sizeWarnings.length ? ['', 'Warnings:', ...sizeWarnings.map((warning) => `- ${warning}`)] : []),
+      ...(warnings.length ? ['', 'Warnings:', ...warnings.map((warning) => `- ${warning}`)] : []),
       ...(childSection ? ['', childSection] : []),
     ].filter(Boolean).join('\n'),
   };
@@ -3717,10 +3720,10 @@ const DISCOVERY_LINE = 'Next: open your engine here and run `agentos status`. To
 // workspace's handoff.md reached 404K chars and tasks.md 342K, and every engine reads both first.
 const STATE_RULE_LINE = 'State files: rewrite `.agentos/handoff.md` to the current state, never append to it; delete finished tasks from `.agentos/tasks.md`. Before an older entry leaves either file, copy it into a note under `.agentos/runs/`; never discard history.';
 const GUIDE_POINTER_LINE = 'Commands and workflows: `.agentos/guide.md` (load on demand). Run `agentos status` first.';
-const MANUAL_LOOP = 'If the work changed durable knowledge: `agentos brain propose <record> --from <file> --task <id>`; inspect `agentos brain policy` (manual by default). Agents may apply only with `--auto --by <self>` when the owner policy permits; otherwise leave it pending.';
+const MANUAL_LOOP = 'Durable knowledge: `agentos brain propose <record> --from <file> --task <id>`; `agentos brain policy` is manual by default. Apply only with `--auto --by <self>` if permitted; otherwise leave pending.';
 const AUTONOMOUS_LOOP = 'If the work changed durable knowledge (Brain policy: autonomous): stage one focused proposal, `agentos brain propose <record> --from <file> --task <id>`, then `agentos brain apply <proposal> --auto --by <self>`. Cite only facts from files you read; leave unknowns unknown. On refusal leave it pending.';
 // The startup loop, in each engine's own bootloader. The task id is the shared identity across engines.
-const startupLoop = (engine: string, autonomous = false) => `Startup loop: \`agentos status\` → \`agentos context ${engine} --task <id>\` → work → \`agentos checkpoint --task <id> --progress "<done>" --next "<remaining>"\`. ${autonomous ? AUTONOMOUS_LOOP : MANUAL_LOOP} Next session or engine: \`agentos resume --task <id>\` (same <id>; no checkpoint yet means a clean start).`;
+const startupLoop = (engine: string, autonomous = false) => `Startup loop: \`agentos status\` → \`agentos context ${engine} --task <id>\` → work → \`agentos checkpoint --task <id> --progress "<done>" --next "<remaining>"\`. Checkpoint at milestones, before limits interrupt work. ${autonomous ? AUTONOMOUS_LOOP : MANUAL_LOOP} Next engine: repeat context with the same task id; \`agentos resume --task <id>\` for details or recovery.`;
 
 // Shared by the AGENTS.md and CLAUDE.md child pointers. The CLI comes first on purpose: some engines
 // (observed: OpenCode run non-interactively) refuse reads outside their start directory, and a refused
@@ -3728,6 +3731,7 @@ const startupLoop = (engine: string, autonomous = false) => `Startup loop: \`age
 const CHILD_CLI_FIRST_LINES = [
   'First step from this repo: run `agentos status`. It works from this directory and prints what you need, so do this before reading any other file under `..`.',
   'Some engines refuse file reads outside the directory they started in, and a refused read can end the session on the spot. If that applies to you, rely on `agentos status` and `agentos status --full` instead of the file list below.',
+  'Then `agentos context <engine> --task <id>` works from here too. Checkpoint at milestones (`agentos checkpoint --task <id>`), before limits interrupt work; the next engine reuses the same task id.',
 ];
 
 // The single engine-agnostic operating guide. Every command named in backticks here must exist in
@@ -3737,7 +3741,7 @@ function guideMd(autonomous = false) {
   return [
     '# AgentOS Guide',
     '',
-    'How to operate AgentOS: `agentos status` shows the objective, open tasks and checks; read `.agentos/handoff.md` and `.agentos/tasks.md` only when file reads work.',
+    'How to operate: `agentos status` shows open tasks and verification; read `.agentos/handoff.md` and `.agentos/tasks.md` only when file reads work.',
     '',
     '## Start',
     '',
@@ -3762,8 +3766,8 @@ function guideMd(autonomous = false) {
     '',
     '## Stopping, switching engines, decisions',
     '',
-    '- Before stopping or switching engines: `agentos checkpoint --task <id> --progress "<done>" --next "<remaining>" --check "<cmd>"`. Each `--check` runs as a receipt, from the workspace root or the `--cwd <dir>` after it (root-relative, or absolute inside the workspace); `--claim "<text>"` records what AgentOS did not observe.',
-    '- Next engine: `agentos resume --task <id>`, then `context`. No checkpoint was written: `agentos checkpoint --recover --task <id>`.',
+    '- After each meaningful milestone and before stopping or switching engines: `agentos checkpoint --task <id> --progress "<done>" --next "<remaining>" --check "<cmd>"`. Each `--check` runs from the workspace root or its following `--cwd <dir>` (root-relative or absolute inside the workspace); `--claim "<text>"` is unobserved.',
+    '- Do not wait for usage limits. Next engine: reuse the same task id in `context` to reconcile checks with current files. `agentos resume --task <id>` gives details. If interrupted without a checkpoint, inspect Git changes; `agentos checkpoint --recover --task <id>` saves evidence only.',
     autonomous
       ? '- Durable changes (Brain policy: autonomous): stage one focused proposal, `agentos brain propose <id-or-path> --from <file|-> --task <id> --summary "<why>"`, then `agentos brain apply <proposal> --auto --by <self>`; progress only: nothing. Cite only facts from files you read; leave unknowns unknown. Refusals stay pending; never drop --auto or change policy. Undo: `agentos brain revert <id> --last --auto --by <self>`.'
       : '- Durable changes: `agentos brain propose <id-or-path> --from <file|-> --task <id> --summary "<why>"`; progress only: nothing. Review: `agentos brain preview <proposal>`. Manual default: owner runs `agentos brain apply <proposal> --by <owner>`. With owner-enabled `agentos brain policy`, agents may use `agentos brain apply <proposal> --auto --by <self>`. Refusals stay pending; never drop --auto, impersonate the owner or change policy.',
@@ -4007,6 +4011,7 @@ async function contextInputFor(root: string, engine: string, options: any) {
   const viewerGone = binding && binding.canonical === 'workspace' && !await exists(binding.dir) ? `optional Obsidian folder unavailable: ${binding.dir} (canonical: workspace; no Brain record lives there)` : null;
   const agents = project.agents && typeof project.agents === 'object' ? project.agents : {};
   const brainRecords = await loadBrain(root, brainScopes(projectText), binding);
+  const missing = await brainMissing(root, brainRecords, binding, obsidian.off);
   return {
     root, engine, project, projectText,
     repos: parseReposFromProjectYaml(projectText, { includeRoot: true }),
@@ -4016,8 +4021,8 @@ async function contextInputFor(root: string, engine: string, options: any) {
     rules: [PROMPT_RULES, ...engineSpecificRules(engine), obsidianPromptLine(root, projectText), approvalGuidance(project.knowledge?.brain?.approval)].filter(Boolean),
     task: options.task, role: options.role ? normalizeAgentAlias(String(options.role)) : undefined, scope: options.scope, budget: options.budget, includeSuperseded: Boolean(options.includeSuperseded),
     brain: brainContextRecords(brainRecords),
-    missing: await brainMissing(root, brainRecords, binding, obsidian.off),
-    warnings: [obsidian.off, viewerGone].filter(Boolean),
+    missing,
+    warnings: [obsidian.off, viewerGone, ...(!brainRecords.length && !missing.length ? [EMPTY_BRAIN_WARNING] : [])].filter(Boolean),
   };
 }
 
@@ -4040,8 +4045,11 @@ export async function contextAgentOS(options: any = {}) {
   const objective = resolveObjective(await safeRead(join(root, '.agentos/handoff.md')));
   let checkpointTask: string | null = null;
   try { checkpointTask = resolveTask(options.task, objective.selected ?? null).id; } catch { /* no task id: no checkpoint record */ }
-  const checkpoint = checkpointTask ? await checkpointContextRecord(root, checkpointTask) : null;
-  const bundle = await buildContextBundle({ ...input, checkpoint: checkpoint ?? undefined });
+  // Lazy: exclusions are validated only when a loaded checkpoint is reconciled, so a bad handoff.exclude_paths
+  // cannot break context when no checkpoint exists (it still fails context, like resume, once one loads).
+  const checkpoint = checkpointTask ? await checkpointContextRecord({ root, repos: input.repos, get excluded() { return checkpointExcludedPaths(input.project); } }, checkpointTask) : null;
+  const bundle = await buildContextBundle({ ...input, checkpoint: checkpoint ?? undefined,
+    missing: [...input.missing, ...(checkpoint?.missing ?? [])], warnings: [...input.warnings, ...(checkpoint?.warnings ?? [])] });
   const advisoryLines = bundle.ok ? advisories(adapter) : [];
   // --require-complete: a bundle with Missing items (e.g. an unavailable vault) exits 1; the bundle itself stays `ok`.
   const incomplete = Boolean(options.requireComplete && bundle.ok && bundle.missing.length);
@@ -4543,6 +4551,13 @@ export async function agentsAgentOS(options: any = {}) {
   return root && (!options.dryRun && !options.list && options.command !== 'show') ? withWorkspaceWriter(root, action) : action();
 }
 
+function checkpointExcludedPaths(project: any): string[] {
+  const excluded = project.handoff?.exclude_paths ?? [];
+  if (!Array.isArray(excluded) || excluded.some((path) => typeof path !== 'string')) throw new Error('handoff.exclude_paths must be a list of relative paths.');
+  for (const path of excluded) assertRelativeBoundaryPath(path);
+  return excluded;
+}
+
 async function checkpointContextFor(root: string, options: any): Promise<CheckpointContext> {
   const engine = options.engine ? normalizeEngine(options.engine) : null;
   const input = await contextInputFor(root, engine ?? 'generic', { role: options.role });
@@ -4550,9 +4565,7 @@ async function checkpointContextFor(root: string, options: any): Promise<Checkpo
   const resolved = resolveObjective(handoffText).selected;
   const objective = resolved ? { id: resolved.id, text: resolved.text } : null;
   const task = resolveTask(options.task, objective);
-  const excluded = input.project.handoff?.exclude_paths ?? [];
-  if (!Array.isArray(excluded) || excluded.some((path) => typeof path !== 'string')) throw new Error('handoff.exclude_paths must be a list of relative paths.');
-  for (const path of excluded) assertRelativeBoundaryPath(path);
+  const excluded = checkpointExcludedPaths(input.project);
   const bundle = await buildContextBundle({ ...input, task: task.id.replace(/-/g, ' ') });
   return {
     root, engine, repos: input.repos, excluded, handoffText, objective, task, bundle, autonomous: isAutonomous(input.project.knowledge?.brain?.approval),
