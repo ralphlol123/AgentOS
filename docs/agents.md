@@ -17,7 +17,7 @@ expected_output: Report files changed, verification run (real command output or 
 provenance:
   installed_from: catalog:developer
   version: 0.9.0
-  source_hash: 5f0c…            # sha256 of the body below at install time
+  source_hash: 5f0c…            # sha256 of the body below at install time (CRLF read as LF)
   installed_at: 2026-10-25T05:00:00.000Z
 custom: false
 ---

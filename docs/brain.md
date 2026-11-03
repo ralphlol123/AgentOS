@@ -19,7 +19,7 @@
 | `scope` | `.` (whole project) or a repo id from `project.yaml` |
 | `status` | `proposed`, `accepted`, `verified`, `superseded` |
 | `sources` | list of workspace-relative paths; must include the file itself |
-| `source_hash` | sha256 of the body (every byte after the closing `---` line) |
+| `source_hash` | sha256 of the body (every byte after the closing `---` line), with CRLF read as LF so a `core.autocrlf=true` checkout of the same text hashes the same. A hash recorded over CRLF bytes earlier still matches that checkout. |
 | `verified_at`, `verified_by` | set by `brain verify` (or `register --by`) |
 | `supersedes`, `superseded_by` | supersession links, set by `brain apply` |
 | `updated_at`, `history` | set by `apply`/`verify`; `history` is a list of one-line entries |
