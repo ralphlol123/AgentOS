@@ -7,7 +7,7 @@ import { assertRelativeBoundaryPath, isWithin, validateTaskScope } from './task-
 import { buildContextBundle, findAcceptance } from './context-builder.js';
 import { applyBrain, splitFrontmatter, brainContextRecords, brainDoctor, brainMissing, checkBrain, dirState, EMPTY_BRAIN_WARNING, indexBrain, initBrain, ioReason, listBrain, logBrain, loadBrain, mirrorWarnings, newIndexNoteWithMirrors, writeMirrors, previewBrain, revertBrain, proposeBrain, policyBrain, registerBrain, searchBrain, showBrain, verifyBrain, type BrainCtx, type VaultBinding } from './brain.js';
 import { approvalGuidance, isAutonomous } from './brain-policy.js';
-import { checkpointContextRecord, checkpointProblems, listCheckpoints, newestCheckpoint, resolveTask, resumeCheckpoint, showCheckpoint, writeCheckpoint, type CheckpointContext } from './checkpoint.js';
+import { ambiguousResume, checkpointContextRecord, checkpointProblems, listCheckpoints, newestCheckpoint, resolveReadTask, resolveTask, resumeCheckpoint, showCheckpoint, writeCheckpoint, type CheckpointContext } from './checkpoint.js';
 import { planCompactRewrite } from './compact-rewrite.js';
 import { STATE_SIZE_WARN_CHARS, largestSections, sectionSizes, tasksShapeWarnings } from './state-size.js';
 import { dumpYaml, patchProjectYaml } from './project-yaml-edit.js';
@@ -964,8 +964,9 @@ export async function statusAgentOS(options: any = {}) {
   const sizeWarnings = await stateSizeWarnings(root);
   const { binding, off } = obsidianIntegration(root, project);
   const knowledge = await brainDoctor(root, brainScopes(project), binding, off);
-  const warnings = [...sizeWarnings, ...knowledge.problems, ...knowledge.warnings];
+  const warnings = [...sizeWarnings, ...knowledge.problems, ...knowledge.warnings, ...await checkpointProblems(root)];
   const checkpoint = await newestCheckpoint(root);
+  const failing = (checkpoint?.receipts ?? []).filter((receipt) => receipt.status === 'observed-fail' || receipt.status === 'unavailable');
   return {
     ok,
     text: [
@@ -978,6 +979,7 @@ export async function statusAgentOS(options: any = {}) {
       'Current handoff:',
       objective.selected?.text || `- ${objective.diagnostic}`,
       ...(checkpoint ? [`Current next action (task ${checkpoint.task.id}, checkpoint ${checkpoint.id}): ${checkpoint.next}`] : []),
+      ...(failing.length ? [`Checks not passing in that checkpoint: ${failing.map((receipt) => `${receipt.status} \`${receipt.command}\``).join('; ')}`] : []),
       '',
       missing.length ? `Missing files:\n${missing.map((f) => `- ${f}`).join('\n')}` : 'Required files: all present',
       ...(warnings.length ? ['', 'Warnings:', ...warnings.map((warning) => `- ${warning}`)] : []),
@@ -4060,13 +4062,14 @@ export async function contextAgentOS(options: any = {}) {
   const input = await contextInputFor(root, engine, options);
   const handoffText = await safeRead(join(root, '.agentos/handoff.md'));
   const objective = resolveObjective(handoffText);
-  let checkpointTask: string | null = null;
-  try { checkpointTask = resolveTask(options.task, objective.selected ?? null).id; } catch { /* no task id: no checkpoint record */ }
+  let checkpointTask: string | null = null, ambiguous: string[] = [];
+  try { const read = await resolveReadTask(root, options.task, objective.selected ?? null); checkpointTask = read.task?.id ?? null; ambiguous = read.candidates ?? []; } catch { /* no task id: no checkpoint record */ }
+  const ambiguity = ambiguous.length ? [`Several tasks have checkpoints (${ambiguous.join(', ')}) and no --task was given; no checkpoint is loaded. Pass --task <id>.`] : [];
   // Lazy: exclusions are validated only when a loaded checkpoint is reconciled, so a bad handoff.exclude_paths
   // cannot break context when no checkpoint exists (it still fails context, like resume, once one loads).
   const checkpoint = checkpointTask ? await checkpointContextRecord({ root, repos: input.repos, handoffText, get excluded() { return checkpointExcludedPaths(input.project); } }, checkpointTask) : null;
   const bundle = await buildContextBundle({ ...input, checkpoint: checkpoint ?? undefined, trailer: advisoryTrailer(adapter),
-    missing: [...input.missing, ...(checkpoint?.missing ?? [])], warnings: [...input.warnings, ...(checkpoint?.warnings ?? [])] });
+    missing: [...input.missing, ...(checkpoint?.missing ?? [])], warnings: [...input.warnings, ...ambiguity, ...(checkpoint?.warnings ?? [])] });
   const advisoryLines = bundle.ok ? advisories(adapter) : [];
   // --require-complete: a bundle with Missing items (e.g. an unavailable vault) exits 1; the bundle itself stays `ok`.
   const incomplete = Boolean(options.requireComplete && bundle.ok && bundle.missing.length);
@@ -4575,13 +4578,17 @@ function checkpointExcludedPaths(project: any): string[] {
   return excluded;
 }
 
+function resolvedObjective(handoffText: string) {
+  const resolved = resolveObjective(handoffText).selected;
+  return resolved ? { id: resolved.id, text: resolved.text } : null;
+}
+
 async function checkpointContextFor(root: string, options: any): Promise<CheckpointContext> {
   const engine = options.engine ? normalizeEngine(options.engine) : null;
   const input = await contextInputFor(root, engine ?? 'generic', { role: options.role });
   const handoffText = await safeRead(join(root, '.agentos/handoff.md'));
-  const resolved = resolveObjective(handoffText).selected;
-  const objective = resolved ? { id: resolved.id, text: resolved.text } : null;
-  const task = resolveTask(options.task, objective);
+  const objective = resolvedObjective(handoffText);
+  const task = options.resolvedTask ?? resolveTask(options.task, objective);
   const excluded = checkpointExcludedPaths(input.project);
   const bundle = await buildContextBundle({ ...input, task: task.id.replace(/-/g, ' ') });
   return {
@@ -4662,7 +4669,10 @@ export const BRAIN_USAGE = [
 export async function resumeAgentOS(options: any = {}) {
   const root = await findAgentOSRoot(options.cwd ?? process.cwd());
   if (!root) return { ok: false, text: 'AgentOS resume: FAIL\nNo .agentos directory found here or in parent directories.' };
-  return resumeCheckpoint(await checkpointContextFor(root, options), { engine: options.engine ? normalizeEngine(options.engine) : undefined, json: options.json });
+  const resolved = resolvedObjective(await safeRead(join(root, '.agentos/handoff.md')));
+  const read = await resolveReadTask(root, options.task, resolved);
+  if (!read.task) return ambiguousResume(root, read.candidates, { json: options.json });
+  return resumeCheckpoint(await checkpointContextFor(root, { ...options, resolvedTask: read.task }), { engine: options.engine ? normalizeEngine(options.engine) : undefined, json: options.json });
 }
 
 export async function doctorAgentOS(options: any = {}) {

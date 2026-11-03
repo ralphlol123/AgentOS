@@ -88,6 +88,20 @@ export function resolveTask(task: string | undefined, objective: { text: string 
   return { id, source: 'objective' };
 }
 
+/** Task for a read without --task (resume, context): the objective's task when it has checkpoints, else the only
+ *  task with any checkpoint files; several and none named by the objective -> `candidates`, never a guess. With no
+ *  checkpoint task at all, the objective slug as before. An explicit --task is resolveTask unchanged. */
+export async function resolveReadTask(root: string, task: string | undefined, objective: { text: string } | null): Promise<{ task: { id: string; source: string }; candidates?: undefined } | { task: null; candidates: string[] }> {
+  if (task !== undefined) return { task: resolveTask(task, objective) };
+  const candidates: string[] = [];
+  for (const id of await checkpointTasks(root)) if ((await listFiles(join(root, '.agentos/checkpoints', id))).length) candidates.push(id);
+  let derived: { id: string; source: string } | null = null;
+  try { derived = resolveTask(undefined, objective); } catch (error) { if (!candidates.length) throw error; }
+  if (derived && (candidates.includes(derived.id) || !candidates.length)) return { task: derived };
+  if (candidates.length === 1) return { task: { id: candidates[0], source: 'checkpoint' } };
+  return { task: null, candidates };
+}
+
 // --- git state ------------------------------------------------------------------------------------
 
 /** Bounded content digest for changed files. Line counts alone miss same-size edits between a check and
@@ -381,8 +395,8 @@ function receiptLine(receipt: Receipt & { stale?: boolean }) {
 
 type Loaded =
   | { kind: 'none' }
-  | { kind: 'incomplete'; evidence: { reason: string; error?: string; files: Array<{ name: string; size: number }> } }
-  | { kind: 'ok'; record: Checkpoint; path: string };
+  | { kind: 'incomplete'; evidence: { reason: string; error?: string; files: Array<{ name: string; size: number }> }; lastUsable: { record: Checkpoint; path: string; newest: boolean } | null }
+  | { kind: 'ok'; record: Checkpoint; path: string; newer: string[] };
 
 async function listFiles(dir: string) {
   const files: Array<{ name: string; size: number }> = [];
@@ -393,24 +407,48 @@ async function listFiles(dir: string) {
   return files;
 }
 
-/** Load the record `current.json` points at. Anything short of a valid record is `incomplete`, with evidence. */
+/** Newest record of a task that parses, validates and matches its file name: what is left to show when current.json
+ *  does not lead to a valid record. `newest`: it is also the newest record file (nothing newer was lost). */
+async function lastUsable(dir: string, task: string, names: string[]) {
+  for (const name of [...names].sort().reverse()) {
+    try {
+      const record = JSON.parse(await readFile(join(dir, name), 'utf8'));
+      assertCheckpoint(record);
+      if (`${record.id}.json` === name && record.task.id === task) return { record, path: `.agentos/checkpoints/${task}/${name}`, newest: name === [...names].sort().at(-1) };
+    } catch { /* unusable; try the one before */ }
+  }
+  return null;
+}
+
+/** Load the record `current.json` points at. Anything short of a valid record is `incomplete`, with evidence and the
+ *  last usable record. A valid pointer with newer record files beside it (a save interrupted before the pointer
+ *  update) is `ok` with those names in `newer`, so readers can say they show older state. */
 export async function loadCurrent(root: string, task: string): Promise<Loaded> {
   const dir = join(root, '.agentos/checkpoints', task);
   const files = await listFiles(dir);
   if (!files.length) return { kind: 'none' };
-  const incomplete = (reason: string, error?: string): Loaded => ({ kind: 'incomplete', evidence: { reason, ...(error ? { error } : {}), files } });
-  const records = files.filter((file) => file.name.endsWith('.json') && file.name !== 'current.json');
+  const records = files.filter((file) => file.name.endsWith('.json') && file.name !== 'current.json').map((file) => file.name);
+  const incomplete = async (reason: string, error?: string): Promise<Loaded> => ({ kind: 'incomplete', evidence: { reason, ...(error ? { error } : {}), files }, lastUsable: await lastUsable(dir, task, records) });
   if (!files.some((file) => file.name === 'current.json')) return incomplete(`current.json is missing; ${records.length} record file(s) present`);
   let pointer;
   try { pointer = JSON.parse(await readFile(join(dir, 'current.json'), 'utf8')); } catch (error) { return incomplete('current.json is unreadable', error.message); }
   if (!pointer || pointer.schema !== POINTER_SCHEMA || typeof pointer.id !== 'string' || !ID_PATTERN.test(pointer.id)) return incomplete('current.json is not a valid checkpoint pointer', JSON.stringify(pointer)?.slice(0, 200));
   const name = `${pointer.id}.json`;
-  if (!files.some((file) => file.name === name)) return incomplete(`current.json points at missing record ${name}`);
+  if (!records.includes(name)) return incomplete(`current.json points at missing record ${name}`);
   let record;
   try { record = JSON.parse(await readFile(join(dir, name), 'utf8')); assertCheckpoint(record); } catch (error) { return incomplete(`record ${name} is invalid`, error.message); }
   if (record.id !== pointer.id || record.task.id !== task) return incomplete(`record ${name} does not match its pointer`);
-  return { kind: 'ok', record, path: `.agentos/checkpoints/${task}/${name}` };
+  return { kind: 'ok', record, path: `.agentos/checkpoints/${task}/${name}`, newer: records.filter((other) => other > name).sort() };
 }
+
+const usableLine = (loaded: Extract<Loaded, { kind: 'incomplete' }>) => {
+  const last = loaded.lastUsable;
+  if (!last) return 'Last usable checkpoint: none — no record of this task is readable.';
+  return last.newest
+    ? `Last usable checkpoint: ${last.record.id} from ${last.record.created_at} (the newest record on disk; current.json does not lead to it, see Reason).`
+    : `Showing OLDER state: last usable checkpoint ${last.record.id} from ${last.record.created_at}; it is not the newest record.`;
+};
+const newerLine = (loaded: Extract<Loaded, { kind: 'ok' }>) => `Showing OLDER state: checkpoint ${loaded.record.id} from ${loaded.record.created_at} is what current.json names, but newer record ${loaded.newer.join(', ')} exists (a save interrupted before the current.json update?). Inspect it with \`agentos checkpoint show <id>\`, then save a fresh checkpoint.`;
 
 /** Evidence a knowledge proposal cites: changed paths (workspace-relative) and every receipt with its state.
  *  Empty `changed` and no `observed-pass` = progress only: nothing worth a durable-knowledge proposal. */
@@ -446,6 +484,7 @@ export async function checkpointProblems(root: string) {
     if (!await exists(join(root, '.agentos/checkpoints', task, 'current.json'))) continue;
     const loaded = await loadCurrent(root, task);
     if (loaded.kind === 'incomplete') problems.push(`.agentos/checkpoints/${task}/current.json: ${loaded.evidence.reason}${loaded.evidence.error ? ` (${oneLine(loaded.evidence.error, 160)})` : ''}; run \`agentos resume --task ${task}\` for the recovery evidence`);
+    if (loaded.kind === 'ok' && loaded.newer.length) problems.push(`.agentos/checkpoints/${task}/current.json names ${loaded.record.id}, but newer record ${loaded.newer.join(', ')} exists (a save interrupted before the pointer update?); run \`agentos resume --task ${task}\``);
   }
   return problems;
 }
@@ -456,11 +495,12 @@ export async function checkpointContextRecord(ctx: Pick<CheckpointContext, 'root
   if (loaded.kind === 'none') return null;
   const source = `.agentos/checkpoints/${task}/current.json`;
   if (loaded.kind === 'incomplete') {
-    const message = `Checkpoint ${task} incomplete: ${loaded.evidence.reason}. Run \`agentos resume --task ${task}\` before continuing.`;
+    const last = loaded.lastUsable;
+    const message = `Checkpoint ${task} incomplete: ${loaded.evidence.reason}; ${last ? `last usable checkpoint ${last.record.id} from ${last.record.created_at}${last.newest ? '' : ' (older state)'}` : 'no usable checkpoint'}. Run \`agentos resume --task ${task}\` before continuing.`;
     return { source, text: message, missing: [message], warnings: [] };
   }
   const { reconciliation, done, left, drift } = await reconcileCheckpoint(ctx, loaded.record);
-  const warnings = reconciliation.status === 'clean' ? [] : [`Checkpoint ${task}: ${reconciliation.status}; inspect current files and recheck stale receipts before continuing.`];
+  const warnings = [...(loaded.newer.length ? [`Checkpoint ${task}: ${newerLine(loaded)}`] : []), ...(reconciliation.status === 'clean' ? [] : [`Checkpoint ${task}: ${reconciliation.status}; inspect current files and recheck stale receipts before continuing.`])];
   return { source, missing: [], warnings, supersedes: supersededProse(loaded.record, ctx.handoffText), text: [
     ...summaryLines(loaded.record, loaded.path, false),
     `Reconciliation: ${reconciliation.status}`, ...drift,
@@ -513,24 +553,28 @@ export async function resumeCheckpoint(ctx: CheckpointContext, options: { engine
   const loaded = await loadCurrent(ctx.root, task);
   const out = (ok: boolean, data: any, lines: string[]) => ({ ok, ...data, text: options.json ? JSON.stringify({ ok, ...data }, null, 2) : lines.join('\n') });
   if (loaded.kind === 'incomplete') {
-    const { evidence } = loaded;
-    return out(false, { status: 'incomplete', task: ctx.task, evidence }, [
+    const { evidence, lastUsable: last } = loaded;
+    return out(false, { status: 'incomplete', task: ctx.task, evidence, last_usable: last ? { id: last.record.id, path: last.path, created_at: last.record.created_at, newest: last.newest, progress: last.record.progress, next: last.record.next, blockers: last.record.blockers, receipts: last.record.receipts } : null }, [
       `AgentOS resume: ${task}`, 'Status: incomplete — the checkpoint was interrupted or damaged; nothing is assumed done.',
       `Reason: ${evidence.reason}`, ...(evidence.error ? [`Error: ${oneLine(evidence.error)}`] : []),
       `Files in .agentos/checkpoints/${task}/:`, ...evidence.files.map((file) => `- ${file.name}${file.name.endsWith('/') ? '' : ` (${file.size} bytes)`}`),
+      usableLine(loaded),
+      ...(last ? [`- Record: ${last.path} (saved; not reconciled with the current files)`, `- Progress: ${last.record.progress}`, `- Next: ${last.record.next}`, `- Blockers: ${last.record.blockers.join('; ') || 'none'}`, ...last.record.receipts.map(receiptLine)] : []),
       'Recover: inspect the files above and the repos with git, then write a fresh record (`agentos checkpoint --task …` or `agentos checkpoint --recover --task …`). Never edit or delete a record by hand to make resume pass.',
     ]);
   }
   const engine = options.engine ?? (loaded.kind === 'ok' ? loaded.record.engine : null) ?? 'generic';
   const nextCommand = `agentos context ${engine} --task ${task}`;
+  // Bare resume with no checkpoint task: the id is only the objective's slug; say so (resolveReadTask).
+  const header = `AgentOS resume: ${task}${ctx.task.source === 'objective' ? ' (derived from the current objective; no task has a checkpoint)' : ''}`;
   if (loaded.kind === 'none') {
     const runs = (await readdir(join(ctx.root, '.agentos/runs')).catch(() => [])).filter((name) => name.endsWith('.md') && name !== 'README.md');
     const { record } = await buildRecord(ctx, { recover: true });
     if (!runs.length && !record.repos.some((repo) => repo.changed_paths.length || repo.omitted_paths)) {
-      return out(true, { status: 'none', task: ctx.task, next_command: nextCommand }, [`AgentOS resume: ${task}`, `Status: clean start — no checkpoint for task ${task}, no run notes and no changed files. No prior work is assumed; start with \`${nextCommand}\`.`]);
+      return out(true, { status: 'none', task: ctx.task, next_command: nextCommand }, [header, `Status: clean start — no checkpoint for task ${task}, no run notes and no changed files. No prior work is assumed; start with \`${nextCommand}\`.`]);
     }
     return out(true, { status: 'recovered', task: ctx.task, record, run_notes: runs, next_command: nextCommand }, [
-      `AgentOS resume: ${task}`, `Status: recovered — no checkpoint exists; this view is built from git evidence only (recovered: true). Nothing is assumed done.`,
+      header, `Status: recovered — no checkpoint exists; this view is built from git evidence only (recovered: true). Nothing is assumed done.`,
       `Progress: ${record.progress}`, `Next: ${record.next}`, `Repos: ${repoLine(record.repos)}`,
       ...record.repos.filter((repo) => repo.changed_paths.length).map((repo) => `- ${repo.name}: changed paths: ${repo.changed_paths.join(', ')}`),
       ...(runs.length ? [`Run notes: ${runs.map((name) => `.agentos/runs/${name}`).join(', ')}`] : []),
@@ -540,7 +584,7 @@ export async function resumeCheckpoint(ctx: CheckpointContext, options: { engine
   const { record, path } = loaded;
   const { reconciliation, done, left, drift } = await reconcileCheckpoint(ctx, record);
   const data = {
-    status: reconciliation.status, task: ctx.task, record_path: path, record, reconciliation,
+    status: reconciliation.status, task: ctx.task, record_path: path, record, reconciliation, ...(loaded.newer.length ? { newer_records: loaded.newer } : {}),
     accomplished: { progress: record.progress, receipts: done },
     remaining: { next: record.next, blockers: record.blockers, receipts: left },
     next_command: nextCommand,
@@ -548,6 +592,7 @@ export async function resumeCheckpoint(ctx: CheckpointContext, options: { engine
   return out(true, data, [
     `AgentOS resume: ${task}`,
     `Record: ${path} (created ${record.created_at}; engine ${record.engine ?? 'unknown'}; role ${record.role ?? 'none'}${record.recovered ? '; recovered: true' : ''})`,
+    ...(loaded.newer.length ? [newerLine(loaded)] : []),
     `Objective: ${record.objective ? oneLine(record.objective.text) : '(unresolved at checkpoint time)'}`,
     `Reconciliation: ${reconciliation.status}`, ...drift,
     'Accomplished:', `- Progress: ${record.progress}`, ...done.map(receiptLine),
@@ -555,6 +600,21 @@ export async function resumeCheckpoint(ctx: CheckpointContext, options: { engine
     ...(left.some((receipt) => receipt.stale) ? ['Receipts marked stale (recheck) tested a different working-tree state; re-run them before relying on them.'] : []),
     `Next: ${nextCommand}`,
   ]);
+}
+
+/** Bare resume with several checkpoint tasks and none named by the objective: list them, never guess. Exit code 2. */
+export async function ambiguousResume(root: string, candidates: string[], options: { json?: boolean }) {
+  const tasks = [];
+  for (const id of candidates) {
+    const loaded = await loadCurrent(root, id);
+    tasks.push(loaded.kind === 'ok' ? { id, status: 'ok', created_at: loaded.record.created_at, next: loaded.record.next } : { id, status: loaded.kind, reason: loaded.kind === 'incomplete' ? loaded.evidence.reason : null });
+  }
+  const text = options.json ? JSON.stringify({ ok: false, status: 'ambiguous', tasks }, null, 2) : [
+    'AgentOS resume: several tasks have checkpoints; none was chosen',
+    'No --task was given and the current objective names none of them. Pick one:',
+    ...tasks.flatMap((entry) => [`- ${entry.id} (${entry.status === 'ok' ? `latest checkpoint ${entry.created_at}): ${oneLine(entry.next, 160)}` : `${entry.status}: ${entry.reason})`}`, `  agentos resume --task ${entry.id}`]),
+  ].join('\n');
+  return { ok: false, exitCode: 2, status: 'ambiguous', tasks, text };
 }
 
 // --- list / show ------------------------------------------------------------------------------------

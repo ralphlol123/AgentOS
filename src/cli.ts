@@ -221,7 +221,7 @@ async function main() {
     if (command === 'resume') {
       const result = await resumeAgentOS({ cwd: process.cwd(), task: flags.task, engine: flags.engine, json: flags.json });
       console.log(result.text);
-      process.exitCode = result.ok ? 0 : 1;
+      process.exitCode = result.exitCode ?? (result.ok ? 0 : 1); // 2: several checkpoint tasks, pass --task
       return;
     }
     console.error(`Unknown command: ${command}`);
