@@ -178,7 +178,7 @@ test('token figures carry the estimate (chars/4) label', async (t) => {
   assert.equal(bundle.budget.label, 'estimate (chars/4)');
   assert.equal(bundle.budget.limit, 24000);
   assert.ok(Number.isInteger(bundle.budget.overhead) && bundle.budget.overhead > 0);
-  assert.equal(bundle.budget.estimate, bundle.budget.overhead + Math.ceil(bundle.text.length / 4));
+  assert.equal(bundle.budget.estimate, bundle.budget.overhead + Math.ceil([bundle.text, '', ...bundle.advisories].join('\n').length / 4));
   for (const item of bundle.included) assert.ok(Number.isInteger(item.tokens) && item.tokens > 0, item.id);
   const human = cli(['context', 'codex'], root);
   assert.match(human.stdout, /estimate \(chars\/4\)/);
