@@ -77,11 +77,17 @@ export interface ContextInput {
 interface Candidate {
   id: string; kind: string; title: string; source: string; text: string;
   mandatory?: boolean; always?: boolean; match?: string; body?: string; outOfScope?: boolean; superseded?: boolean; fresh: number; penalty?: number; label?: string;
-  score?: number; reason?: string;
+  score?: number; reason?: string; aboutHit?: boolean;
 }
 
-const STOPWORDS = new Set(['the', 'and', 'for', 'with', 'into', 'from', 'this', 'that', 'are', 'was', 'not', 'all', 'any', 'its', 'our', 'your', 'use', 'via', 'per', 'should', 'must']);
 const words = (text: string) => (text.toLowerCase().match(/[a-z0-9]+/g) || []).map((word) => word.replace(/s$/, ''));
+// Entries go through words() like the terms do (does → doe), so an entry ending in s still matches.
+const STOPWORDS = new Set(words(['the and for with into from this that are was not all any its our your use via per should must',
+  // Common English function words: question words, auxiliaries, pronoun-like determiners, prepositions, conjunctions and
+  // generic verbs/adverbs. Left out on purpose because they can be project terms: get (HTTP GET), make (the tool), about (--about).
+  'how what when where which who why does did can could would will shall may might there here then than also just only even both',
+  'each every some such one two out off over under before after again above below between during while being been were has have',
+  'had having got keep kept made take very much many more most other another same own too time long'].join(' ')));
 /** Task terms and term hits: the one matcher shared by the context builder and `agentos brain search`. */
 export const taskTerms = (text: string) => [...new Set(words(text))].filter((term) => term.length >= 3 && !STOPWORDS.has(term));
 export const termHits = (terms: string[], text: string) => { const haystack = new Set(words(text)); return terms.filter((term) => haystack.has(term)); };
@@ -302,13 +308,17 @@ export async function buildContextBundle(input: ContextInput): Promise<ContextBu
     if (candidate.superseded && !input.includeSuperseded) return omit(candidate, 'superseded');
     const key = `${candidate.id.slice(candidate.id.indexOf(':') + 1)} ${candidate.match ?? candidate.title}`;
     // --about terms also search a Brain record's body; the task id terms do not (unchanged selection without --about).
-    const hits = [...new Set([...termHits(terms, key), ...termHits(aboutTerms, `${key} ${candidate.body ?? ''}`)])];
+    const about = termHits(aboutTerms, `${key} ${candidate.body ?? ''}`);
+    const hits = [...new Set([...termHits(terms, key), ...about])];
     if (!candidate.always && !hits.length) return omit(candidate, 'no-match');
+    candidate.aboutHit = candidate.kind === 'brain' && about.length > 0;
     candidate.score = (candidate.always ? 1 : 0) + hits.length - (candidate.penalty ?? 0);
     candidate.reason = [candidate.always ? 'in scope' : '', hits.length ? `matched: ${hits.join(', ')}` : '', candidate.penalty ? 'proposed (ranked below accepted)' : '', candidate.superseded ? 'superseded (--include-superseded)' : ''].filter(Boolean).join('; ');
     ranked.push(candidate);
   });
-  ranked.sort((a, b) => b.score - a.score || b.fresh - a.fresh); // stable: ties keep source order
+  // A Brain record with an --about hit is packed before everything else optional, the always-relevant items included;
+  // within each group the order is unchanged. Without --about no record qualifies, so the order is the old one.
+  ranked.sort((a, b) => Number(b.aboutHit) - Number(a.aboutHit) || b.score - a.score || b.fresh - a.fresh); // stable: ties keep source order
 
   // --- budget -------------------------------------------------------------------------------------
   const mandatory = candidates.filter((candidate) => candidate.mandatory);
