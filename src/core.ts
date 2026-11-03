@@ -4044,7 +4044,9 @@ export async function contextAgentOS(options: any = {}) {
   const objective = resolveObjective(await safeRead(join(root, '.agentos/handoff.md')));
   let checkpointTask: string | null = null;
   try { checkpointTask = resolveTask(options.task, objective.selected ?? null).id; } catch { /* no task id: no checkpoint record */ }
-  const checkpoint = checkpointTask ? await checkpointContextRecord({ root, repos: input.repos, excluded: checkpointExcludedPaths(input.project) }, checkpointTask) : null;
+  // Lazy: exclusions are validated only when a loaded checkpoint is reconciled, so a bad handoff.exclude_paths
+  // cannot break context when no checkpoint exists (it still fails context, like resume, once one loads).
+  const checkpoint = checkpointTask ? await checkpointContextRecord({ root, repos: input.repos, get excluded() { return checkpointExcludedPaths(input.project); } }, checkpointTask) : null;
   const bundle = await buildContextBundle({ ...input, checkpoint: checkpoint ?? undefined,
     missing: [...input.missing, ...(checkpoint?.missing ?? [])], warnings: [...input.warnings, ...(checkpoint?.warnings ?? [])] });
   const advisoryLines = bundle.ok ? advisories(adapter) : [];

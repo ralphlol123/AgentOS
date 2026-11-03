@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -110,6 +110,26 @@ test('an empty Brain is visible in doctor, status and startup context; inspectio
   assert.ok(context.warnings.some(w => /no registered.*Brain|Brain.*no registered/i.test(w)));
   assert.match(run(root, ['status']), /no registered.*Brain|Brain.*no registered/i);
   assert.deepEqual(await snapshot(root), before);
+});
+
+const badExclusions = (root) => appendFile(join(root, '.agentos/project.yaml'), 'handoff:\n  exclude_paths: 5\n');
+
+test('context validates handoff.exclude_paths only when a checkpoint loads (no task, task without checkpoint)', async t => {
+  const root = await fixture(t);
+  await badExclusions(root);
+  assert.match(run(root, ['context', 'codex']), /Follow AgentOS/);
+  assert.match(run(root, ['context', 'codex', '--task', 'nothing-saved']), /Task: nothing-saved/);
+});
+
+test('invalid handoff.exclude_paths still fails context and resume when a checkpoint loads', async t => {
+  const root = await fixture(t);
+  checkpoint(root);
+  await badExclusions(root);
+  for (const args of [['context', 'codex', '--task', 'feature'], ['resume', '--task', 'feature']]) {
+    const r = spawnSync(process.execPath, [CLI, ...args], { cwd: root, env, encoding: 'utf8' });
+    assert.equal(r.status, 1, args.join(' '));
+    assert.match(r.stderr, /handoff\.exclude_paths must be a list of relative paths\./, args.join(' '));
+  }
 });
 
 test('generated startup instructions checkpoint milestones before limits and reuse the task id', async t => {
