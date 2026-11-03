@@ -316,9 +316,10 @@ export async function buildContextBundle(input: ContextInput): Promise<ContextBu
     candidate.reason = [candidate.always ? 'in scope' : '', hits.length ? `matched: ${hits.join(', ')}` : '', candidate.penalty ? 'proposed (ranked below accepted)' : '', candidate.superseded ? 'superseded (--include-superseded)' : ''].filter(Boolean).join('; ');
     ranked.push(candidate);
   });
-  // A Brain record with an --about hit is packed before everything else optional, the always-relevant items included;
-  // within each group the order is unchanged. Without --about no record qualifies, so the order is the old one.
-  ranked.sort((a, b) => Number(b.aboutHit) - Number(a.aboutHit) || b.score - a.score || b.fresh - a.fresh); // stable: ties keep source order
+  // Usual order: score, then freshness; stable, so ties keep source order. The top three Brain --about hits in that order
+  // may move ahead (see the packing below); without --about none qualifies.
+  ranked.sort((a, b) => b.score - a.score || b.fresh - a.fresh);
+  const promotable = ranked.filter((candidate) => candidate.aboutHit).slice(0, 3);
 
   // --- budget -------------------------------------------------------------------------------------
   const mandatory = candidates.filter((candidate) => candidate.mandatory);
@@ -343,34 +344,45 @@ export async function buildContextBundle(input: ContextInput): Promise<ContextBu
       text: `AgentOS context: OVERFLOW\nMandatory context (overview, objective, constraints, scope, role, active checkpoint when present), with the header, the Omitted/Missing/Warnings listing and the advisories that are always rendered, needs ${needed} tokens, ${TOKEN_LABEL}, but the budget is ${limit}. Nothing was truncated and no context was rendered; raise --budget to at least ${needed} or shorten the mandatory sources.`,
     });
   }
-  // Selection is unchanged: optional records in rank order against header + mandatory sections, then the loop below
-  // drops the last ones until the whole rendering fits (it always does with none, since needed <= limit).
-  const selected = [...mandatory];
-  let running = overhead + estimateTokens(headerLines(input, task, role).join('\n')) + mandatory.reduce((sum, candidate) => sum + estimateTokens(renderSection(candidate)), 0);
-  let full = false;
-  for (const candidate of ranked) {
-    const cost = estimateTokens(renderSection(candidate));
-    if (full || running + cost > limit) { full = true; omit(candidate, 'budget'); continue; }
-    running += cost;
-    selected.push(candidate);
-  }
-  for (;;) {
-    const conflicts = findConflicts(selected);
-    const shown = relabel(omitted, selected);
-    const text = render(input, task, role, selected, shown, conflicts, missing, warnings);
-    const estimate = estimateOf(text);
-    const last = selected.at(-1);
-    if (estimate <= limit) {
-      return finish({
-        ok: true, engine, task, role, scope, budget: { limit, estimate, overhead, label: TOKEN_LABEL },
-        included: selected.map((candidate) => ({ id: candidate.id, kind: candidate.kind, source: candidate.source, reason: candidate.mandatory ? 'mandatory' : candidate.reason, tokens: estimateTokens(renderSection(candidate)) })),
-        omitted: shown, conflicts, missing, warnings, text,
-      });
+  // Selection: optional records in the given order against header + mandatory sections, then the inner loop drops the
+  // last ones until the whole rendering fits (it always does with none, since needed <= limit).
+  const pack = (order: Candidate[]) => {
+    const selected = [...mandatory], dropped = [...omitted];
+    let running = overhead + estimateTokens(headerLines(input, task, role).join('\n')) + mandatory.reduce((sum, candidate) => sum + estimateTokens(renderSection(candidate)), 0);
+    let full = false;
+    for (const candidate of order) {
+      const cost = estimateTokens(renderSection(candidate));
+      if (full || running + cost > limit) { full = true; dropped.push({ id: candidate.id, kind: candidate.kind, reason: 'budget' }); continue; }
+      running += cost;
+      selected.push(candidate);
     }
-    if (last.mandatory) throw new Error(`internal: context estimate ${estimate} exceeds ${limit} with no optional record left (needed ${needed})`);
-    selected.pop(); // the trailer (omitted/conflicts/missing) pushed the total over the limit
-    omitted.push({ id: last.id, kind: last.kind, reason: 'budget' });
+    for (;;) {
+      const conflicts = findConflicts(selected);
+      const shown = relabel(dropped, selected);
+      const text = render(input, task, role, selected, shown, conflicts, missing, warnings);
+      const estimate = estimateOf(text);
+      const last = selected.at(-1);
+      if (estimate <= limit) return { selected, shown, conflicts, text, estimate };
+      if (last.mandatory) throw new Error(`internal: context estimate ${estimate} exceeds ${limit} with no optional record left (needed ${needed})`);
+      selected.pop(); // the trailer (omitted/conflicts/missing) pushed the total over the limit
+      dropped.push({ id: last.id, kind: last.kind, reason: 'budget' });
+    }
+  };
+  // Brain-first for --about: the top 3, 2 or 1 Brain --about hits go first, the rest in the usual order, using the
+  // largest count that keeps every always-relevant item the usual order fits. Without --about this is pack(ranked).
+  let packed = pack(ranked);
+  const kept = packed.selected.filter((candidate) => candidate.always);
+  for (let count = promotable.length; count > 0; count--) {
+    const first = promotable.slice(0, count);
+    const trial = pack([...first, ...ranked.filter((candidate) => !first.includes(candidate))]);
+    if (kept.every((candidate) => trial.selected.includes(candidate))) { packed = trial; break; }
   }
+  const { selected, shown, conflicts, text, estimate } = packed;
+  return finish({
+    ok: true, engine, task, role, scope, budget: { limit, estimate, overhead, label: TOKEN_LABEL },
+    included: selected.map((candidate) => ({ id: candidate.id, kind: candidate.kind, source: candidate.source, reason: candidate.mandatory ? 'mandatory' : candidate.reason, tokens: estimateTokens(renderSection(candidate)) })),
+    omitted: shown, conflicts, missing, warnings, text,
+  });
 }
 
 /** Two current (non-superseded) selected decisions with the same subject: the heading minus its date, up to ':'. */
