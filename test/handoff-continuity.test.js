@@ -183,6 +183,20 @@ test('prose directly above the managed block is still superseded after the first
   assert.deepEqual(titles(sections(json(root, ['context', 'codex', '--task', 'feature']).text).filter(superseded)), ['## Next exact action']);
 });
 
+test('status presents the newest checkpoint\'s Next as the one current next action, without writing', async t => {
+  const root = await fixture(t);
+  await earlierProse(root);
+  run(root, ['checkpoint', '--task', 'older', '--next', 'Superseded task step']);
+  run(root, ['checkpoint', '--task', 'feature', '--engine', 'claude-code', '--next', 'Confirm CI on the new head']);
+  const { id } = JSON.parse(await readFile(join(root, '.agentos/checkpoints/feature/current.json'), 'utf8'));
+  const before = await snapshot(root);
+  const status = run(root, ['status']);
+  assert.equal(status.match(/^Current next action/gm)?.length, 1, status);
+  assert.match(status, new RegExp(`^Current next action \\(task feature, checkpoint ${id}\\): Confirm CI on the new head$`, 'm'), status);
+  assert.doesNotMatch(status, /Run the continuation trial|Superseded task step/, 'older next-action text must not read as current');
+  assert.deepEqual(await snapshot(root), before, 'status must not write');
+});
+
 test('generated startup instructions checkpoint milestones before limits and reuse the task id', async t => {
   const root = await fixture(t);
   for (const path of ['AGENTS.md', 'CLAUDE.md', '.hermes.md', '.agentos/guide.md']) {
