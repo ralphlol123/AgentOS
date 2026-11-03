@@ -70,7 +70,7 @@ test('F7/A05: Brain writes refresh the generated block of the index note; unchan
   assert.equal(count(note, START), 1, note);
   assert.equal(count(note, END), 1);
   for (const id of ['architecture', 'conventions', 'glossary', 'decisions']) assert.match(block(note), new RegExp(`\`brain:${id}\``), `links ${id}`);
-  assert.match(block(note), /\]\(<\.\.\/\.agentos\/brain\/architecture\.md>\)/, 'relative link, never a copy');
+  assert.match(block(note), /\]\(<Records\/architecture\.md>\) — `brain:architecture` \(architecture, proposed\) — read-only copy; the record is `\.agentos\/brain\/architecture\.md` in the project/, 'a record outside the vault: link to its read-only copy, never a link that leaves the vault');
 
   const before = await snapshot(root);
   const again = cli(['brain', 'index'], root);

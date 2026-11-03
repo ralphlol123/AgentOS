@@ -17,4 +17,4 @@
 ## Later
 
 - [ ] Body-text retrieval beyond Brain records: `brain search` and `decisions.md` section bodies (`context --about` covers Brain record bodies; the task id stays separate from the phrase).
-- [ ] Make the default Obsidian layout expose the actual Brain records.
+- [ ] `brain propose --from <read-only copy>`: strip the copy's frontmatter and banner (today it is refused).

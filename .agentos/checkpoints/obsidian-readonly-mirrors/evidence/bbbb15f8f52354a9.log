@@ -1,0 +1,8 @@
+$ npm run check
+(cwd .)
+--- stdout ---
+
+--- stderr ---
+npm notice run agentos-for-projects@3.2.0 check
+npm notice run node ./node_modules/typescript/bin/tsc -p tsconfig.json --noEmit
+

@@ -82,7 +82,7 @@ test('obsidian init creates a plain knowledge folder with a relative-link index 
   assert.match(r.stdout, /\.obsidian\/ is not created/);
   const index = await read(root, 'knowledge/index.md');
   assert.match(index, /^# Ws AgentOS Index/m);
-  assert.match(index, /\]\(<\.\.\/\.agentos\/brain\/architecture\.md>\)/, 'Brain records linked by relative path');
+  assert.match(index, /\]\(<Records\/architecture\.md>\)/, 'Brain records outside the vault linked through read-only copies');
   assert.ok(!index.includes(root), 'no absolute workspace path in the index');
   assert.equal(await exists(join(root, 'knowledge/.obsidian')), false);
 
@@ -120,7 +120,7 @@ test('obsidian link creates only <dest>/ and its index note; every byte elsewher
   const r = linkVault(root, vault);
   ok(r);
   assert.deepEqual(await outsideDest(), before, 'nothing outside <dest> changed (including .obsidian/)');
-  assert.deepEqual(await readdir(join(vault, DEST)), ['Ws AgentOS Index.md']);
+  assert.deepEqual(await readdir(join(vault, DEST)), ['Records', 'Ws AgentOS Index.md']);
   const index = await read(vault, `${DEST}/Ws AgentOS Index.md`);
   assert.match(index, /architecture\.md>\)/);
   const data = parseYaml(await read(root, '.agentos/project.yaml')).knowledge.obsidian;
