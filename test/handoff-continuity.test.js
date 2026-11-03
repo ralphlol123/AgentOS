@@ -138,6 +138,6 @@ test('generated startup instructions checkpoint milestones before limits and reu
     const text = await readFile(join(root, path), 'utf8');
     assert.match(text, /milestone/i, path);
     assert.match(text, /limit|interrupt/i, path);
-    assert.match(text, /same.*(?:task|id)|reuse.*task/i, path);
+    assert.match(text, /\bsame task id\b/i, path);
   }
 });
