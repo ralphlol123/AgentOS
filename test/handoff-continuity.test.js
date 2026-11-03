@@ -174,6 +174,42 @@ test('handoff prose rewritten after the checkpoint, or a checkpoint without a sa
   run(root, ['checkpoint', '--task', 'recovered', '--recover']);
   context = json(root, ['context', 'codex', '--task', 'recovered']);
   assert.deepEqual(sections(context.text).filter(superseded), [], 'a recovered checkpoint has no next action to supersede the prose with');
+  assert.doesNotMatch(context.text, /not current/, 'a recovered checkpoint has no digests, so it labels no prose as not current');
+});
+
+test('a handoff Next exact action edited after the checkpoint is a labelled not-current note; the checkpoint Next stays the one current next action', async t => {
+  const root = await fixture(t);
+  await earlierProse(root);
+  run(root, ['checkpoint', '--task', 'feature', '--progress', 'Drafted', '--next', 'Review the change']);
+  const { id } = JSON.parse(await readFile(join(root, '.agentos/checkpoints/feature/current.json'), 'utf8'));
+  const handoff = join(root, '.agentos/handoff.md');
+  await writeFile(handoff, (await readFile(handoff, 'utf8')).replace(OLD_NEXT, 'Merge after review.'));
+  const before = await snapshot(root);
+  const context = json(root, ['context', 'codex', '--task', 'feature']);
+  const labelled = (part) => /^## [^\n]*\[/.test(part);
+  const current = sections(context.text).filter((part) => !labelled(part)).join('\n');
+  assert.equal(current.match(/Next: Review the change/g)?.length, 1, context.text);
+  assert.doesNotMatch(current, /Merge after review|^## Next exact action/m, 'the edited text must not read as a second current next action');
+  const note = sections(context.text).filter((part) => part.startsWith('## Next exact action'));
+  assert.equal(note.length, 1, context.text);
+  assert.ok(note[0].split('\n')[0].endsWith(`[edited after checkpoint ${id}; not current]`), note[0]);
+  assert.match(note[0], /Merge after review\./, 'the edited text stays visible');
+  assert.match(note[0], /agentos checkpoint --task feature --next "/, 'the note says how to make it current');
+  assert.ok(sections(context.text).some((part) => part.startsWith('## Current state') && part.split('\n')[0].endsWith(`[superseded by checkpoint ${id}]`)), 'unchanged prose keeps its superseded label');
+  assert.deepEqual(await snapshot(root), before, 'context must not write');
+});
+
+test('without a checkpoint, handoff Next exact action is the unlabelled current next action (no task, task without checkpoint)', async t => {
+  const root = await fixture(t);
+  await earlierProse(root);
+  for (const args of [['context', 'codex'], ['context', 'codex', '--task', 'nothing-saved']]) {
+    const text = json(root, args).text;
+    const next = sections(text).filter((part) => part.startsWith('## Next exact action'));
+    assert.equal(next.length, 1, text);
+    assert.equal(next[0].split('\n')[0], '## Next exact action', next[0]);
+    assert.match(next[0], /Run the continuation trial\./);
+    assert.doesNotMatch(text, /superseded by checkpoint|not current/, args.join(' '));
+  }
 });
 
 test('prose directly above the managed block is still superseded after the first checkpoint inserts the block', async t => {
@@ -205,4 +241,11 @@ test('generated startup instructions checkpoint milestones before limits and reu
     assert.match(text, /limit|interrupt/i, path);
     assert.match(text, /\bsame task id\b/i, path);
   }
+});
+
+test('the generated guide states the next-action precedence: checkpoint Next, edited handoff as a note, handoff without a checkpoint', async t => {
+  const guide = await readFile(join(await fixture(t), '.agentos/guide.md'), 'utf8');
+  assert.match(guide, /checkpoint's Next is current/);
+  assert.match(guide, /Next exact action edited later is a note until saved with `--next`/);
+  assert.match(guide, /with no checkpoint, the handoff's is current/);
 });

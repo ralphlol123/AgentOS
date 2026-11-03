@@ -2,32 +2,29 @@
 
 ## Current objective
 
-After `agentos checkpoint --task <id> --next "<action>"`, the next agent's startup path (`agentos status`, `agentos context <engine> --task <id>`, `agentos resume --task <id>`) presents exactly one current next action: the most recently saved one. Older or contradicting next-action text in handoff.md or tasks.md is shown as superseded, never as current. Nothing is silently deleted.
+When handoff.md § Next exact action is edited after a checkpoint, `agentos context <engine> --task <id>` presents exactly one current next action, the checkpoint's Next. The edited text stays visible as a labelled not-current note with the command that makes it current. Without a checkpoint, § Next exact action stays the unlabelled current next action.
 
 ## Scope
 
 - Repo: `agentos-for-projects`, single-repo workspace.
-- Baseline: `a1286e9` on main (PR #69 merged), package 3.1.1. Unreleased changes; no version bump or release is requested.
-- Branch: `feat/unify-current-task-state`; task id: `unify-current-task-state`.
-- Allowed changes: checkpoint/context/status implementation, tests, docs and this repository's AgentOS state.
+- Baseline: `46b7090` on main (PR #70 merged), package 3.1.1. Unreleased changes; no version bump or release is requested.
+- Branch: `fix/context-next-action-precedence`; task id: `context-next-action-precedence`.
+- Allowed changes: context/checkpoint implementation, tests, guide, docs and this repository's AgentOS state. `status`, `resume` and Next truncation are out of scope.
 
 ## Current state
 
-- Phase 1 (context) committed in `a16062d`: a checkpoint that saves `--next` records `supersedes` digests of handoff.md § Current state and § Next exact action; `agentos context` labels prose still matching them `[superseded by checkpoint <id>]` and keeps it as history.
-- Phase 2 (status) committed in `ecd8cfa` (RED test) and `91588a0` (implementation): `agentos status` prints one `Current next action (task <id>, checkpoint <id>): <next>` line from the newest valid checkpoint across tasks by `created_at` (`newestCheckpoint` in `src/checkpoint.ts`, used by `statusAgentOS` in `src/core.ts`). Read-only; incomplete checkpoints are skipped. CHANGELOG and docs/checkpoints.md updated.
-- `resume` already shows only the checkpoint's Next.
-- Verification at `91588a0` (local WSL, npm): `npm run check` clean; `npm test` 822/822. Bun commands not run (Bun not installed here).
-- All commits are local on `feat/unify-current-task-state`; nothing pushed.
-- Not covered yet:
-  - tasks.md § Now is not reconciled: context never renders it, and child-repo `status` lists its open items as current.
-  - When prose is edited after the checkpoint, context shows both next actions unlabelled.
-  - Records written before `supersedes` existed mark nothing.
-- Carried over from `reliable-engine-handoffs`: the Claude Code interruption trial is still pending and gates release (not merge).
-- Previous state: `.agentos/runs/2026-11-03-before-status-next-action.md` (and, before that, `.agentos/runs/2026-11-03-before-unify-current-task-state.md`).
+- `2b770f3`: RED test in `test/handoff-continuity.test.js` (checkpoint, then an edited § Next exact action); it failed at `46b7090` with the edited text shown as an unlabelled second `## Next exact action`.
+- `a74fdc7`: fix. `supersededProse` (`src/checkpoint.ts`) also returns `edited` when § Next exact action no longer matches the record's `supersedes` digest; `src/context-builder.ts` labels it `[edited after checkpoint <id>; not current]` and names `agentos checkpoint --task <id> --next "<this text>"`. An edited § Current state stays unlabelled. Records without `supersedes` (legacy, recovered) label nothing, as before.
+- `8aec458`: guide (`guideMd` in `src/core.ts`, regenerated `.agentos/guide.md`, 5370/5376 bytes), docs/checkpoints.md and CHANGELOG state the precedence, with a guide test.
+- `bbc0fe7`: Ralph's release-gate acceptance recorded in `.agentos/runs/2026-11-03-claude-code-controlled-interruption-trial.md` (one added line).
+- Verification at `bbc0fe7` (local WSL, npm): `npm run check` clean; `npm test` 825/825; `npm run smoke` exit 0; `npm run test:metadata` 3/3. Bun not run (not installed here).
+- All commits are local; nothing pushed.
+- Not covered yet: tasks.md § Now is not reconciled with the checkpoint.
+- Previous state: `.agentos/runs/2026-11-03-before-context-next-action-precedence.md`.
 
 ## Next exact action
 
-Reconcile tasks.md § Now with the active checkpoint: in child-repo `status` ("Open tasks (Now)") and in `context`, mark § Now items written before the checkpoint as superseded, with a failing-then-passing test in `test/handoff-continuity.test.js`.
+Phynceon reviews the local commits on `fix/context-next-action-precedence`, then pushes and opens the PR.
 
 ## Protected files / do not touch
 
@@ -37,7 +34,7 @@ Reconcile tasks.md § Now with the active checkpoint: in child-repo `status` ("O
 ## Open decisions
 
 - Release version and merge remain separate from this implementation.
-- `status` has no `--task`: implemented as the newest valid checkpoint by `created_at` (equal to the pointer's `updated_at`), naming its task; owner may still prefer a `--task` flag.
+- `status` has no `--task`: it uses the newest valid checkpoint by `created_at`; owner may still prefer a `--task` flag.
 - Retrieval improvements and Obsidian layout changes remain follow-up work.
 
 <!-- agentos:checkpoint:start -->

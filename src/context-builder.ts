@@ -58,8 +58,9 @@ export interface ContextInput {
   budget?: string | number;
   includeSuperseded?: boolean;
   /** Current checkpoint summary for the task (`.agentos/checkpoints/<task>/current.json`), when one exists;
-   *  `supersedes` lists the handoff prose sections (HANDOFF_PROSE ids) unchanged since it was saved. */
-  checkpoint?: { source: string; text: string; supersedes?: { id: string; at: string; ids: string[] } };
+   *  `supersedes` lists the handoff prose sections (HANDOFF_PROSE ids) unchanged since it was saved; `edited`, the
+   *  Next exact action changed since (shown as a not-current note). */
+  checkpoint?: { source: string; text: string; supersedes?: { id: string; at: string; ids: string[]; edited?: string[] } };
   /** Valid Project Brain records (src/brain.ts brainContextRecords); rendered by reference, never as rules. */
   brain?: Array<{ id: string; kind: string; status: string; scope: string; title: string; path: string; changed: boolean; location?: 'workspace' | 'vault' }>;
   /** Known-unreadable inputs (e.g. `vault unavailable: <dir>`); listed under Missing, so the bundle never reads as complete. */
@@ -225,9 +226,11 @@ export async function buildContextBundle(input: ContextInput): Promise<ContextBu
   // Prose unchanged since the checkpoint was saved is older than its Next: shown as history, never as a second next action.
   const by = input.checkpoint?.supersedes;
   for (const prose of handoffProse(files['handoff.md'])) {
-    const older = by?.ids.includes(prose.id);
+    const older = by?.ids.includes(prose.id), edited = by?.edited?.includes(prose.id);
     add({ id: prose.id, kind: 'handoff', title: prose.title, source: handoffSource(prose.heading), always: true, fresh: mtimes['handoff.md'],
-      ...(older ? { label: ` [superseded by checkpoint ${by.id}]`, text: `Unchanged since checkpoint ${by.id} was saved (${by.at}). The Next under ## Checkpoint is the current next action; this text is kept as history and does not override it.\n${prose.text}` } : { text: prose.text }) });
+      ...(older ? { label: ` [superseded by checkpoint ${by.id}]`, text: `Unchanged since checkpoint ${by.id} was saved (${by.at}). The Next under ## Checkpoint is the current next action; this text is kept as history and does not override it.\n${prose.text}` }
+        : edited ? { label: ` [edited after checkpoint ${by.id}; not current]`, text: `Edited after checkpoint ${by.id} was saved (${by.at}). The Next under ## Checkpoint is the current next action; this note does not override it. To make it current, save it through a checkpoint: \`agentos checkpoint --task ${task} --next "<this text>"\`.\n${prose.text}` }
+        : { text: prose.text }) });
   }
   for (const repo of input.repos) {
     const notePath = `.agentos/repos/${repo.name}.md`;
