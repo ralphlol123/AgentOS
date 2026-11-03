@@ -69,6 +69,9 @@ export interface ContextInput {
   missing?: string[];
   /** Diagnostics that do not make the bundle incomplete (e.g. an optional Obsidian viewer that is off or gone). */
   warnings?: string[];
+  /** Text the engine adapter appends to a successful bundle (its ADVISORY lines, src/engines.ts advisoryTrailer);
+   *  counted in budget.estimate, not part of `text`. */
+  trailer?: string;
 }
 
 interface Candidate {
@@ -309,17 +312,31 @@ export async function buildContextBundle(input: ContextInput): Promise<ContextBu
 
   // --- budget -------------------------------------------------------------------------------------
   const mandatory = candidates.filter((candidate) => candidate.mandatory);
-  const headerText = headerLines(input, task, role).join('\n');
-  const needed = overhead + estimateTokens(headerText) + mandatory.reduce((sum, candidate) => sum + estimateTokens(renderSection(candidate)), 0);
+  // D7: a Brain record that matched nothing but whose file is already shown section by section (e.g. brain:decisions vs the
+  // decision:* sections of .agentos/decisions.md) is reported as covered by that section, not as no-match.
+  const brainSource = new Map(candidates.filter((candidate) => candidate.kind === 'brain').map((candidate) => [candidate.id, candidate.source]));
+  const relabel = (list: ContextBundle['omitted'], selected: Candidate[]) => list.map((item) => {
+    const source = item.reason === 'no-match' ? brainSource.get(item.id) : undefined;
+    const via = source && selected.find((candidate) => candidate.source.startsWith(`${source}#`))?.id;
+    return via ? { ...item, reason: 'covered' as const, via } : item;
+  });
+  // The estimate counts everything rendered: header, sections, Omitted/Conflicts/Missing/Warnings and the engine's
+  // ADVISORY trailer (input.trailer), so a successful bundle always fits the limit.
+  const estimateOf = (text: string) => overhead + estimateTokens(text + (input.trailer ?? ''));
+  // needed = the smallest rendering: mandatory records only, every ranked record listed as omitted for budget.
+  const floorOmitted = relabel([...omitted, ...ranked.map((candidate) => ({ id: candidate.id, kind: candidate.kind, reason: 'budget' as const }))], mandatory);
+  const needed = estimateOf(render(input, task, role, mandatory, floorOmitted, [], missing, warnings));
   if (needed > limit) {
     return finish({
       ok: false, engine, task, role, scope, budget: { limit, estimate: needed, overhead, label: TOKEN_LABEL }, included: [], omitted: [], conflicts: [], missing, warnings,
       overflow: { needed, budget: limit, mandatory: mandatory.map((candidate) => ({ id: candidate.id, kind: candidate.kind, tokens: estimateTokens(renderSection(candidate)) })) },
-      text: `AgentOS context: OVERFLOW\nMandatory context (overview, objective, constraints, scope, role, active checkpoint when present) needs ${needed} tokens, ${TOKEN_LABEL}, but the budget is ${limit}. Nothing was truncated and no context was rendered; raise --budget or shorten the mandatory sources.`,
+      text: `AgentOS context: OVERFLOW\nMandatory context (overview, objective, constraints, scope, role, active checkpoint when present), with the header, the Omitted/Missing/Warnings listing and the advisories that are always rendered, needs ${needed} tokens, ${TOKEN_LABEL}, but the budget is ${limit}. Nothing was truncated and no context was rendered; raise --budget to at least ${needed} or shorten the mandatory sources.`,
     });
   }
+  // Selection is unchanged: optional records in rank order against header + mandatory sections, then the loop below
+  // drops the last ones until the whole rendering fits (it always does with none, since needed <= limit).
   const selected = [...mandatory];
-  let running = needed;
+  let running = overhead + estimateTokens(headerLines(input, task, role).join('\n')) + mandatory.reduce((sum, candidate) => sum + estimateTokens(renderSection(candidate)), 0);
   let full = false;
   for (const candidate of ranked) {
     const cost = estimateTokens(renderSection(candidate));
@@ -327,28 +344,20 @@ export async function buildContextBundle(input: ContextInput): Promise<ContextBu
     running += cost;
     selected.push(candidate);
   }
-  // D7: a Brain record that matched nothing but whose file is already shown section by section (e.g. brain:decisions vs the
-  // decision:* sections of .agentos/decisions.md) is reported as covered by that section, not as no-match.
-  const brainSource = new Map(candidates.filter((candidate) => candidate.kind === 'brain').map((candidate) => [candidate.id, candidate.source]));
-  const relabel = () => omitted.map((item) => {
-    const source = item.reason === 'no-match' ? brainSource.get(item.id) : undefined;
-    const via = source && selected.find((candidate) => candidate.source.startsWith(`${source}#`))?.id;
-    return via ? { ...item, reason: 'covered' as const, via } : item;
-  });
   for (;;) {
     const conflicts = findConflicts(selected);
-    const shown = relabel();
+    const shown = relabel(omitted, selected);
     const text = render(input, task, role, selected, shown, conflicts, missing, warnings);
-    const estimate = overhead + estimateTokens(text);
+    const estimate = estimateOf(text);
     const last = selected.at(-1);
-    if (estimate <= limit || last.mandatory) {
-      if (estimate > limit) warnings.push(`estimate ${estimate} exceeds the budget ${limit} only because of the Omitted/Conflicts/Missing listing; mandatory records were kept whole.`);
+    if (estimate <= limit) {
       return finish({
         ok: true, engine, task, role, scope, budget: { limit, estimate, overhead, label: TOKEN_LABEL },
         included: selected.map((candidate) => ({ id: candidate.id, kind: candidate.kind, source: candidate.source, reason: candidate.mandatory ? 'mandatory' : candidate.reason, tokens: estimateTokens(renderSection(candidate)) })),
         omitted: shown, conflicts, missing, warnings, text,
       });
     }
+    if (last.mandatory) throw new Error(`internal: context estimate ${estimate} exceeds ${limit} with no optional record left (needed ${needed})`);
     selected.pop(); // the trailer (omitted/conflicts/missing) pushed the total over the limit
     omitted.push({ id: last.id, kind: last.kind, reason: 'budget' });
   }

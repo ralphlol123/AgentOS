@@ -2,28 +2,29 @@
 
 ## Current objective
 
-An incoming agent finds a relevant Brain decision by a phrase in its body, from a differently named task, without knowing the note's title or the original task id. The phrase is a search input only: the task id used by `context`, `checkpoint` and `resume` stays the `--task` value.
+Every successful `agentos context` result fits its `--budget`: `ok:true` means `budget.estimate <= budget.limit`, and `overflow.needed` is the smallest budget that succeeds. Ranking, matching and `--about` semantics are out of scope and unchanged.
 
 ## Scope
 
 - Repo: `agentos-for-projects`, single-repo workspace.
-- Baseline: `ddf96c1` on main (PR #73 merged), package 3.1.1. Unreleased changes; no version bump or release is requested (a separate 3.2.0 release PR may be in review).
-- Branch: `feat/brain-body-retrieval`; task id: `brain-body-retrieval`.
-- Allowed changes: context/brain selection, CLI flag wiring, tests, docs, CHANGELOG Unreleased and this repository's AgentOS state. Out of scope: issue #71 (next-action truncation), issue #72 (multi-task status), the version bump.
+- Baseline: `f40626f` on main (PR #75 merged), package 3.2.0. Unreleased changes; no version bump or release is requested.
+- Branch: `fix/context-budget-accounting`; task id: `context-budget-accounting`.
+- Allowed changes: the context budget accounting (`src/context-builder.ts`, the advisory trailer in `src/engines.ts`, its wiring in `src/core.ts`), tests, docs/context-builder.md, CHANGELOG Unreleased and this repository's AgentOS state. Out of scope: ranking, scores, tie-breaks, matching, `--about`, the version bump.
 
 ## Current state
 
-- `2a271dd`: RED test `test/brain-body-retrieval.test.js` (3 tests); at `ddf96c1` all 3 failed with `Unknown option: --about`.
-- `e60e66b`: `agentos context --about "<phrase>"`. Its words are extra match terms (`taskTerms`/`termHits`, as for `--task`) that also match each Brain record's body (`brainContextRecords` now passes `body`; never rendered). Scope and status filters run first, so an out-of-scope record with the phrase stays `out-of-scope`. `--task`, `checkpoint` and `resume` are unchanged; `checkpoint`/`resume` reject `--about`. Without `--about`, output is byte-identical to `ddf96c1`. The tight-budget figure in the RED test was corrected in this commit (the first figure hit the existing Omitted-trailer rule).
-- `028fcf3`: docs/context-builder.md, docs/brain.md, README synopsis and one CHANGELOG Unreleased line (`### Added`). Guide unchanged (5370/5376 bytes).
-- Verification at `028fcf3` (local WSL, npm): `npm run check` clean; `npm test` 828/828; `npm run smoke` exit 0; `npm run test:metadata` 3/3. Bun not run (not installed here).
+- `c768444`: RED test `test/context-budget-accounting.test.js` (2 tests). At `f40626f` both failed: at `--budget <needed>` the result was `ok:true` with estimate 3781 > limit 2863, and the estimate left out the ADVISORY lines (3866 vs 3964).
+- `44a9582`: `needed` is now the estimate of the smallest full rendering (header, mandatory sections, every optional record listed as Omitted `budget`, Missing, Warnings, plus the engine's ADVISORY trailer from `advisoryTrailer` in src/engines.ts). The final loop drops optional records until the whole rendering fits and never returns `ok:true` over the limit (the old over-budget warning is gone). Selection order is unchanged. `budget.estimate` now counts the ADVISORY lines (`test/v1-slice2-context.test.js` estimate formula updated).
+- `c0b1e75`: docs/context-builder.md § Budget (guarantee, what is and is not measured, real `needed`) and one CHANGELOG Unreleased `### Fixed` line.
+- On AgentOS's own repo (claude-code, `--task split-core-into-modules`): B_min 3899 with `--about milestone`, 3901 without; B_min - 1 is OVERFLOW exit 1. No `ok:true` over limit in sweeps B_min..default size (step 10). At the default budget the rendered text, included and omitted lists are byte-identical to `f40626f`; only the reported estimate rises by the advisory (~99 tokens).
+- Verification at `c0b1e75` (local WSL, npm): `npm run check` clean; `npm test` 830/830; `npm run smoke` exit 0; `npm run test:metadata` 3/3. Bun not run (not installed here).
 - All commits are local; nothing pushed.
-- Not covered: `decisions.md` section bodies and `brain search` still match titles only; `--about` is not echoed in the rendered text or as a JSON field (the included item's `reason` lists the matched terms).
-- Previous state: `.agentos/runs/2026-11-03-before-brain-body-retrieval.md`.
+- Not counted in the estimate: the human `Budget:` footer line and the `--require-synced-config` status line (they report on the budget) and the JSON envelope.
+- Previous state: `.agentos/runs/2026-11-03-before-context-budget-accounting.md`.
 
 ## Next exact action
 
-Phynceon reviews the local commits on `feat/brain-body-retrieval`, then pushes and opens the draft PR.
+Phynceon reviews the local commits on `fix/context-budget-accounting`, then pushes and opens the draft PR.
 
 ## Protected files / do not touch
 
@@ -34,8 +35,7 @@ Phynceon reviews the local commits on `feat/brain-body-retrieval`, then pushes a
 ## Open decisions
 
 - Release version and merge remain separate from this implementation.
-- Whether `brain search` and `decisions.md` section bodies should also match body text (follow-up).
-- Whether a checkpoint should store a task description that `context` reuses as the search phrase (rejected here as more infrastructure; owner may prefer it).
+- Whether a tight budget should shorten the Omitted list (for example counts per reason) so more optional records fit. Not done here: the accounting fix alone makes the budget truthful and leaves the output format unchanged.
 
 <!-- agentos:checkpoint:start -->
 ## Checkpoint (managed)

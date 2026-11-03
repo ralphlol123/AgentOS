@@ -13,7 +13,7 @@ import { STATE_SIZE_WARN_CHARS, largestSections, sectionSizes, tasksShapeWarning
 import { dumpYaml, patchProjectYaml } from './project-yaml-edit.js';
 import { renderUnifiedDiff } from './compact-report.js';
 import { agentCardDoctor, upgradeLegacyCatalogCards, diffSummary, manifestAgent, manifestFor, PACKAGE_VERSION, parseAgentCard, planCardInstall, provenanceFor, removeAgent, renderCard, ROLE_ID, setAgentEnabled, showAgent } from './agents.js';
-import { advisories, CLAUDE_RESIDUAL, ENGINE_ADAPTERS, engineAdapter, ROLE_BLOCK_END, ROLE_BLOCK_START, type NativeFile } from './engines.js';
+import { advisories, advisoryTrailer, CLAUDE_RESIDUAL, ENGINE_ADAPTERS, engineAdapter, ROLE_BLOCK_END, ROLE_BLOCK_START, type NativeFile } from './engines.js';
 import { editedEntries, jsonArrays, jsonAt, parseSyncRecord, recordDigest, replaceRecordedEntries, serializeJsonLike, SYNC_RECORD_DIR, syncFreshness, syncRecord, syncRecordPath, type Installed, type Now, type SyncRecord, type SyncRecordFile } from './synced-config.js';
 import { resolveCompactMode } from './cli-options.js';
 import { canonicalAgentId, resolveAgentAlias, resolveSkillAlias, RETIRED_AGENT_IDS, RETIRED_SKILL_IDS, SKILL_ALIASES, agentDeprecationNotice, skillDeprecationNotice } from './aliases.js';
@@ -4051,7 +4051,7 @@ export async function contextAgentOS(options: any = {}) {
   // Lazy: exclusions are validated only when a loaded checkpoint is reconciled, so a bad handoff.exclude_paths
   // cannot break context when no checkpoint exists (it still fails context, like resume, once one loads).
   const checkpoint = checkpointTask ? await checkpointContextRecord({ root, repos: input.repos, handoffText, get excluded() { return checkpointExcludedPaths(input.project); } }, checkpointTask) : null;
-  const bundle = await buildContextBundle({ ...input, checkpoint: checkpoint ?? undefined,
+  const bundle = await buildContextBundle({ ...input, checkpoint: checkpoint ?? undefined, trailer: advisoryTrailer(adapter),
     missing: [...input.missing, ...(checkpoint?.missing ?? [])], warnings: [...input.warnings, ...(checkpoint?.warnings ?? [])] });
   const advisoryLines = bundle.ok ? advisories(adapter) : [];
   // --require-complete: a bundle with Missing items (e.g. an unavailable vault) exits 1; the bundle itself stays `ok`.

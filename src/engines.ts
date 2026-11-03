@@ -50,8 +50,11 @@ export function advisories(adapter: Pick<EngineAdapter, 'id' | 'capabilities'>) 
   });
 }
 
+/** What renderWith appends to a successful bundle's text; `context` counts it in budget.estimate. */
+export const advisoryTrailer = (adapter: Pick<EngineAdapter, 'id' | 'capabilities'>) => ['', '', ...advisories(adapter)].join('\n');
+
 function renderWith(this: EngineAdapter, context: ContextBundle) {
-  return context.ok ? [context.text, '', ...advisories(this)].join('\n') : context.text;
+  return context.ok ? context.text + advisoryTrailer(this) : context.text;
 }
 
 export const ROLE_BLOCK_START = '<!-- agentos:role:start -->';

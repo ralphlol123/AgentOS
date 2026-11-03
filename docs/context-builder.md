@@ -43,9 +43,10 @@ Optional: `acceptance` (`## Acceptance criteria` in `tasks.md`, else `handoff.md
 
 - Tokens are estimated as `ceil(chars/4)`; every figure carries the label `estimate (chars/4)`. They are not tokenizer counts.
 - Fixed per-engine overhead, reserved from the budget for what the engine reads before this context (its bootloader file, system prompt, tool scaffolding). **Assumptions, not measurements:** claude-code 2000, hermes 2000, codex 1500, opencode 1500, any other engine 1000.
-- `budget.estimate` = overhead + `ceil(text.length / 4)` of the rendered text, including the Omitted/Conflicts/Missing blocks.
-- Mandatory records: if overhead + header + mandatory sections exceed the limit, the result is `ok:false` with `overflow: {needed, budget, mandatory: [{id, kind, tokens}]}`, an explanation instead of a rendering, and exit 1. Nothing is truncated.
-- Optional records are added in rank order. The first one that does not fit, and every one after it, is omitted with reason `budget`. If the trailer then pushes the total over the limit, the last optional record is dropped too.
+- `budget.estimate` = overhead + `ceil(chars / 4)` of everything the engine receives: `text` (header, sections, and the Omitted/Conflicts/Missing/Warnings blocks) plus the engine's `ADVISORY:` lines (printed after `text` without `--json`, listed as `advisories` with it), i.e. `ceil([text, '', ...advisories].join('\n').length / 4)`. The figure is the same in human and `--json` output. Not counted: the human `Budget:` line and the `--require-synced-config` status line after it (they report on the budget), and the JSON envelope around `text`.
+- **Guarantee:** every successful result (`ok:true`, exit 0) has `budget.estimate <= budget.limit`.
+- Overflow: `needed` is the estimate of the smallest rendering: header and mandatory sections, no optional record, every optional record listed under Omitted (`budget`), plus Missing, Warnings and the advisories. If `needed` exceeds the limit, the result is `ok:false` with `overflow: {needed, budget, mandatory: [{id, kind, tokens}]}`, `AgentOS context: OVERFLOW` and an explanation instead of a rendering, and exit 1. Nothing is truncated. `--budget <needed>` succeeds; `--budget <needed - 1>` overflows.
+- Optional records are added in rank order. The first one that does not fit, and every one after it, is omitted with reason `budget`. If the whole rendering then exceeds the limit, the last optional records are dropped (reason `budget`) until it fits; with none left it fits, because `needed <= limit`. The Omitted list is never shortened.
 
 ## Output
 
