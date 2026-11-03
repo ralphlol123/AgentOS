@@ -105,6 +105,21 @@ export function sectionText(section: RecognizedSection): string {
   return [section.suffix, section.body].filter((part) => part && part.trim()).join('\n\n').trim();
 }
 
+/** Handoff prose that restates task progress. A checkpoint that saves a next action supersedes it (src/checkpoint.ts). */
+export const HANDOFF_PROSE = [
+  { id: 'handoff:current-state', title: 'Current state', titles: ['Current state', 'Current status'] },
+  { id: 'handoff:next-exact-action', title: 'Next exact action', titles: ['Next exact action', 'Next action', 'Next step'] },
+] as const;
+
+/** The non-empty HANDOFF_PROSE sections of a handoff, first recognized heading per section. */
+export function handoffProse(text: string) {
+  return HANDOFF_PROSE.flatMap(({ id, title, titles }) => {
+    const found = recognizeSections(text, titles.map((canonical) => ({ role: titles[0], canonical })))[0];
+    const body = found ? sectionText(found) : '';
+    return body ? [{ id, title, heading: found.headingText, text: body }] : [];
+  });
+}
+
 /** A present heading with no suffix text and no body text is empty, not missing. */
 export function isEmptySection(section: RecognizedSection): boolean {
   return sectionText(section).length === 0;

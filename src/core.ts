@@ -4042,12 +4042,13 @@ export async function contextAgentOS(options: any = {}) {
     return { ok: false, text: `AgentOS context: FAIL\n${gateLines}\nNo context was rendered. Without the flags, the edit scope is delivered with the ADVISORY lines (see \`agentos doctor --engines\`).` };
   }
   const input = await contextInputFor(root, engine, options);
-  const objective = resolveObjective(await safeRead(join(root, '.agentos/handoff.md')));
+  const handoffText = await safeRead(join(root, '.agentos/handoff.md'));
+  const objective = resolveObjective(handoffText);
   let checkpointTask: string | null = null;
   try { checkpointTask = resolveTask(options.task, objective.selected ?? null).id; } catch { /* no task id: no checkpoint record */ }
   // Lazy: exclusions are validated only when a loaded checkpoint is reconciled, so a bad handoff.exclude_paths
   // cannot break context when no checkpoint exists (it still fails context, like resume, once one loads).
-  const checkpoint = checkpointTask ? await checkpointContextRecord({ root, repos: input.repos, get excluded() { return checkpointExcludedPaths(input.project); } }, checkpointTask) : null;
+  const checkpoint = checkpointTask ? await checkpointContextRecord({ root, repos: input.repos, handoffText, get excluded() { return checkpointExcludedPaths(input.project); } }, checkpointTask) : null;
   const bundle = await buildContextBundle({ ...input, checkpoint: checkpoint ?? undefined,
     missing: [...input.missing, ...(checkpoint?.missing ?? [])], warnings: [...input.warnings, ...(checkpoint?.warnings ?? [])] });
   const advisoryLines = bundle.ok ? advisories(adapter) : [];

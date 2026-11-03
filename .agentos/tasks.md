@@ -2,23 +2,21 @@
 
 ## Now
 
-- [ ] Confirm CI on the new head of `fix/reliable-engine-handoffs` (PR #69) after the review fixes are pushed. The Codex → Hermes continuation trial passed (2026-11-03).
+- [ ] Add the current next action to `agentos status` (`statusAgentOS` in `src/core.ts`), taken from the newest checkpoint record (task id `unify-current-task-state`).
 
 ## Acceptance criteria
 
-- Context and resume distinguish current passing checks from stale receipts after code or Git changes.
-- Missing Git evidence never counts as current verification.
-- A damaged checkpoint is visible to `context --require-complete`; read-only inspection changes no files.
-- The active checkpoint is retained or context reports budget overflow.
-- Empty Brains are visible and inspection does not initialize them.
-- All engine bootloaders advise milestone checkpoints and consistent task ids.
+- After `agentos checkpoint --task <id> --next "<action>"`, `agentos status`, `agentos context <engine> --task <id>` and `agentos resume --task <id>` present exactly one current next action: the most recently saved one.
+- Older or contradicting next-action text in handoff.md or tasks.md is not presented as current; the next agent can tell it is superseded.
+- Nothing is silently deleted.
 
 ## Next
 
-- [ ] Merge decision: Ralph. Release only after the Claude Code interruption trial (Claude Code interrupted mid-task, another engine continues with task id `reliable-engine-handoffs`).
+- [ ] tasks.md § Now: mark items written before the checkpoint as superseded in `context` and in child-repo `status` ("Open tasks (Now)").
+- [ ] Prose edited after the checkpoint: mark the checkpoint's Next as older in `context` instead of showing two unlabelled next actions.
+- [ ] Release only after the Claude Code interruption trial (carried over from `reliable-engine-handoffs`).
 
 ## Later
 
 - [ ] Improve body-text retrieval and separate task identity from task description.
-- [ ] Consolidate current task views around checkpoints.
 - [ ] Make the default Obsidian layout expose the actual Brain records.

@@ -6,7 +6,7 @@
  */
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { recognizeSections, resolveObjective, sectionText, type SectionRole } from './context-sections.js';
+import { handoffProse, recognizeSections, resolveObjective, sectionText, type SectionRole } from './context-sections.js';
 import { markdownHeadings } from './markdown.js';
 import { assertRelativeBoundaryPath, validateTaskScope } from './task-scope.js';
 import { effectiveEditScope, parseAgentCard, ROLE_ID } from './agents.js';
@@ -57,8 +57,9 @@ export interface ContextInput {
   scope?: string;
   budget?: string | number;
   includeSuperseded?: boolean;
-  /** Current checkpoint summary for the task (`.agentos/checkpoints/<task>/current.json`), when one exists. */
-  checkpoint?: { source: string; text: string };
+  /** Current checkpoint summary for the task (`.agentos/checkpoints/<task>/current.json`), when one exists;
+   *  `supersedes` lists the handoff prose sections (HANDOFF_PROSE ids) unchanged since it was saved. */
+  checkpoint?: { source: string; text: string; supersedes?: { id: string; at: string; ids: string[] } };
   /** Valid Project Brain records (src/brain.ts brainContextRecords); rendered by reference, never as rules. */
   brain?: Array<{ id: string; kind: string; status: string; scope: string; title: string; path: string; changed: boolean; location?: 'workspace' | 'vault' }>;
   /** Known-unreadable inputs (e.g. `vault unavailable: <dir>`); listed under Missing, so the bundle never reads as complete. */
@@ -221,9 +222,12 @@ export async function buildContextBundle(input: ContextInput): Promise<ContextBu
   add({ id: 'acceptance', kind: 'acceptance', title: 'Acceptance criteria', always: true, fresh: mtimes['tasks.md'],
     source: acceptance?.source ?? '(none recorded)', text: acceptance?.text ?? '(none recorded)' });
   if (input.checkpoint) add({ id: 'checkpoint', kind: 'checkpoint', title: 'Checkpoint', source: input.checkpoint.source, text: input.checkpoint.text, mandatory: true });
-  for (const [id, title, titles] of [['handoff:current-state', 'Current state', roles('Current state', 'Current status')], ['handoff:next-exact-action', 'Next exact action', roles('Next exact action', 'Next action', 'Next step')]] as const) {
-    const found = section(files['handoff.md'], titles as SectionRole[]);
-    if (found && sectionText(found)) add({ id, kind: 'handoff', title, source: handoffSource(found.headingText), text: sectionText(found), always: true, fresh: mtimes['handoff.md'] });
+  // Prose unchanged since the checkpoint was saved is older than its Next: shown as history, never as a second next action.
+  const by = input.checkpoint?.supersedes;
+  for (const prose of handoffProse(files['handoff.md'])) {
+    const older = by?.ids.includes(prose.id);
+    add({ id: prose.id, kind: 'handoff', title: prose.title, source: handoffSource(prose.heading), always: true, fresh: mtimes['handoff.md'],
+      ...(older ? { label: ` [superseded by checkpoint ${by.id}]`, text: `Unchanged since checkpoint ${by.id} was saved (${by.at}). The Next under ## Checkpoint is the current next action; this text is kept as history and does not override it.\n${prose.text}` } : { text: prose.text }) });
   }
   for (const repo of input.repos) {
     const notePath = `.agentos/repos/${repo.name}.md`;
