@@ -114,6 +114,30 @@ test('D3: the vault index marks records outside the vault folder; a record regis
   assert.match(cli(['brain', 'index'], root).stdout, /Unchanged: index note/, 'deterministic');
 });
 
+test('D3: the index note in an external vault gives a register instruction only where brain register accepts it', async (t) => {
+  // Phase 4 trial: with canonical: workspace the note said "register it in place: agentos brain register <this folder>/<note>.md",
+  // and following it was refused ("canonical is workspace"). The hint must name the canonical: vault step first.
+  const vault = join(await realpath(await base(t)), 'Vault');
+  await mkdir(join(vault, '.obsidian'), { recursive: true });
+  for (const canonical of ['workspace', 'vault']) {
+    const { root } = await project(t);
+    const dest = `Projects/${canonical}`;
+    ok(cli(['obsidian', 'link', '--vault', vault, '--dest', dest, '--create', '--canonical', canonical], root));
+    const [name] = (await readdir(join(vault, dest))).filter((file) => file.endsWith(' AgentOS Index.md'));
+    const note = await readFile(join(vault, dest, name), 'utf8');
+    await writeFile(join(vault, dest, 'decision.md'), '# Decision\n\nIn the vault.\n');
+    const register = cli(['brain', 'register', join(vault, dest, 'decision.md')], root);
+    if (canonical === 'workspace') {
+      fails(register);
+      assert.doesNotMatch(note, /To have a new record editable here, create it inside this folder and register it in place/, note);
+      assert.match(note, /set `canonical: vault` under `knowledge\.obsidian` in `\.agentos\/project\.yaml` first/, note);
+    } else {
+      ok(register);
+      assert.match(note, /To have a new record editable here, create it inside this folder and register it in place/, note);
+    }
+  }
+});
+
 // --- D4: WSL → Windows path mapping --------------------------------------------------------------------
 
 test('D4: wslWindowsPath maps /mnt/<drive> to a drive path and Linux-side paths to \\\\wsl$\\<distro>', async () => {

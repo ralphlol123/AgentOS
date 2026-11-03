@@ -307,13 +307,15 @@ const NONE_YET = '- None registered yet (`agentos init`, `agentos brain register
 const NONE_YET_BEFORE_311 = '- None registered yet (`agentos brain init`, `agentos brain register <path>`).'; // still recognised as generated
 const OUTSIDE = ' — outside this vault: edit in your editor';
 const OUTSIDE_RULE = 'Obsidian shows only records stored inside this vault folder. A record marked *outside this vault* lives in the workspace (for example `.agentos/`): Obsidian cannot open it; edit it in your editor or through `agentos brain propose|apply`. To have a new record editable here, create it inside this folder and register it in place: `agentos brain register <this folder>/<note>.md` (no copies, no moves).';
+// canonical: workspace in an external vault: `brain register` refuses notes in this folder, so name the step that allows it.
+const NAVIGATION_RULE = OUTSIDE_RULE.replace(/To have .*$/, 'This folder holds links only (canonical: workspace), so `agentos brain register` refuses notes here; to keep editable records here, set `canonical: vault` under `knowledge.obsidian` in `.agentos/project.yaml` first, then create the note inside this folder and run `agentos brain register <this folder>/<note>.md` (no copies, no moves).');
 const GENERATED_LINE = /^- \[.*\]\(<.*>\) — `brain:[a-z0-9-]+` \([a-z]+, [a-z]+\)( — outside this vault: edit in your editor)?$/;
 
 /** The generated block: a link (relative to the note) to every valid record, in walk order; records outside the
  *  vault folder Obsidian opens (`vaultRoot`) are marked, since Obsidian cannot open links that leave it (D3). Deterministic. */
-function noteBlock(records: BrainRecord[], noteAbs: string, vaultRoot: string) {
+function noteBlock(records: BrainRecord[], noteAbs: string, vaultRoot: string, navigation: boolean) {
   const list = valid(records).map((record) => `- [${record.title}](<${posix(relative(dirname(noteAbs), record.abs))}>) — \`${record.id}\` (${record.kind}, ${record.status})${inside(vaultRoot, record.abs) ? '' : OUTSIDE}`);
-  return [NOTE_START, '## Brain records', '', ...(list.some((line) => line.endsWith(OUTSIDE)) ? [OUTSIDE_RULE, ''] : []), ...(list.length ? list : [NONE_YET]), NOTE_END].join('\n');
+  return [NOTE_START, '## Brain records', '', ...(list.some((line) => line.endsWith(OUTSIDE)) ? [navigation ? NAVIGATION_RULE : OUTSIDE_RULE, ''] : []), ...(list.length ? list : [NONE_YET]), NOTE_END].join('\n');
 }
 
 /** A new index note (`obsidian init|link`, or recovery after it was deleted). In an external vault with
@@ -326,7 +328,7 @@ export function newIndexNote(name: string, canonical: string, records: BrainReco
     ...(navigation ? ['**Navigation only.** The records below live in the AgentOS workspace, outside this vault; this vault does not contain or sync them, and Obsidian may not open links that leave the vault. Obsidian edits only records stored inside the vault it opens.', ''] : []),
     `Canonical location of the Project Brain: **${canonical}**. Records live there only; this note holds links, never copies (no sync).`,
     'Runtime state stays in the workspace `.agentos/`. Agents read only the notes a task needs, never the whole vault, and change records only through `agentos brain register|propose|apply`.', '',
-    noteBlock(records, noteAbs, vaultRoot), '',
+    noteBlock(records, noteAbs, vaultRoot, navigation), '',
   ].join('\n');
 }
 
@@ -337,7 +339,7 @@ function adoptNote(before: string, block: string) {
   const at = lines.indexOf('## Brain records');
   let end = at + 1;
   while (at >= 0 && end < lines.length && !lines[end].startsWith('#')) end++;
-  if (at >= 0 && lines.slice(at + 1, end).every((line) => line === '' || line === NONE_YET || line === NONE_YET_BEFORE_311 || line === OUTSIDE_RULE || GENERATED_LINE.test(line))) {
+  if (at >= 0 && lines.slice(at + 1, end).every((line) => line === '' || line === NONE_YET || line === NONE_YET_BEFORE_311 || line === OUTSIDE_RULE || line === NAVIGATION_RULE || GENERATED_LINE.test(line))) {
     return [...lines.slice(0, at), ...block.split('\n'), '', ...lines.slice(end)].join('\n').replace(/\n*$/, '\n');
   }
   const text = lines.join('\n');
@@ -354,7 +356,7 @@ async function planNote(ctx: BrainCtx, records: BrainRecords, adopt: boolean) {
   const rel = inside(ctx.root, note.abs) ? posix(relative(ctx.root, note.abs)) : note.abs;
   const before = await readFile(note.abs, 'utf8').catch((error) => { if (error.code === 'ENOENT') return null; throw error; });
   if (before === null) return { rel, abs: note.abs, before, after: newIndexNote(note.name, ctx.vault.canonical, records, note.abs, ctx.root, ctx.vault.vault), action: 'create' };
-  const block = noteBlock(records, note.abs, ctx.vault.vault);
+  const block = noteBlock(records, note.abs, ctx.vault.vault, ctx.vault.canonical === 'workspace' && !inside(ctx.root, note.abs));
   const starts = before.split(START_PREFIX).length - 1, ends = before.split(NOTE_END).length - 1;
   const s = before.indexOf(START_PREFIX), e = before.indexOf(NOTE_END);
   if (starts === 1 && ends === 1 && s < e) {

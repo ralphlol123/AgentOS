@@ -16,6 +16,7 @@ All notable changes to AgentOS for Projects are documented here.
 ### Fixed
 
 - `context --budget` is a real limit: a successful result (`ok:true`, exit 0) always has `budget.estimate <= budget.limit`. The overflow check now measures the smallest full rendering (header, mandatory sections, the Omitted/Missing/Warnings listing and the engine's ADVISORY lines), so `overflow.needed` is the minimum budget that succeeds; below it the result is `AgentOS context: OVERFLOW`, exit 1. Before, only the mandatory sections were compared, and budgets between that figure and the real size returned `ok:true` over the limit. `budget.estimate` now also counts the ADVISORY lines (about 100 tokens for claude-code), so the reported figure rises by that much; the rendered context and selection are unchanged when the bundle is more than that below the budget (as at the default budget on normal projects).
+- The index note in an external vault with `canonical: workspace` (`obsidian link`, `obsidian init --dir <outside the workspace>`) no longer tells you to `agentos brain register <this folder>/<note>.md`, which `brain register` refuses there. Its generated block now says the folder holds links only and to set `canonical: vault` under `knowledge.obsidian` first. Existing such notes get the new sentence on the next Brain write or `agentos brain index`; notes inside the workspace (`obsidian init`) and `canonical: vault` notes are unchanged.
 
 ## [3.2.0] - 2026-11-03
 
