@@ -40,12 +40,12 @@ Phynceon reviews the local commits on `fix/resume-active-task`, then pushes and 
 <!-- agentos:checkpoint:start -->
 ## Checkpoint (managed)
 
-- Task: obsidian-readonly-mirrors
-- Record: `.agentos/checkpoints/obsidian-readonly-mirrors/2026-11-03T16-44-59-570Z-20556dd3.json`
-- Repos: agentos-for-projects fix/obsidian-readonly-mirrors@f325ce2 (0 changed)
-- Progress: Read-only copies for out-of-vault Brain records (canonical: workspace): RED cfc9496, fix baba3d8, docs 873062e, state commit. New test/obsidian-mirrors.test.js 13/13; full suite green; real CLI both flows on rebuilt originals: no index link leaves the vault, edited copy kept and warned, propose/app…
+- Task: resume-active-task
+- Record: `.agentos/checkpoints/resume-active-task/2026-11-03T18-08-39-275Z-dfed002c.json`
+- Repos: agentos-for-projects fix/resume-active-task@fb75a3e (0 changed)
+- Progress: Bare resume/context resolve the checkpoint task (one -> resumed as --task, several -> listed, exit 2, none -> labelled); failed saves show the last usable checkpoint as OLDER state; status shows failing checks and checkpoint problems; doctor unbound vault with canonical: workspace is a warning; CRL…
 - Blockers: none
-- Next: Phynceon reviews the local commits on fix/obsidian-readonly-mirrors, pushes and opens a PR against main; Ralph runs the desktop check per flow.
+- Next: Phynceon reviews the local commits on fix/resume-active-task, then pushes and opens a PR against main.
 - Receipts: observed-pass 2, observed-fail 0, claimed 0, not-run 3, unavailable 0
-- Resume: `agentos resume --task obsidian-readonly-mirrors`
+- Resume: `agentos resume --task resume-active-task`
 <!-- agentos:checkpoint:end -->
