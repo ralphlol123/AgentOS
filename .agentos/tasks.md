@@ -16,5 +16,5 @@
 
 ## Later
 
-- [ ] Improve body-text retrieval and separate task identity from task description.
+- [ ] Body-text retrieval beyond Brain records: `brain search` and `decisions.md` section bodies (`context --about` covers Brain record bodies; the task id stays separate from the phrase).
 - [ ] Make the default Obsidian layout expose the actual Brain records.
