@@ -3731,6 +3731,7 @@ const startupLoop = (engine: string, autonomous = false) => `Startup loop: \`age
 const CHILD_CLI_FIRST_LINES = [
   'First step from this repo: run `agentos status`. It works from this directory and prints what you need, so do this before reading any other file under `..`.',
   'Some engines refuse file reads outside the directory they started in, and a refused read can end the session on the spot. If that applies to you, rely on `agentos status` and `agentos status --full` instead of the file list below.',
+  'Then `agentos context <engine> --task <id>` works from here too. Checkpoint at milestones (`agentos checkpoint --task <id>`), before limits interrupt work; the next engine reuses the same task id.',
 ];
 
 // The single engine-agnostic operating guide. Every command named in backticks here must exist in
