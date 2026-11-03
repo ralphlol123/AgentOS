@@ -35,3 +35,4 @@ Engine B did not ask a human anything. Its session log shows it did not read Phy
   - `guide.md` does not mention the status next-action line.
   - Status picks the newest checkpoint across all tasks.
 - **Not covered:** a real Claude Code usage-limit or crash interruption.
+- Release gate: Ralph accepted this controlled trial for the handoff release gate on 2026-11-03. Scope unchanged: controlled stop, not a real usage-limit or crash.
