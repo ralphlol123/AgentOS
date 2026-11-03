@@ -1,6 +1,6 @@
 # Context builder (`agentos context`)
 
-`agentos context <engine> [--task "<text>"] [--role <agent-id>] [--scope <repo-or-path>,...] [--budget <tokens>] [--json] [--include-superseded] [--require-synced-config] [--require-enforcement] [--require-complete]`
+`agentos context <engine> [--task "<text>"] [--about "<phrase>"] [--role <agent-id>] [--scope <repo-or-path>,...] [--budget <tokens>] [--json] [--include-superseded] [--require-synced-config] [--require-enforcement] [--require-complete]`
 
 Builds the context one engine needs for one task and one role. Read-only: it reads `.agentos/` state and never writes a file, lock or temp file (tested by hashing the whole fixture tree with a private `TMPDIR`). `agentos context --brief` (the short prefix `agentos prompt` printed before 3.0.0) is unchanged. Code: `src/context-builder.ts`; wiring: `contextAgentOS` in `src/core.ts`.
 
@@ -10,6 +10,7 @@ Builds the context one engine needs for one task and one role. Read-only: it rea
 |---|---|
 | engine | Same normalisation as `prompt` (`claude` → `claude-code`, …). Unknown names pass through and get the generic overhead. |
 | `--task` | Free text. Its words (3+ characters, minus a few stopwords, trailing `s` dropped) are the match terms. Without it only "always relevant" records are added. |
+| `--about` | Optional search phrase, separate from the task id. Its words become extra match terms (same rules as `--task`) that are also matched against the body of each Brain record, so a record with a generic title (`Decision 2026-10-12`) is found by a phrase in its text. Never used for the task id: `checkpoint`/`resume` do not take it, and the checkpoint `context` loads is still the `--task` one. Bodies are matched, not rendered: records stay by reference. Without `--about` selection is unchanged. |
 | `--role` | Must be listed in `agents.enabled`; otherwise exit 1. Default: `agents.capabilities.implementation`, else the first enabled agent. A missing `.agentos/agents/<role>.md` is a `missing` warning, not fatal. |
 | `--scope` | Comma list of repo IDs or workspace-relative paths, validated like `task_scope`. It replaces the read scope and keeps only the `task_scope.edit` entries it still covers, so it never widens edit. No `--scope` → `task_scope`; neither → read is the whole workspace (`.`) and edit is empty; the Scope section prints `Edit scope: not set (no task_scope in .agentos/project.yaml). Edit only the files the owner's task names; ask the owner to set task_scope.` with a warning. No default edit scope is invented. |
 | `--budget` | Positive whole number of tokens; default 24000 for every engine. |
@@ -29,7 +30,7 @@ Optional: `acceptance` (`## Acceptance criteria` in `tasks.md`, else `handoff.md
 
 1. **Scope filter** → `out-of-scope`. A repo note or verification record is in scope when a read entry covers the whole repo (its ID, its path, an ancestor, or `.`). A path inside a repo does not bring the repo in: reading `api/contracts/openapi.yaml` does not include `repo:api`. A root repo (`path: .`) is in scope when some read entry lies outside every child repo. A skill path is in scope when it is under `.agentos/` or covered by read; absolute or `..` paths are always out.
 2. **Status filter** → `superseded`. A heading containing `superseded`/`deprecated`, or a line `status: superseded|deprecated` (optionally bulleted or bold, frontmatter included). `--include-superseded` keeps them, labelled `[superseded]`; they never count as conflicts.
-3. **Match filter** → `no-match`. Decisions, skills and linked notes need at least one task term in their ID (without the `kind:` prefix), heading, skill-index heading or path. Body text is not matched. Acceptance, handoff state, repo notes, verification and read paths are always relevant.
+3. **Match filter** → `no-match`. Decisions, skills, linked notes and Brain records need at least one task term in their ID (without the `kind:` prefix), heading, skill-index heading, path, or Brain title/kind. Body text is not matched by `--task` terms; `--about` terms also match Brain record bodies (not `decisions.md` section bodies). The scope and status filters run first, so an out-of-scope or superseded record with the phrase stays omitted. Acceptance, handoff state, repo notes, verification and read paths are always relevant.
    A Brain record that would be `no-match` but whose file is already shown section by section (for example `brain:decisions` and the `decision:*` sections of `.agentos/decisions.md`) is reported as `covered` with `via: <section id>` (text: `covered by <section id> (same file, shown above)`), not as `no-match`.
 4. **Rank**: score = 1 for always-relevant + number of matched terms; ties broken by freshness (a `YYYY-MM-DD` in the heading, else the file mtime), then source order.
 
@@ -63,4 +64,4 @@ Optional: `acceptance` (`## Acceptance criteria` in `tasks.md`, else `handoff.md
 
 ## Known limits
 
-Ranking is plain term overlap: no stemming beyond a trailing `s`, no synonyms, no semantic deduplication. The overhead numbers are unmeasured. Scope is advisory, as in `prompt`: nothing AgentOS renders stops an engine from editing outside it (engine-side enforcement: [engines.md](engines.md#enforcement-vs-synced-configuration)).
+Ranking is plain term overlap (an `--about` hit in a body counts like a hit in a title, and any one hit is enough): no stemming beyond a trailing `s`, no synonyms, no semantic deduplication. The overhead numbers are unmeasured. Scope is advisory, as in `prompt`: nothing AgentOS renders stops an engine from editing outside it (engine-side enforcement: [engines.md](engines.md#enforcement-vs-synced-configuration)).

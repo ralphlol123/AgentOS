@@ -2,40 +2,40 @@
 
 ## Current objective
 
-When handoff.md § Next exact action is edited after a checkpoint, `agentos context <engine> --task <id>` presents exactly one current next action, the checkpoint's Next. The edited text stays visible as a labelled not-current note with the command that makes it current. Without a checkpoint, § Next exact action stays the unlabelled current next action.
+An incoming agent finds a relevant Brain decision by a phrase in its body, from a differently named task, without knowing the note's title or the original task id. The phrase is a search input only: the task id used by `context`, `checkpoint` and `resume` stays the `--task` value.
 
 ## Scope
 
 - Repo: `agentos-for-projects`, single-repo workspace.
-- Baseline: `46b7090` on main (PR #70 merged), package 3.1.1. Unreleased changes; no version bump or release is requested.
-- Branch: `fix/context-next-action-precedence`; task id: `context-next-action-precedence`.
-- Allowed changes: context/checkpoint implementation, tests, guide, docs and this repository's AgentOS state. `status`, `resume` and Next truncation are out of scope.
+- Baseline: `ddf96c1` on main (PR #73 merged), package 3.1.1. Unreleased changes; no version bump or release is requested (a separate 3.2.0 release PR may be in review).
+- Branch: `feat/brain-body-retrieval`; task id: `brain-body-retrieval`.
+- Allowed changes: context/brain selection, CLI flag wiring, tests, docs, CHANGELOG Unreleased and this repository's AgentOS state. Out of scope: issue #71 (next-action truncation), issue #72 (multi-task status), the version bump.
 
 ## Current state
 
-- `2b770f3`: RED test in `test/handoff-continuity.test.js` (checkpoint, then an edited § Next exact action); it failed at `46b7090` with the edited text shown as an unlabelled second `## Next exact action`.
-- `a74fdc7`: fix. `supersededProse` (`src/checkpoint.ts`) also returns `edited` when § Next exact action no longer matches the record's `supersedes` digest; `src/context-builder.ts` labels it `[edited after checkpoint <id>; not current]` and names `agentos checkpoint --task <id> --next "<this text>"`. An edited § Current state stays unlabelled. Records without `supersedes` (legacy, recovered) label nothing, as before.
-- `8aec458`: guide (`guideMd` in `src/core.ts`, regenerated `.agentos/guide.md`, 5370/5376 bytes), docs/checkpoints.md and CHANGELOG state the precedence, with a guide test.
-- `bbc0fe7`: Ralph's release-gate acceptance recorded in `.agentos/runs/2026-11-03-claude-code-controlled-interruption-trial.md` (one added line).
-- Verification at `bbc0fe7` (local WSL, npm): `npm run check` clean; `npm test` 825/825; `npm run smoke` exit 0; `npm run test:metadata` 3/3. Bun not run (not installed here).
+- `2a271dd`: RED test `test/brain-body-retrieval.test.js` (3 tests); at `ddf96c1` all 3 failed with `Unknown option: --about`.
+- `e60e66b`: `agentos context --about "<phrase>"`. Its words are extra match terms (`taskTerms`/`termHits`, as for `--task`) that also match each Brain record's body (`brainContextRecords` now passes `body`; never rendered). Scope and status filters run first, so an out-of-scope record with the phrase stays `out-of-scope`. `--task`, `checkpoint` and `resume` are unchanged; `checkpoint`/`resume` reject `--about`. Without `--about`, output is byte-identical to `ddf96c1`. The tight-budget figure in the RED test was corrected in this commit (the first figure hit the existing Omitted-trailer rule).
+- `028fcf3`: docs/context-builder.md, docs/brain.md, README synopsis and one CHANGELOG Unreleased line (`### Added`). Guide unchanged (5370/5376 bytes).
+- Verification at `028fcf3` (local WSL, npm): `npm run check` clean; `npm test` 828/828; `npm run smoke` exit 0; `npm run test:metadata` 3/3. Bun not run (not installed here).
 - All commits are local; nothing pushed.
-- Not covered yet: tasks.md § Now is not reconciled with the checkpoint.
-- Previous state: `.agentos/runs/2026-11-03-before-context-next-action-precedence.md`.
+- Not covered: `decisions.md` section bodies and `brain search` still match titles only; `--about` is not echoed in the rendered text or as a JSON field (the included item's `reason` lists the matched terms).
+- Previous state: `.agentos/runs/2026-11-03-before-brain-body-retrieval.md`.
 
 ## Next exact action
 
-Phynceon reviews the local commits on `fix/context-next-action-precedence`, then pushes and opens the PR.
+Phynceon reviews the local commits on `feat/brain-body-retrieval`, then pushes and opens the draft PR.
 
 ## Protected files / do not touch
 
 - Secrets, .env files, migrations and production config.
 - `.github/workflows/`, client workspaces, external Obsidian vaults and Hermes configuration.
+- `package.json` version and CHANGELOG release headings (release PR).
 
 ## Open decisions
 
 - Release version and merge remain separate from this implementation.
-- `status` has no `--task`: it uses the newest valid checkpoint by `created_at`; owner may still prefer a `--task` flag.
-- Retrieval improvements and Obsidian layout changes remain follow-up work.
+- Whether `brain search` and `decisions.md` section bodies should also match body text (follow-up).
+- Whether a checkpoint should store a task description that `context` reuses as the search phrase (rejected here as more infrastructure; owner may prefer it).
 
 <!-- agentos:checkpoint:start -->
 ## Checkpoint (managed)

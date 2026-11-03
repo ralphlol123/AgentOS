@@ -288,7 +288,7 @@ agentos doctor --engines [--json]
 agentos upgrade [--check] [--to <version>] [--dry-run] [--yes] [--json]
 
 # Work loop (agents run these)
-agentos context [claude|codex|opencode|hermes] [--task "<text>"] [--role <agent-id>] [--scope <repo-or-path>,...] [--budget <tokens>] [--json] [--strict] [--include-superseded]
+agentos context [claude|codex|opencode|hermes] [--task "<text>"] [--about "<phrase>"] [--role <agent-id>] [--scope <repo-or-path>,...] [--budget <tokens>] [--json] [--strict] [--include-superseded]
 agentos context [claude|codex|opencode|hermes] --brief
 agentos checkpoint [--task <id>] [--engine <e>] [--role <r>] [--progress "<text>"] [--blocker "<text>"] [--next "<text>"] [--check "<cmd>" [--cwd <dir>]]... [--claim "<text>"]... [--json] [--dry-run]
 agentos checkpoint --recover [--task <id>] [--dry-run]
@@ -338,7 +338,7 @@ agentos context codex --task "..." --json      # structured bundle only
 ```
 
 - Mandatory records come first and are never truncated: objective (same resolver as `status`/`doctor`), constraints (handoff "Protected files / do not touch" plus the generated rules), scope, and the role's agent card.
-- Optional records are filtered before ranking: out of read scope → `out-of-scope`; `superseded`/`deprecated` heading or `status:` line → `superseded` (shown labelled with `--include-superseded`); decisions, skills and linked notes that share no term with `--task` → `no-match`. The rest (acceptance criteria, handoff current state / next action, repo notes and verification commands for repos in scope, decisions, skills, linked notes by reference) is ranked by term overlap, then freshness, and added until the budget is reached; the rest is listed as `budget`.
+- Optional records are filtered before ranking: out of read scope → `out-of-scope`; `superseded`/`deprecated` heading or `status:` line → `superseded` (shown labelled with `--include-superseded`); decisions, skills, linked notes and Brain records that share no term with `--task` (or with `--about`, which also searches Brain record bodies) → `no-match`. The rest (acceptance criteria, handoff current state / next action, repo notes and verification commands for repos in scope, decisions, skills, linked notes by reference) is ranked by term overlap, then freshness, and added until the budget is reached; the rest is listed as `budget`.
 - `--scope` narrows `task_scope`: it replaces the read scope and keeps only the edit entries it still covers, so it never widens edit. Without any scope the read scope is the whole workspace and edit scope is empty; `context` prints `Edit scope: not set` and tells the engine to edit only the files the owner's task names and to ask the owner to set `task_scope`.
 - Tokens are `estimate (chars/4)` plus a fixed per-engine overhead; default budget 24000. If the mandatory records alone exceed the budget, the command exits 1 with `overflow` and renders nothing. A missing objective also exits 1; a missing agent card or scope path is listed under `missing` as a warning; two current decisions with the same heading subject are listed under `conflicts`.
 
