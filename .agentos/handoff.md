@@ -39,12 +39,12 @@ Phynceon reviews the local commits on `fix/obsidian-readonly-mirrors`, then push
 <!-- agentos:checkpoint:start -->
 ## Checkpoint (managed)
 
-- Task: unify-current-task-state
-- Record: `.agentos/checkpoints/unify-current-task-state/2026-11-03T09-05-27-224Z-af1f3cdc.json`
-- Repos: agentos-for-projects feat/unify-current-task-state@a16062d (0 changed)
-- Progress: Phase 1 (context): a checkpoint that saves --next records supersedes digests of handoff.md § Current state and § Next exact action; agentos context marks prose still matching as [superseded by checkpoint <id>] and keeps it as history. RED then GREEN in test/handoff-continuity.test.js (3 new tests).…
+- Task: obsidian-readonly-mirrors
+- Record: `.agentos/checkpoints/obsidian-readonly-mirrors/2026-11-03T16-44-59-570Z-20556dd3.json`
+- Repos: agentos-for-projects fix/obsidian-readonly-mirrors@f325ce2 (0 changed)
+- Progress: Read-only copies for out-of-vault Brain records (canonical: workspace): RED cfc9496, fix baba3d8, docs 873062e, state commit. New test/obsidian-mirrors.test.js 13/13; full suite green; real CLI both flows on rebuilt originals: no index link leaves the vault, edited copy kept and warned, propose/app…
 - Blockers: none
-- Next: In src/core.ts statusAgentOS, print one 'Current next action' line from the newest .agentos/checkpoints/*/current.json record (by updated_at: task id, checkpoint id, its Next), and add a test in test/handoff-continuity.test.js that status shows that Next exactly once after a checkpoint while handof…
+- Next: Phynceon reviews the local commits on fix/obsidian-readonly-mirrors, pushes and opens a PR against main; Ralph runs the desktop check per flow.
 - Receipts: observed-pass 2, observed-fail 0, claimed 0, not-run 3, unavailable 0
-- Resume: `agentos resume --task unify-current-task-state`
+- Resume: `agentos resume --task obsidian-readonly-mirrors`
 <!-- agentos:checkpoint:end -->

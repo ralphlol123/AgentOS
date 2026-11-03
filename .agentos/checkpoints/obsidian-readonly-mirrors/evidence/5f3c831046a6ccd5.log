@@ -1,0 +1,19 @@
+$ npm run test:metadata
+(cwd .)
+--- stdout ---
+✔ package metadata is ready for public npm publishing (7.232467ms)
+✔ packed npm tarball contains only publishable runtime files (1434.481596ms)
+✔ dist/ is generated, not committed: ignored, rebuilt on install, and not policed by CI (7.966179ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1455.408657
+
+--- stderr ---
+npm notice run agentos-for-projects@3.2.0 test:metadata
+npm notice run node test/package-metadata.js
+

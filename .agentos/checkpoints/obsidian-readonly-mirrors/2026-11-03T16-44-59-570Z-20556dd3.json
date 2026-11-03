@@ -1,0 +1,111 @@
+{
+  "schema": "agentos.checkpoint/1",
+  "id": "2026-11-03T16-44-59-570Z-20556dd3",
+  "created_at": "2026-11-03T16:44:59.570Z",
+  "recovered": false,
+  "project": {
+    "name": "agentos-for-projects",
+    "root": "/home/hermes/developer-workspace/agentos-obsidian-mirrors/agentos"
+  },
+  "task": {
+    "id": "obsidian-readonly-mirrors",
+    "source": "--task"
+  },
+  "run_id": null,
+  "engine": "claude-code",
+  "role": "developer",
+  "objective": {
+    "id": "obj-481bca935d",
+    "text": "Obsidian must open project Brain records from the index note. With `canonical: workspace` and an index note in a vault, every valid record outside the vault root gets a generated read-only copy at `<note folder>/Records/<slug>.md` (frontmatter `agentos_mirror_of`, `source`, `source_hash`, `mirror_hash`, `tags: [agentos-mirror]`, no `id:`), and the index links to it. No generated link may leave the vault. An edited copy is never overwritten or deleted and is warned about; in-workspace `knowledge/` gets `Records/.gitignore` (`*`). `canonical: vault`, `context`, checkpoints and clones without `.agentos/local.yaml` stay unchanged."
+  },
+  "acceptance": {
+    "source": ".agentos/tasks.md#Acceptance criteria",
+    "text": "- After `agentos checkpoint --task <id> --next \"<action>\"`, `agentos status`, `agentos context <engine> --task <id>` and `agentos resume --task <id>` present exactly one current next action: the most recently saved one.\n- Older or contradicting next-action text in handoff.md or tasks.md is not presented as current; the next agent can tell it is superseded.\n- Nothing is silently deleted."
+  },
+  "scope": {
+    "repos": [
+      "agentos-for-projects=."
+    ],
+    "read": [
+      "."
+    ],
+    "edit": []
+  },
+  "repos": [
+    {
+      "name": "agentos-for-projects",
+      "path": ".",
+      "worktree": "/home/hermes/developer-workspace/agentos-obsidian-mirrors/agentos",
+      "branch": "fix/obsidian-readonly-mirrors",
+      "head": "f325ce253d9ab769430fafb79ed63ebd1ab52111",
+      "fingerprint": "33d4fe776f582c5bfce8197c59675fdb4676d089ae84bc1f354ca098d9a14e20",
+      "changed_paths": [],
+      "omitted_paths": 0,
+      "available": true
+    }
+  ],
+  "state": "026bdda5dfe45e29eb248af7c1a83e66f45450cf54fbe57f1d54b8546a8679c1",
+  "progress": "Read-only copies for out-of-vault Brain records (canonical: workspace): RED cfc9496, fix baba3d8, docs 873062e, state commit. New test/obsidian-mirrors.test.js 13/13; full suite green; real CLI both flows on rebuilt originals: no index link leaves the vault, edited copy kept and warned, propose/apply round trip converges, clone without vault unchanged, canonical: vault note byte-identical to d0b4160.",
+  "blockers": [],
+  "next": "Phynceon reviews the local commits on fix/obsidian-readonly-mirrors, pushes and opens a PR against main; Ralph runs the desktop check per flow.",
+  "supersedes": {
+    "handoff:current-state": "bbcb57cc1d767b45d6d3581cc4b0ba7c9ea9a81054c3a4dc687f3c15db75d457",
+    "handoff:next-exact-action": "00e68d2d94c47165aee8cddd846957256d2826b56027dd6b0f10aa48be65d686"
+  },
+  "knowledge_refs": [
+    {
+      "id": "decision:2026-08-02-obsidian-is-link-only-long-term-knowledge",
+      "source": ".agentos/decisions.md#2026-08-02 — Obsidian is link-only long-term knowledge"
+    }
+  ],
+  "receipts": [
+    {
+      "status": "observed-pass",
+      "command": "npm run check",
+      "cwd": ".",
+      "exit_code": 0,
+      "observed_at": "2026-11-03T16:44:57.484Z",
+      "evidence": ".agentos/checkpoints/obsidian-readonly-mirrors/evidence/bbbb15f8f52354a9.log",
+      "state_tested": "026bdda5dfe45e29eb248af7c1a83e66f45450cf54fbe57f1d54b8546a8679c1"
+    },
+    {
+      "status": "observed-pass",
+      "command": "npm run test:metadata",
+      "cwd": ".",
+      "exit_code": 0,
+      "observed_at": "2026-11-03T16:44:57.919Z",
+      "evidence": ".agentos/checkpoints/obsidian-readonly-mirrors/evidence/5f3c831046a6ccd5.log",
+      "state_tested": "026bdda5dfe45e29eb248af7c1a83e66f45450cf54fbe57f1d54b8546a8679c1"
+    },
+    {
+      "status": "not-run",
+      "command": "bun run build",
+      "cwd": ".",
+      "exit_code": null,
+      "observed_at": null,
+      "evidence": null,
+      "state_tested": null,
+      "note": "declared agentos-for-projects.build_command"
+    },
+    {
+      "status": "not-run",
+      "command": "bun run test",
+      "cwd": ".",
+      "exit_code": null,
+      "observed_at": null,
+      "evidence": null,
+      "state_tested": null,
+      "note": "declared agentos-for-projects.test_command"
+    },
+    {
+      "status": "not-run",
+      "command": "bun run test:package-managers",
+      "cwd": ".",
+      "exit_code": null,
+      "observed_at": null,
+      "evidence": null,
+      "state_tested": null,
+      "note": "declared agentos-for-projects.package_manager_test_command"
+    }
+  ]
+}
