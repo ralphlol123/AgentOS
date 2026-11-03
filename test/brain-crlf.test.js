@@ -32,8 +32,12 @@ test('brain: a record verified with LF endings stays ok in an autocrlf=true clon
   const check = ok(cli(['brain', 'check'], clone, crlf));
   assert.doesNotMatch(check.stdout, /changed brain:/);
   assert.match(check.stdout, /- ok brain:0001/);
-  assert.doesNotMatch(ok(cli(['doctor'], clone, crlf)).stdout, /source changed since verification/);
+  const doctor = ok(cli(['doctor'], clone, crlf)).stdout;
+  assert.doesNotMatch(doctor, /source changed since verification/);
+  assert.doesNotMatch(doctor, /agent card .* changed since install/); // installed cards are CRLF on disk too
   assert.doesNotMatch(cli(['context', 'generic', '--task', 't', '--about', 'persimmon rounding'], clone, crlf).stdout, /\[source changed since verification\]/);
   const verify = ok(cli(['brain', 'verify', 'brain:0001', '--by', 'owner', '--dry-run'], clone, crlf));
   assert.match(verify.stdout, /\(unchanged\)/);
+  const add = ok(cli(['agents', 'add', 'developer', '--dry-run'], clone, crlf)); // an unmodified card is a no-op, not a refusal
+  assert.match(add.stdout, /already installed and unmodified/);
 });
