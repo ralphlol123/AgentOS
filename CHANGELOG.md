@@ -8,6 +8,10 @@ All notable changes to AgentOS for Projects are documented here.
 
 - `context --about "<phrase>"` finds Brain records by words in their body (for example a decision titled `Decision 2026-10-12`) from a differently named task. The phrase is a search input only: the task id, checkpoint and `resume` stay on `--task`; scope, status and budget rules are unchanged; without `--about` nothing changes.
 
+### Changed
+
+- `context` match terms skip common English function words (how, what, when, does, one, keep, before, time, long, there, even, out, both, …; full list: `STOPWORDS` in src/context-builder.ts), for `--task`, `--about` and `brain search`, so a question no longer matches a record on its function words alone. With `--about`, a Brain record that matched an `--about` term is placed and packed before the always-relevant optional items (acceptance, handoff state, repo note, verification, read paths), so under a tight budget those are omitted first; without `--about` the order is unchanged.
+
 ### Fixed
 
 - `context --budget` is a real limit: a successful result (`ok:true`, exit 0) always has `budget.estimate <= budget.limit`. The overflow check now measures the smallest full rendering (header, mandatory sections, the Omitted/Missing/Warnings listing and the engine's ADVISORY lines), so `overflow.needed` is the minimum budget that succeeds; below it the result is `AgentOS context: OVERFLOW`, exit 1. Before, only the mandatory sections were compared, and budgets between that figure and the real size returned `ok:true` over the limit. `budget.estimate` now also counts the ADVISORY lines (about 100 tokens for claude-code), so the reported figure rises by that much; the rendered context and selection are unchanged when the bundle is more than that below the budget (as at the default budget on normal projects).
