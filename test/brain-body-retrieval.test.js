@@ -68,7 +68,13 @@ test('context --about keeps the budget rules: same mandatory overflow, optional 
   const overflow = (args) => json(['context', 'claude', '--task', TASK, '--budget', '100', ...args], root);
   const [plain, about] = [overflow([]), overflow(['--about', PHRASE])];
   assert.equal(about.ok, false);
-  assert.deepEqual(about.overflow, plain.overflow, 'mandatory records and the overflow figure do not change');
+  assert.deepEqual(about.overflow.mandatory, plain.overflow.mandatory, 'mandatory records do not change');
+  // needed includes the Omitted listing, whose reasons differ with --about; assert it is the real minimum instead.
+  for (const [args, result] of [[[], plain], [['--about', PHRASE], about]]) {
+    const at = (budget) => json(['context', 'claude', '--task', TASK, '--budget', String(budget), ...args], root);
+    assert.equal(at(result.overflow.needed - 1).ok, false, `${args.join(' ')}: needed - 1 overflows`);
+    assert.equal(at(result.overflow.needed).ok, true, `${args.join(' ')}: needed fits`);
+  }
   // One token below what the default budget used: something optional must go, and it must not be the best match.
   const full = json(['context', 'claude', '--task', TASK, '--about', PHRASE], root);
   const tight = json(['context', 'claude', '--task', TASK, '--about', PHRASE, '--budget', String(full.budget.estimate - 1)], root);
