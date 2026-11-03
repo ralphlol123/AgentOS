@@ -1,6 +1,6 @@
 // Bare `agentos resume` (no --task) must find the real checkpoint task, not a slug of the objective text.
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -132,6 +132,16 @@ test('(2) a corrupt current.json with no readable record: resume says no usable 
   assert.equal(r.status, 1);
   assert.match(r.stdout, /Reason: current\.json is unreadable/);
   assert.match(r.stdout, /Last usable checkpoint: none — no record of this task is readable\./);
+});
+
+test('(2) records without current.json (a first save interrupted before the pointer): status and doctor report it', async (t) => {
+  const root = await project(t);
+  save(root, 'task-tracker-cli', 'Only next.');
+  await unlink(join(dir(root, 'task-tracker-cli'), 'current.json'));
+  assert.match(cli(['status'], root).stdout, /task-tracker-cli\/current\.json: current\.json is missing; 1 record file\(s\) present/);
+  const d = cli(['doctor'], root);
+  assert.equal(d.status, 1);
+  assert.match(d.stdout, /current\.json is missing; 1 record file\(s\) present/);
 });
 
 test('(2) a save interrupted before the current.json update: resume flags the newer record and labels the shown one older', async (t) => {
