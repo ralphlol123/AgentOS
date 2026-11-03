@@ -4021,7 +4021,7 @@ async function contextInputFor(root: string, engine: string, options: any) {
     defaultRole: agents.capabilities?.implementation ? normalizeAgentAlias(String(agents.capabilities.implementation)) : undefined,
     header: promptHeaderLines(engine, root, projectText),
     rules: [PROMPT_RULES, ...engineSpecificRules(engine), obsidianPromptLine(root, projectText), approvalGuidance(project.knowledge?.brain?.approval)].filter(Boolean),
-    task: options.task, role: options.role ? normalizeAgentAlias(String(options.role)) : undefined, scope: options.scope, budget: options.budget, includeSuperseded: Boolean(options.includeSuperseded),
+    task: options.task, about: options.about, role: options.role ? normalizeAgentAlias(String(options.role)) : undefined, scope: options.scope, budget: options.budget, includeSuperseded: Boolean(options.includeSuperseded),
     brain: brainContextRecords(brainRecords),
     missing,
     warnings: [obsidian.off, viewerGone, ...(!brainRecords.length && !missing.length ? [EMPTY_BRAIN_WARNING] : [])].filter(Boolean),

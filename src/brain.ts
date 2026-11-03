@@ -228,10 +228,10 @@ function findRecord(records: BrainRecord[], ctx: BrainCtx, ref: string) {
   return records.find((record) => record.abs === abs);
 }
 
-/** Context builder input: valid records only (doctor reports the invalid ones). Vault records are referenced
+/** Context builder input: valid records only (doctor reports the invalid ones). `body` is for `--about` matching only, never rendered. Vault records are referenced
  *  by this machine's absolute path (the reader needs a real file), workspace records by their relative path. */
 export function brainContextRecords(records: BrainRecord[]) {
-  return valid(records).map((record) => ({ id: record.id, kind: record.kind, status: record.status, scope: record.scope, title: record.title, path: record.location === 'vault' ? record.abs : record.path, location: record.location, changed: record.state === 'changed' }));
+  return valid(records).map((record) => ({ id: record.id, kind: record.kind, status: record.status, scope: record.scope, title: record.title, body: record.body, path: record.location === 'vault' ? record.abs : record.path, location: record.location, changed: record.state === 'changed' }));
 }
 
 /** index.json entries: derived, but the only list of record identities that survives their storage going away. */

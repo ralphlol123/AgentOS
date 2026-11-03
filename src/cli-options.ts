@@ -1,6 +1,6 @@
 export type FlagValue = string | boolean;
 const booleans = new Set(['new', 'existing', 'dry-run', 'yes', 'y', 'detected', 'replace', 'fix', 'json', 'create', 'refresh', 'installed', 'diff', 'include-superseded', 'recover', 'append', 'custom', 'require-enforcement', 'require-synced-config', 'require-complete', 'adopt', 'auto', 'last', 'force', 'full', 'brief', 'strict', 'engines', 'no-index', 'archive-only']);
-const values = new Set(['agents', 'engine', 'role', 'vault', 'dest', 'name', 'expected-sha256', 'objective', 'expect-state', 'task', 'scope', 'budget', 'progress', 'blocker', 'next', 'check', 'cwd', 'claim', 'kind', 'status', 'by', 'from', 'summary', 'supersedes', 'canonical', 'dir', 'location', 'to', 'explain', 'note']);
+const values = new Set(['agents', 'engine', 'role', 'vault', 'dest', 'name', 'expected-sha256', 'objective', 'expect-state', 'task', 'scope', 'budget', 'progress', 'blocker', 'next', 'check', 'cwd', 'claim', 'kind', 'status', 'by', 'from', 'summary', 'supersedes', 'canonical', 'dir', 'location', 'to', 'explain', 'note', 'about']);
 /** `--check` and `--claim` repeat; each `--cwd` belongs to the `--check` right before it. */
 export function parseFlagsAndPositionals(args: string[], extraBooleans: string[] = []): { flags: Record<string, FlagValue>; positionals: string[]; checks: Array<{ command: string; cwd?: string }>; claims: string[] } {
   const flags: Record<string, FlagValue> = {}, positionals: string[] = [], checks: Array<{ command: string; cwd?: string }> = [], claims: string[] = [];
@@ -31,7 +31,7 @@ export function parseFlagsAndPositionals(args: string[], extraBooleans: string[]
 export function validateCommandFlags(command: string, flags: Record<string, FlagValue>): void {
   const allowed: Record<string, string[]> = {
     init: ['new', 'existing', 'agents', 'dry-run', 'yes', 'y', 'refresh'], status: ['full'],
-    context: ['task', 'role', 'scope', 'budget', 'json', 'brief', 'strict', 'include-superseded', 'require-enforcement', 'require-synced-config', 'require-complete'],
+    context: ['task', 'about', 'role', 'scope', 'budget', 'json', 'brief', 'strict', 'include-superseded', 'require-enforcement', 'require-synced-config', 'require-complete'],
     checkpoint: ['task', 'engine', 'role', 'progress', 'blocker', 'next', 'check', 'cwd', 'claim', 'json', 'dry-run', 'recover'],
     resume: ['task', 'engine', 'json'],
     brain: ['kind', 'scope', 'status', 'by', 'from', 'summary', 'supersedes', 'append', 'task', 'json', 'dry-run', 'location', 'adopt', 'auto', 'to', 'last', 'force'],

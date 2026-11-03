@@ -176,7 +176,7 @@ async function main() {
         return;
       }
       const strict = Boolean(flags.strict); // --strict = all three --require-* gates
-      const result = await contextAgentOS({ cwd: process.cwd(), engine: positionals[0] || 'generic', task: flags.task, role: flags.role, scope: flags.scope, budget: flags.budget, json: flags.json, includeSuperseded: flags['include-superseded'], requireEnforcement: strict || flags['require-enforcement'], requireSyncedConfig: strict || flags['require-synced-config'], requireComplete: strict || flags['require-complete'] });
+      const result = await contextAgentOS({ cwd: process.cwd(), engine: positionals[0] || 'generic', task: flags.task, about: flags.about, role: flags.role, scope: flags.scope, budget: flags.budget, json: flags.json, includeSuperseded: flags['include-superseded'], requireEnforcement: strict || flags['require-enforcement'], requireSyncedConfig: strict || flags['require-synced-config'], requireComplete: strict || flags['require-complete'] });
       console.log(result.text);
       process.exitCode = result.ok ? 0 : 1;
       return;
@@ -306,7 +306,7 @@ const HELP = [
   '  agentos upgrade [--check] [--to <version>] [--dry-run] [--yes] [--json]',
   '',
   'Work loop (agents run these)',
-  '  agentos context [claude|codex|opencode|hermes] [--task "<text>"] [--role <agent-id>] [--scope <repo-or-path>,...] [--budget <tokens>] [--json] [--strict] [--include-superseded]',
+  '  agentos context [claude|codex|opencode|hermes] [--task "<text>"] [--about "<phrase>"] [--role <agent-id>] [--scope <repo-or-path>,...] [--budget <tokens>] [--json] [--strict] [--include-superseded]',
   '  agentos context [claude|codex|opencode|hermes] --brief',
   '  agentos checkpoint [--task <id>] [--engine <e>] [--role <r>] [--progress "<text>"] [--blocker "<text>"] [--next "<text>"] [--check "<cmd>" [--cwd <dir>]]... [--claim "<text>"]... [--json] [--dry-run]',
   '  agentos checkpoint --recover [--task <id>] [--dry-run]',
