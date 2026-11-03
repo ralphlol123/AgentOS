@@ -242,3 +242,10 @@ test('generated startup instructions checkpoint milestones before limits and reu
     assert.match(text, /\bsame task id\b/i, path);
   }
 });
+
+test('the generated guide states the next-action precedence: checkpoint Next, edited handoff as a note, handoff without a checkpoint', async t => {
+  const guide = await readFile(join(await fixture(t), '.agentos/guide.md'), 'utf8');
+  assert.match(guide, /checkpoint's Next is current/);
+  assert.match(guide, /Next exact action edited later is a note until saved with `--next`/);
+  assert.match(guide, /with no checkpoint, the handoff's is current/);
+});
