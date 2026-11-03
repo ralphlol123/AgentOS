@@ -4,6 +4,10 @@ All notable changes to AgentOS for Projects are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- `context --about "<phrase>"` finds Brain records by words in their body (for example a decision titled `Decision 2026-10-12`) from a differently named task. The phrase is a search input only: the task id, checkpoint and `resume` stay on `--task`; scope, status and budget rules are unchanged; without `--about` nothing changes.
+
 ## [3.2.0] - 2026-11-03
 
 ### Added
