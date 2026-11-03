@@ -2732,8 +2732,11 @@ async function doctorAgentOSUnlocked(options: any = {}) {
   problems.push(...cards.problems);
   diagnostics.push(...cards.diagnostics);
   const doctorProject = await safeRead(join(root, '.agentos/project.yaml'));
-  const { binding, off } = obsidianIntegration(root, doctorProject);
-  if (off && !off.startsWith('Obsidian integration disabled')) problems.push(off);
+  const { binding, off, config: obsidianConfig } = obsidianIntegration(root, doctorProject);
+  // No vault on this machine is a problem only when Brain records live there (canonical: vault). With canonical:
+  // workspace the records are in the project and the vault is an optional view (a fresh clone has no local.yaml).
+  if (off === UNBOUND && obsidianConfig?.canonical !== 'vault') warnings.push(`${off}. Optional with canonical: workspace: Brain records are read from the project, so context and brain work without it; bind a vault only to open them in Obsidian.`);
+  else if (off && !off.startsWith('Obsidian integration disabled')) problems.push(off);
   const brain = await brainDoctor(root, brainScopes(doctorProject), binding, off);
   problems.push(...brain.problems);
   warnings.push(...brain.warnings);
