@@ -174,6 +174,7 @@ test('handoff prose rewritten after the checkpoint, or a checkpoint without a sa
   run(root, ['checkpoint', '--task', 'recovered', '--recover']);
   context = json(root, ['context', 'codex', '--task', 'recovered']);
   assert.deepEqual(sections(context.text).filter(superseded), [], 'a recovered checkpoint has no next action to supersede the prose with');
+  assert.doesNotMatch(context.text, /not current/, 'a recovered checkpoint has no digests, so it labels no prose as not current');
 });
 
 test('a handoff Next exact action edited after the checkpoint is a labelled not-current note; the checkpoint Next stays the one current next action', async t => {

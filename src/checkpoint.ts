@@ -285,11 +285,15 @@ function proseDigests(handoffText: string): Record<string, string> {
   return Object.fromEntries(handoffProse(prose).map((section) => [section.id, sha256(section.text)]));
 }
 
-/** Prose still byte-identical to what the record superseded was written before it; prose edited since is newer. */
+/** Prose still byte-identical to what the record superseded was written before it; prose edited since is newer.
+ *  A Next exact action edited since is `edited`: a note, not a second current next action. Legacy and recovered
+ *  records have no digests and label nothing. */
 function supersededProse(record: Checkpoint, handoffText: string) {
-  const saved = record.supersedes ?? {};
-  const ids = Object.entries(proseDigests(handoffText)).filter(([id, digest]) => saved[id] === digest).map(([id]) => id);
-  return ids.length ? { id: record.id, at: record.created_at, ids } : undefined;
+  if (!record.supersedes) return undefined;
+  const saved = record.supersedes, digests = proseDigests(handoffText), next = 'handoff:next-exact-action';
+  const ids = Object.entries(digests).filter(([id, digest]) => saved[id] === digest).map(([id]) => id);
+  const edited = digests[next] !== undefined && saved[next] !== digests[next] ? [next] : [];
+  return ids.length || edited.length ? { id: record.id, at: record.created_at, ids, edited } : undefined;
 }
 
 function repoLine(repos: RepoState[]) {
