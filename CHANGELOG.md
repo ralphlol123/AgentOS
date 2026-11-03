@@ -11,6 +11,7 @@ All notable changes to AgentOS for Projects are documented here.
 ### Changed
 
 - `context` match terms skip common English function words (how, what, when, does, one, keep, before, time, long, there, even, out, both, …; full list: `STOPWORDS` in src/context-builder.ts), for `--task`, `--about` and `brain search`, so a question no longer matches a record on its function words alone. With `--about`, a Brain record that matched an `--about` term is placed and packed before the always-relevant optional items (acceptance, handoff state, repo note, verification, read paths), so under a tight budget those are omitted first; without `--about` the order is unchanged.
+- `context --about` promotes at most three Brain records (the top three `--about` hits) ahead of the always-relevant items, and only while every always-relevant item that fits without the promotion still fits (it tries 3, then 2, then 1). A common `--about` word that hits many records no longer pushes acceptance, handoff state or verification out of a tight budget; the 4th and later hits keep their usual rank. Without `--about` nothing changes.
 
 ### Fixed
 
