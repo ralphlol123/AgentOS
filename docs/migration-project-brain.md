@@ -30,7 +30,7 @@ Relocate the vault-canonical records first (above). Then set `enabled: false` un
 
 ## Records outside the vault folder
 
-Obsidian opens only files inside the vault. Workspace records (`.agentos/brain/*.md`, `.agentos/decisions.md`) are listed in the index note with `— outside this vault: edit in your editor`. Edit them in an editor or through `brain propose|apply`. To edit a record in Obsidian, create it inside `<vault>/<dest>` and `brain register` it there; that needs `canonical: vault` for a linked vault. AgentOS never copies or symlinks a record to make it visible.
+Obsidian opens only files inside the vault. With `canonical: workspace`, workspace records (`.agentos/brain/*.md`, `.agentos/decisions.md`, project docs) are linked from the index note through generated read-only copies under `<note folder>/Records/`, each line ending `` — read-only copy; the record is `<path>` in the project ``. Edit the record in an editor or through `brain propose|apply`; an edit made to a copy is kept and reported, never saved. Existing index notes switch to the copies on the next Brain write or `agentos brain index`. To edit a record in Obsidian, create it inside `<vault>/<dest>` and `brain register` it there; that needs `canonical: vault` for a linked vault. AgentOS never symlinks a record, and a copy is never a second record.
 
 ## Autonomous Brain updates (after 2.0.0)
 
