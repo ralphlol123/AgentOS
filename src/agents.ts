@@ -50,6 +50,9 @@ export interface AgentCard {
 }
 
 export const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
+/** Card body hash with CRLF read as LF: a Windows (core.autocrlf) checkout of an installed card is not an edit. */
+const lf = (text: string) => text.replace(/\r\n/g, '\n');
+const bodyHash = (body: string) => sha256(lf(body));
 const isStr = (value: unknown) => typeof value === 'string' && value.trim() !== '';
 const isPlain = (value: unknown) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 
@@ -86,7 +89,7 @@ export function validateAgentManifest(value: any, expectedId?: string): string[]
 export function parseAgentCard(id: string, text: string): AgentCard {
   const path = `.agentos/agents/${id}.md`;
   const split = splitFrontmatter(text);
-  const base = { id, path, body: split.has ? split.body : text, bodyHash: sha256(split.has ? split.body : text), modified: false };
+  const base = { id, path, body: split.has ? split.body : text, bodyHash: bodyHash(split.has ? split.body : text), modified: false };
   if (!split.has) return { ...base, state: 'legacy', manifest: null, problems: [] };
   if (!split.closed) return { ...base, body: text, state: 'invalid', manifest: null, problems: [`${path}:1: frontmatter is not closed`] };
   const doc = parseDocument(split.fm);
@@ -114,7 +117,7 @@ export function manifestFor(id: string, body: string, provenance: AgentManifest[
   };
 }
 
-export const provenanceFor = (installedFrom: string, body: string) => ({ installed_from: installedFrom, version: PACKAGE_VERSION, source_hash: sha256(body), installed_at: new Date().toISOString() });
+export const provenanceFor = (installedFrom: string, body: string) => ({ installed_from: installedFrom, version: PACKAGE_VERSION, source_hash: bodyHash(body), installed_at: new Date().toISOString() });
 
 /** Effective edit scope = the task's edit scope, narrowed (never widened) by the role manifest. */
 export function effectiveEditScope(taskEdit: string[], manifest: AgentManifest | null, covers: (entries: string[], target: string) => boolean) {
@@ -142,7 +145,7 @@ export function planCardInstall(id: string, existing: string | null, body: strin
   const generated = card.state === 'legacy' ? existing === body
     : card.state === 'manifest' && !card.manifest!.custom && !card.modified;
   if (generated) {
-    if (card.state === 'manifest' && card.body === body && card.manifest!.provenance !== 'unknown' && card.manifest!.provenance.installed_from === installedFrom) return { action: 'noop', content: existing, diff: [], reason: 'already installed and unmodified' };
+    if (card.state === 'manifest' && lf(card.body) === body && card.manifest!.provenance !== 'unknown' && card.manifest!.provenance.installed_from === installedFrom) return { action: 'noop', content: existing, diff: [], reason: 'already installed and unmodified' };
     return { action: 'upgrade', content: fresh(), diff: card.body === body ? [] : diffLines(card.body, body), reason: card.state === 'legacy' ? 'byte-matched generated card: adding its manifest' : 'unmodified generated card' };
   }
   const why = card.state === 'invalid' ? `its manifest is invalid (${card.problems.join('; ')})`
