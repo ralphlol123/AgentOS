@@ -477,12 +477,13 @@ export async function newestCheckpoint(root: string) {
   return newest;
 }
 
-/** Doctor: a present current.json that does not lead to a valid record is a problem. */
+/** Doctor and status: a task with records whose current.json does not lead to a valid record, or that has newer
+ *  records than the one it names, is a problem. A task directory with no record file is not. */
 export async function checkpointProblems(root: string) {
   const problems: string[] = [];
   for (const task of await checkpointTasks(root)) {
-    if (!await exists(join(root, '.agentos/checkpoints', task, 'current.json'))) continue;
     const loaded = await loadCurrent(root, task);
+    if (loaded.kind === 'incomplete' && !loaded.evidence.files.some((file) => file.name.endsWith('.json'))) continue;
     if (loaded.kind === 'incomplete') problems.push(`.agentos/checkpoints/${task}/current.json: ${loaded.evidence.reason}${loaded.evidence.error ? ` (${oneLine(loaded.evidence.error, 160)})` : ''}; run \`agentos resume --task ${task}\` for the recovery evidence`);
     if (loaded.kind === 'ok' && loaded.newer.length) problems.push(`.agentos/checkpoints/${task}/current.json names ${loaded.record.id}, but newer record ${loaded.newer.join(', ')} exists (a save interrupted before the pointer update?); run \`agentos resume --task ${task}\``);
   }
