@@ -9,7 +9,7 @@ All notable changes to AgentOS for Projects are documented here.
 - Startup `context` and `resume` share checkpoint reconciliation: code/HEAD/branch drift and unavailable Git evidence are shown, with stale receipts separated from current passing checks. The active checkpoint is mandatory context; damaged checkpoints are Missing and fail `--require-complete`.
 - `context` validates `handoff.exclude_paths` only when a checkpoint loads, so an invalid value no longer breaks context without a checkpoint; with one, context fails like `resume`.
 - Empty registered Brains are visible in `status`, `doctor` and `context`. Context warnings appear in human output as well as JSON. These diagnostics do not initialize knowledge or establish its semantic correctness.
-- Generated bootloaders and the guide advise checkpoints after meaningful milestones, before usage limits or interruptions, and reuse the same task id across engines. Existing workspaces can refresh managed instructions with `agentos doctor --fix`.
+- Generated bootloaders, child repo pointers and the guide advise checkpoints after meaningful milestones, before usage limits or interruptions, and reuse the same task id across engines. Existing workspaces can refresh managed instructions with `agentos doctor --fix`.
 - Refreshed this repository's stale live project state, preserved its prior state in a run archive, and registered local knowledge about the architecture and handoff workflow.
 
 ## [3.1.1] - 2026-10-27

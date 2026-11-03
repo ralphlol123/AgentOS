@@ -16,15 +16,23 @@ Make engine handoffs trustworthy: an engine saves project knowledge and task pro
 - Startup context now uses the same Git reconciliation and receipt freshness calculation as resume.
 - Active checkpoint context is mandatory; incomplete checkpoints appear under Missing and fail `--require-complete`.
 - Empty registered Brains produce explicit warnings in status, doctor and context.
-- Generated instructions tell engines to checkpoint meaningful milestones before limits interrupt them, and reuse the same task id across engines.
-- Previous handoff/tasks/status/memory/repo notes are preserved in `.agentos/runs/2026-11-03-before-continuity-refresh.md`.
-- Local validation passed: 815 tests, 809 passed and 6 skipped; TypeScript check, smoke and package metadata checks passed.
-- Three Brain records are registered; architecture remains proposed for review.
-- A real cross-engine continuation trial and release approval remain outstanding. Bun package-manager compatibility was not run locally because Bun is unavailable; see PR CI.
+- Generated instructions tell engines to checkpoint meaningful milestones before limits interrupt them, and reuse the same task id across engines. Child repo pointers now carry the same advice in their CLI-first lines.
+- PR #69 review fixes: `context` validates `handoff.exclude_paths` only when a checkpoint loads; the task-id test requires the new "same task id" wording.
+- **Codex → Hermes continuation trial: passed (2026-11-03).** Hermes continued from Codex checkpoint `2026-11-02T21-32-50-521Z-e13c1a39` in a fresh clone using repo artifacts only, recovered the goal, state and next step, found the checkpoint drifted because it was taken before the commits, re-ran the checks and saved a clean checkpoint `2026-11-03T07-27-42-525Z-18dc50c7`. Record and verbatim reconstruction: `.agentos/runs/2026-11-03-codex-to-hermes-continuation-trial.md`.
+- **Claude Code interruption trial: pending; gates release (not merge).** Claude Code is interrupted mid-task, then another engine continues with the same task id.
+- Test results, by revision and environment:
+  - `b62f37f`, GitHub CI run #164: Linux on Node 20/22/24/26 and macOS on Node 24 ran 815/815; Windows on Node 24 passed 803 with 12 skipped; the npm/pnpm/Bun packaged job passed.
+  - `b62f37f`, local WSL on Node 26 (npm): 815/815, plus `check`, `smoke` and `test:metadata`.
+  - `e119e9f` (last code commit; later commits change only docs and AgentOS state), local WSL on Node 26 (npm): 818/818, plus `check`, `smoke` and `test:metadata`.
+  - CI for the new head: pending until the branch is pushed.
+  - Not run locally: Bun and pnpm (not installed).
+- Drift is expected: any later commit, including a commit of the checkpoint itself, makes a saved checkpoint show as drifted. That is not a failure, and a committed checkpoint does not stay current. The next engine runs `agentos resume --task reliable-engine-handoffs`, inspects current files, re-runs the stale checks and saves a new checkpoint.
+- Previous state is preserved in `.agentos/runs/2026-11-03-before-continuity-refresh.md` and `.agentos/runs/2026-11-03-before-pr69-review-fixes.md`.
+- Three Brain records are registered; architecture remains proposed for review. A proposal adding the drift guidance to `brain:engine-handoff` awaits owner review.
 
 ## Next exact action
 
-Review the draft change on `fix/reliable-engine-handoffs`, then run a real Claude Code → second-engine continuation trial using task id `reliable-engine-handoffs`. Inspect current files and re-run stale checks. Do not merge or publish as part of this task.
+Merge decision: Ralph. Release only after the Claude Code interruption trial. Do not merge or publish as part of this task.
 
 ## Protected files / do not touch
 

@@ -2,7 +2,7 @@
 
 ## Now
 
-- [ ] Review `fix/reliable-engine-handoffs` and run a real cross-engine continuation trial using task id `reliable-engine-handoffs`.
+- [ ] Confirm CI on the new head of `fix/reliable-engine-handoffs` (PR #69) after the review fixes are pushed. The Codex → Hermes continuation trial passed (2026-11-03).
 
 ## Acceptance criteria
 
@@ -15,7 +15,7 @@
 
 ## Next
 
-- [ ] Decide merge and release only after review and the live continuation trial.
+- [ ] Merge decision: Ralph. Release only after the Claude Code interruption trial (Claude Code interrupted mid-task, another engine continues with task id `reliable-engine-handoffs`).
 
 ## Later
 
