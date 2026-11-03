@@ -264,3 +264,25 @@ test('9: obsidian init (knowledge/ inside the workspace) writes mirrors that nev
   const status = git(root, 'status', '--porcelain', '--untracked-files=all');
   assert.doesNotMatch(status, /Records/, status);
 });
+
+// --- fallbacks and unchanged behaviour ----------------------------------------------------------------
+
+test('a copy that cannot be written falls back to plain text plus the path; no link leaves the vault', async (t) => {
+  const { root, vault } = await fixture(t);
+  await mkdir(join(vault, DEST), { recursive: true });
+  await writeFile(join(vault, DEST, 'Records'), 'a file where the Records folder would go\n');
+  ok(link(root, vault));
+  const note = await readFile(join(vault, NOTE), 'utf8');
+  assert.deepEqual(targets(note).filter((target) => target.startsWith('..')), [], note);
+  assert.match(note, /^- Decision 0001: Tangerine refund window — `brain:0001-tangerine-refund-window` \(decision, accepted\) — the record is `docs\/decisions\/0001-tangerine-refund-window\.md` in the project \(no read-only copy could be written\)$/m);
+  assert.match(cli(['brain', 'index'], root).stdout, /Records is not a folder, so read-only copies cannot be written there/);
+  assert.equal(await readFile(join(vault, DEST, 'Records'), 'utf8'), 'a file where the Records folder would go\n', 'the user file is untouched');
+});
+
+test('canonical: vault keeps direct links and writes no copies', async (t) => {
+  const { root, vault } = await fixture(t);
+  ok(link(root, vault, ['--canonical', 'vault']));
+  ok(cli(['brain', 'index'], root));
+  assert.equal(await exists(join(vault, DEST, 'Records')), false);
+  assert.match(await readFile(join(vault, NOTE), 'utf8'), /\(<\.\.\/\.\.\/\.\.\/\.\.\/p1-project\/docs\/decisions\/0001-tangerine-refund-window\.md>\) — `brain:0001-tangerine-refund-window` \(decision, accepted\) — outside this vault: edit in your editor$/m);
+});

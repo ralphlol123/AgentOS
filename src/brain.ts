@@ -214,7 +214,7 @@ function classify(ctx: BrainCtx, abs: string): { location: 'workspace' | 'vault'
   const v = ctx.vault;
   if (v && inside(v.dir, abs) && v.canonical === 'vault') return { location: 'vault', base: v.vault };
   if (inside(ctx.root, abs)) return { location: 'workspace', base: ctx.root };
-  if (v && inside(v.dir, abs)) return { refused: `${abs}: knowledge.obsidian.canonical is workspace, so records live in the workspace and the vault folder holds links only (no copies). Set canonical: vault in .agentos/project.yaml to keep records in ${v.dir}. Nothing was written.` };
+  if (v && inside(v.dir, abs)) return { refused: `${abs}: knowledge.obsidian.canonical is workspace, so records live in the workspace and the vault folder holds links and generated read-only copies only (never records). Set canonical: vault in .agentos/project.yaml to keep records in ${v.dir}. Nothing was written.` };
   if (v && inside(v.vault, abs)) return { refused: `${abs} is inside the vault but outside the linked folder ${v.dir}; only that folder is allowed. Nothing was written.` };
   return null;
 }
@@ -309,26 +309,44 @@ const OUTSIDE = ' — outside this vault: edit in your editor';
 const OUTSIDE_RULE = 'Obsidian shows only records stored inside this vault folder. A record marked *outside this vault* lives in the workspace (for example `.agentos/`): Obsidian cannot open it; edit it in your editor or through `agentos brain propose|apply`. To have a new record editable here, create it inside this folder and register it in place: `agentos brain register <this folder>/<note>.md` (no copies, no moves).';
 // canonical: workspace in an external vault: `brain register` refuses notes in this folder, so name the step that allows it.
 const NAVIGATION_RULE = OUTSIDE_RULE.replace(/To have .*$/, 'This folder holds links only (canonical: workspace), so `agentos brain register` refuses notes here; to keep editable records here, set `canonical: vault` under `knowledge.obsidian` in `.agentos/project.yaml` first, then create the note inside this folder and run `agentos brain register <this folder>/<note>.md` (no copies, no moves).');
-const GENERATED_LINE = /^- \[.*\]\(<.*>\) — `brain:[a-z0-9-]+` \([a-z]+, [a-z]+\)( — outside this vault: edit in your editor)?$/;
+// canonical: workspace: records outside the vault are linked through generated read-only copies (MIRRORS), never directly.
+const READ_ONLY = (path: string) => ` — read-only copy; the record is \`${path}\` in the project`;
+const NO_COPY = (path: string) => ` — the record is \`${path}\` in the project (no read-only copy could be written)`;
+const MIRROR_RULE = 'Obsidian opens only notes inside this vault. A record stored outside it (for example in the workspace `.agentos/`) is linked through a generated **read-only copy** under `Records/`, refreshed on every Brain write and `agentos brain index`; the record is the project file named on its line. A copy is never a Brain record: edit the record in your editor or through `agentos brain propose|apply`. An edit made to a copy is kept and reported, never saved to the project. To have a new record editable here, create it inside this folder and register it in place: `agentos brain register <this folder>/<note>.md` (no moves).';
+const MIRROR_NAVIGATION_RULE = MIRROR_RULE.replace(/To have .*$/, 'This folder holds read-only copies only (canonical: workspace), so `agentos brain register` refuses notes here; to keep editable records here, set `canonical: vault` under `knowledge.obsidian` in `.agentos/project.yaml` first, then create the note inside this folder and run `agentos brain register <this folder>/<note>.md` (no moves).');
+const GENERATED_LINE = /^- (\[.*\]\(<.*>\)|[^[].*) — `brain:[a-z0-9-]+` \([a-z]+, [a-z]+\)( — outside this vault: edit in your editor| — read-only copy; the record is `.*` in the project| — the record is `.*` in the project \(no read-only copy could be written\))?$/;
 
-/** The generated block: a link (relative to the note) to every valid record, in walk order; records outside the
- *  vault folder Obsidian opens (`vaultRoot`) are marked, since Obsidian cannot open links that leave it (D3). Deterministic. */
-function noteBlock(records: BrainRecord[], noteAbs: string, vaultRoot: string, navigation: boolean) {
-  const list = valid(records).map((record) => `- [${record.title}](<${posix(relative(dirname(noteAbs), record.abs))}>) — \`${record.id}\` (${record.kind}, ${record.status})${inside(vaultRoot, record.abs) ? '' : OUTSIDE}`);
-  return [NOTE_START, '## Brain records', '', ...(list.some((line) => line.endsWith(OUTSIDE)) ? [navigation ? NAVIGATION_RULE : OUTSIDE_RULE, ''] : []), ...(list.length ? list : [NONE_YET]), NOTE_END].join('\n');
+/** The generated block: a link (relative to the note) to every valid record, in walk order. A record outside the vault
+ *  folder Obsidian opens (`vaultRoot`) cannot be opened through a link that leaves it: with `mirrors` (canonical:
+ *  workspace) it links to its read-only copy, or is plain text when no copy exists; without (canonical: vault) it is
+ *  linked and marked as before (D3). Deterministic. */
+function noteBlock(records: BrainRecord[], noteAbs: string, vaultRoot: string, navigation: boolean, mirrors: Map<string, string> | null = null) {
+  const link = (record: BrainRecord, abs: string) => `- [${record.title}](<${posix(relative(dirname(noteAbs), abs))}>) — \`${record.id}\` (${record.kind}, ${record.status})`;
+  let outside = false, copied = false;
+  const list = valid(records).map((record) => {
+    if (inside(vaultRoot, record.abs)) return link(record, record.abs);
+    if (!mirrors) { outside = true; return `${link(record, record.abs)}${OUTSIDE}`; }
+    copied = true;
+    const copy = mirrors.get(record.abs);
+    return copy ? `${link(record, copy)}${READ_ONLY(record.path)}` : `- ${record.title} — \`${record.id}\` (${record.kind}, ${record.status})${NO_COPY(record.path)}`;
+  });
+  const rule = outside ? [navigation ? NAVIGATION_RULE : OUTSIDE_RULE, ''] : copied ? [navigation ? MIRROR_NAVIGATION_RULE : MIRROR_RULE, ''] : [];
+  return [NOTE_START, '## Brain records', '', ...rule, ...(list.length ? list : [NONE_YET]), NOTE_END].join('\n');
 }
 
 /** A new index note (`obsidian init|link`, or recovery after it was deleted). In an external vault with
- *  canonical: workspace it is a navigation note only: labelled as such, in frontmatter and text. */
-export function newIndexNote(name: string, canonical: string, records: BrainRecord[], noteAbs: string, root: string, vaultRoot = dirname(noteAbs)) {
+ *  canonical: workspace it lists read-only copies: labelled as such, in frontmatter and text. */
+export function newIndexNote(name: string, canonical: string, records: BrainRecord[], noteAbs: string, root: string, vaultRoot = dirname(noteAbs), mirrors: Map<string, string> | null = null) {
   const navigation = canonical === 'workspace' && !inside(root, noteAbs);
   return [
     ...(navigation ? ['---', 'tags: [agentos-navigation]', '---', ''] : []),
     `# ${name} AgentOS Index`, '', NOTE_RULE, '',
-    ...(navigation ? ['**Navigation only.** The records below live in the AgentOS workspace, outside this vault; this vault does not contain or sync them, and Obsidian may not open links that leave the vault. Obsidian edits only records stored inside the vault it opens.', ''] : []),
-    `Canonical location of the Project Brain: **${canonical}**. Records live there only; this note holds links, never copies (no sync).`,
+    ...(navigation ? ['**Read-only copies.** The records below live in the AgentOS workspace, outside this vault. Each one opens here as a generated read-only copy under `Records/`; the record is the project file named on its line. Edit it there; an edit made to a copy is kept and reported, never saved to the project.', ''] : []),
+    canonical === 'workspace'
+      ? 'Canonical location of the Project Brain: **workspace**. Records live there only; a record outside this vault appears here as a read-only copy, never as a second record.'
+      : `Canonical location of the Project Brain: **${canonical}**. Records live there only; this note holds links, never copies (no sync).`,
     'Runtime state stays in the workspace `.agentos/`. Agents read only the notes a task needs, never the whole vault, and change records only through `agentos brain register|propose|apply`.', '',
-    noteBlock(records, noteAbs, vaultRoot, navigation), '',
+    noteBlock(records, noteAbs, vaultRoot, navigation, mirrors), '',
   ].join('\n');
 }
 
@@ -339,7 +357,7 @@ function adoptNote(before: string, block: string) {
   const at = lines.indexOf('## Brain records');
   let end = at + 1;
   while (at >= 0 && end < lines.length && !lines[end].startsWith('#')) end++;
-  if (at >= 0 && lines.slice(at + 1, end).every((line) => line === '' || line === NONE_YET || line === NONE_YET_BEFORE_311 || line === OUTSIDE_RULE || line === NAVIGATION_RULE || GENERATED_LINE.test(line))) {
+  if (at >= 0 && lines.slice(at + 1, end).every((line) => line === '' || line === NONE_YET || line === NONE_YET_BEFORE_311 || line === OUTSIDE_RULE || line === NAVIGATION_RULE || line === MIRROR_RULE || line === MIRROR_NAVIGATION_RULE || GENERATED_LINE.test(line))) {
     return [...lines.slice(0, at), ...block.split('\n'), '', ...lines.slice(end)].join('\n').replace(/\n*$/, '\n');
   }
   const text = lines.join('\n');
@@ -348,15 +366,109 @@ function adoptNote(before: string, block: string) {
 
 const NOTE_WRITES = new Set(['create', 'refresh', 'adopt']);
 
+// --- read-only mirrors --------------------------------------------------------------------------------
+// canonical: workspace + an index note: each valid record outside the vault gets `<note dir>/Records/<slug>.md`, a
+// generated copy (no `id:`, so never a record) that Obsidian can open. `mirror_hash` = sha256 of the copy's body only
+// (Obsidian may reformat frontmatter): a different hash means the copy was edited, and it is then never overwritten or
+// deleted. Inside the workspace (`obsidian init` → knowledge/) a `Records/.gitignore` of `*` keeps copies out of git.
+
+const MIRRORS = 'Records';
+const MIRROR_IGNORE = '*\n';
+interface MirrorPlan { dir: string; links: Map<string, string>; writes: Array<{ abs: string; text: string; action: 'create' | 'refresh' }>; removes: string[]; gitignore: boolean; warnings: string[]; shown: (abs: string) => string }
+
+const fmValue = (text: string, key: string) => splitFrontmatter(text).fm.match(new RegExp(`^${key}:[ \\t]*["']?([^"'\\r\\n]*)`, 'm'))?.[1].trim() ?? null;
+const isMirror = (text: string) => fmValue(text, 'agentos_mirror_of') !== null;
+const mirrorEdited = (text: string) => sha256(splitFrontmatter(text).body) !== fmValue(text, 'mirror_hash');
+
+export function mirrorText(record: BrainRecord) {
+  const body = `> [!warning] Generated by AgentOS:${READ_ONLY(record.path).slice(2)}\n> \`${record.id}\` (${record.kind}, ${record.status}). Do not edit here: an edit to this copy is not saved to the project; \`agentos brain index\` reports it.\n\n${record.body}`;
+  const fm = stringifyYaml({ agentos_mirror_of: record.id, source: record.path, source_hash: sha256(record.body), mirror_hash: sha256(body) }, { lineWidth: 0 });
+  return `---\n${fm}tags: [agentos-mirror]\n---\n${body}`;
+}
+
+/** What the mirrors need; reads only. Null when they do not apply (no index note, or canonical: vault). */
+async function planMirrors(ctx: BrainCtx, records: BrainRecord[]): Promise<MirrorPlan | null> {
+  if (!ctx.note || ctx.vault?.canonical !== 'workspace') return null;
+  const dir = join(dirname(ctx.note.abs), MIRRORS);
+  const shown = (abs: string) => (inside(ctx.root, abs) ? posix(relative(ctx.root, abs)) : abs);
+  const plan: MirrorPlan = { dir, links: new Map(), writes: [], removes: [], gitignore: false, warnings: [], shown };
+  let names: string[];
+  try { names = await readdir(dir); } catch (error) {
+    if (error.code === 'ENOENT') names = [];
+    else if (error.code === 'ENOTDIR') { plan.warnings.push(`${shown(dir)} is not a folder, so read-only copies cannot be written there (left as is); records outside the vault are listed as plain text.`); return plan; }
+    else throw error;
+  }
+  const read = (abs: string) => readFile(abs, 'utf8');
+  const wanted = new Set<string>();
+  for (const record of valid(records)) {
+    if (inside(ctx.vault.vault, record.abs)) continue;
+    const name = `${record.id.slice('brain:'.length)}.md`, abs = join(dir, name);
+    wanted.add(name);
+    plan.links.set(record.abs, abs);
+    const text = mirrorText(record);
+    const before = names.includes(name) ? await read(abs) : null;
+    if (before === text) continue;
+    // An edited copy is kept, unless the edit already landed in the record (same body as the new copy).
+    if (before !== null && mirrorEdited(before) && splitFrontmatter(before).body !== splitFrontmatter(text).body) {
+      plan.warnings.push(`${shown(abs)} was edited in Obsidian; the record is ${record.path} in the project (not overwritten). Copy the change there, or stage it with \`agentos brain propose ${record.id} --from <file>\` (the body only, without this copy's frontmatter and banner).`);
+      continue;
+    }
+    plan.writes.push({ abs, text, action: before === null ? 'create' : 'refresh' });
+  }
+  for (const name of names.filter((n) => /\.md$/i.test(n) && !wanted.has(n)).sort()) {
+    const abs = join(dir, name);
+    const before = await read(abs).catch(() => null);
+    if (before === null || !isMirror(before)) continue; // not a copy AgentOS wrote: never touched
+    if (mirrorEdited(before)) plan.warnings.push(`${shown(abs)} was edited in Obsidian and ${fmValue(before, 'agentos_mirror_of')} no longer has a read-only copy here (record removed, or now inside the vault); kept as is. Delete it by hand when done.`);
+    else plan.removes.push(abs);
+  }
+  plan.gitignore = inside(ctx.root, dir) && (plan.writes.length > 0 || names.length > 0) && (await read(join(dir, '.gitignore')).catch(() => null)) !== MIRROR_IGNORE;
+  return plan;
+}
+
+/** Apply a mirror plan inside the caller's mutation transaction. */
+export async function writeMirrors(plan: MirrorPlan | null) {
+  if (!plan || (!plan.writes.length && !plan.removes.length && !plan.gitignore)) return;
+  await mkdirTracked(plan.dir);
+  if (plan.gitignore) await writeFileAtomic(join(plan.dir, '.gitignore'), MIRROR_IGNORE);
+  for (const write of plan.writes) await writeFileAtomic(write.abs, write.text);
+  for (const abs of plan.removes) await removeTracked(abs);
+}
+
+/** `obsidian init|link`: the new note's text plus the mirrors it links to (written with it by the caller). */
+export async function newIndexNoteWithMirrors(ctx: BrainCtx, records: BrainRecord[]) {
+  const mirrors = await planMirrors(ctx, records);
+  return { text: newIndexNote(ctx.note.name, ctx.vault.canonical, records, ctx.note.abs, ctx.root, ctx.vault.vault, mirrors?.links ?? null), mirrors };
+}
+
+/** doctor: edited and orphaned-but-edited copies (warnings only). */
+export async function mirrorWarnings(ctx: BrainCtx) {
+  return (await planMirrors(ctx, await loadBrain(ctx.root, ctx.repos, ctx.vault)))?.warnings ?? [];
+}
+
+/** Plan, then (unless dryRun) write the mirrors. A failure never throws: the affected lines become plain text. */
+async function syncMirrors(ctx: BrainCtx, records: BrainRecords, dryRun: boolean) {
+  let plan: MirrorPlan | null = null;
+  try {
+    plan = await planMirrors(ctx, records);
+    if (plan && !dryRun) await withMutationTransaction(() => writeMirrors(plan));
+    return { plan, links: plan?.links ?? null, lines: plan?.warnings.map((w) => `Warning: ${w}`) ?? [] };
+  } catch (error) {
+    const links = new Map(plan?.links ?? []);
+    for (const write of plan?.writes ?? []) for (const [record, abs] of links) if (abs === write.abs) links.delete(record);
+    return { plan: null, links, lines: [...(plan?.warnings.map((w) => `Warning: ${w}`) ?? []), `Warning: read-only copies in ${ctx.note.abs ? join(dirname(ctx.note.abs), MIRRORS) : MIRRORS} could not be written (${error.message}); those records are listed as plain text. The next successful brain write or \`agentos brain index\` retries.`] };
+  }
+}
+
 /** What the index note needs: create (absent), refresh/unchanged (one marker pair), legacy (no markers; `adopt` to
  *  write), broken (damaged markers: never written). Null: no index note is linked, or its folder is absent. */
-async function planNote(ctx: BrainCtx, records: BrainRecords, adopt: boolean) {
+async function planNote(ctx: BrainCtx, records: BrainRecords, adopt: boolean, mirrors: Map<string, string> | null = null) {
   const note = ctx.note;
   if (!note || !ctx.vault || await dirState(dirname(note.abs)) === 'absent') return null;
   const rel = inside(ctx.root, note.abs) ? posix(relative(ctx.root, note.abs)) : note.abs;
   const before = await readFile(note.abs, 'utf8').catch((error) => { if (error.code === 'ENOENT') return null; throw error; });
-  if (before === null) return { rel, abs: note.abs, before, after: newIndexNote(note.name, ctx.vault.canonical, records, note.abs, ctx.root, ctx.vault.vault), action: 'create' };
-  const block = noteBlock(records, note.abs, ctx.vault.vault, ctx.vault.canonical === 'workspace' && !inside(ctx.root, note.abs));
+  if (before === null) return { rel, abs: note.abs, before, after: newIndexNote(note.name, ctx.vault.canonical, records, note.abs, ctx.root, ctx.vault.vault, mirrors), action: 'create' };
+  const block = noteBlock(records, note.abs, ctx.vault.vault, ctx.vault.canonical === 'workspace' && !inside(ctx.root, note.abs), mirrors);
   const starts = before.split(START_PREFIX).length - 1, ends = before.split(NOTE_END).length - 1;
   const s = before.indexOf(START_PREFIX), e = before.indexOf(NOTE_END);
   if (starts === 1 && ends === 1 && s < e) {
@@ -370,17 +482,19 @@ async function planNote(ctx: BrainCtx, records: BrainRecords, adopt: boolean) {
 const legacyLine = (rel: string) => `index note ${rel} has no agentos:brain-index markers (an older note); not refreshed. Preview: \`agentos brain index\`; adopt: \`agentos brain index --adopt\` (text outside the generated block is kept).`;
 const brokenLine = (rel: string) => `index note ${rel} has damaged agentos:brain-index markers (exactly one start and one end marker are needed); not refreshed. Fix the markers by hand; nothing was written to it.`;
 
-/** Plan and (unless dryRun) write the index note. A failure never throws: the note is optional and derived. */
+/** Plan and (unless dryRun) write the read-only copies, then the index note. A failure never throws: the note is optional and derived.
+ *  `lines`: the note is stale (sets note_stale). `mirrorLines`: warnings about copies (edited, or not writable). */
 async function syncNote(ctx: BrainCtx, records: BrainRecords, adopt = false, dryRun = false) {
-  let plan = null;
+  let plan = null, mirrors = null;
   try {
-    plan = await planNote(ctx, records, adopt);
+    if (ctx.note && ctx.vault && await dirState(dirname(ctx.note.abs)) !== 'absent') mirrors = await syncMirrors(ctx, records, dryRun);
+    plan = await planNote(ctx, records, adopt, mirrors?.links ?? null);
     if (plan && !dryRun && NOTE_WRITES.has(plan.action)) await withMutationTransaction(() => writeFileAtomic(plan.abs, plan.after));
   } catch (error) {
-    return { plan, failed: true, lines: [`Warning: index note ${plan?.rel ?? ctx.note?.abs} is stale (${error.message}); the record write above is kept. The next successful brain write or \`agentos brain index\` regenerates it.`] };
+    return { plan, mirrors, mirrorLines: mirrors?.lines ?? [], failed: true, lines: [`Warning: index note ${plan?.rel ?? ctx.note?.abs} is stale (${error.message}); the record write above is kept. The next successful brain write or \`agentos brain index\` regenerates it.`] };
   }
   const lines = plan?.action === 'legacy' ? [`Warning: ${legacyLine(plan.rel)}`] : plan?.action === 'broken' ? [`Warning: ${brokenLine(plan.rel)}`] : [];
-  return { plan, failed: false, lines };
+  return { plan, mirrors, mirrorLines: mirrors?.lines ?? [], failed: false, lines };
 }
 
 /** A Brain write, then the derived index.json and index note, each in its own transaction. Both are rebuildable, so
@@ -395,6 +509,7 @@ async function commit(ctx: BrainCtx, write: () => Promise<void>) {
   if (records) {
     const note = await syncNote(ctx, records);
     if (note.lines.length) { flags.note_stale = true; lines.push(...note.lines); }
+    lines.push(...note.mirrorLines);
   }
   return { lines, flags };
 }
@@ -408,19 +523,22 @@ export async function indexBrain(ctx: BrainCtx, options: { adopt?: boolean; dryR
   const index = await writeIndex(ctx, records, dry);
   const note = await syncNote(ctx, records, Boolean(options.adopt), dry);
   const plan = note.plan;
+  const copies = note.mirrors?.plan;
   const ok = !note.failed && plan?.action !== 'broken';
   const lines = [
     `AgentOS brain index${dry ? ' (dry run)' : ''}`,
     `- ${verb(index)}: ${INDEX} (${valid(records).length} record(s))`,
     ...(!ctx.note ? ['- No Obsidian index note is linked; nothing else to do.'] : !plan && !note.failed ? [`- Index note folder ${dirname(ctx.note.abs)} is absent; the note was not written (see \`agentos obsidian status\`).`] : []),
+    ...(copies ? [...copies.writes.map((w) => `- ${verb(w.action)}: read-only copy ${copies.shown(w.abs)}`), ...copies.removes.map((abs) => `- ${dry ? 'Would remove' : 'Removed'}: read-only copy ${copies.shown(abs)} (its record is gone or now inside the vault)`)] : []),
     ...(plan && (NOTE_WRITES.has(plan.action) || plan.action === 'unchanged') ? [`- ${verb(plan.action)}: index note ${plan.rel}`] : []),
     ...(plan?.action === 'legacy' ? [`- ${legacyLine(plan.rel)}`, 'Preview of --adopt:', ...diffLines(plan.before, plan.after)] : []),
     ...(plan?.action === 'adopt' ? ['Diff:', ...diffLines(plan.before, plan.after)] : []),
     ...(plan?.action === 'broken' ? [`- ${brokenLine(plan.rel)}`] : []),
     ...(note.failed ? note.lines : []),
+    ...note.mirrorLines,
     'Records, project.yaml and history are never changed by this command.',
   ];
-  return out(options.json, ok, { dryRun: dry, index, note: plan ? { path: plan.rel, action: plan.action } : null, ...(note.failed ? { note_stale: true } : {}) }, lines);
+  return out(options.json, ok, { dryRun: dry, index, note: plan ? { path: plan.rel, action: plan.action } : null, ...(copies ? { mirrors: [...copies.writes.map((w) => ({ path: copies.shown(w.abs), action: w.action })), ...copies.removes.map((abs) => ({ path: copies.shown(abs), action: 'remove' }))] } : {}), ...(note.mirrorLines.length ? { mirror_warnings: note.mirrorLines } : {}), ...(note.failed ? { note_stale: true } : {}) }, lines);
 }
 
 const out = (json: boolean, ok: boolean, data: any, lines: string[]) => ({ ok, ...data, text: json ? JSON.stringify({ ok, ...data }, null, 2) : lines.join('\n') });
@@ -631,12 +749,14 @@ export async function checkBrain(ctx: BrainCtx, options: { json?: boolean }) {
   const invalid = records.filter((record) => record.state === 'invalid');
   const count = (state: string) => lost.filter((record) => record.state === state).length;
   const ok = invalid.length === 0 && !groups.some((group) => group.failed && group.records.length);
-  return out(options.json, ok, { ...(gone ? { vault_unavailable: gone.dir ?? gone.reason } : {}), records: [...records.map((record) => ({ ...publicRecord(record), source_hash: record.source_hash, current_hash: record.current_hash, problems: record.problems })), ...lost] }, [
+  const copies = await planMirrors(ctx, records).then((plan) => plan?.warnings ?? [], () => [] as string[]);
+  return out(options.json, ok, { ...(gone ? { vault_unavailable: gone.dir ?? gone.reason } : {}), records: [...records.map((record) => ({ ...publicRecord(record), source_hash: record.source_hash, current_hash: record.current_hash, problems: record.problems })), ...lost], ...(copies.length ? { mirror_warnings: copies } : {}) }, [
     `AgentOS brain check: ${records.length + lost.length} record(s), ${records.filter((r) => r.state === 'ok').length} ok, ${records.filter((r) => r.state === 'changed').length} changed, ${invalid.length} invalid${gone ? `, ${count('unavailable')} unavailable` : ''}${count('unreadable') ? `, ${count('unreadable')} unreadable` : ''}`,
     ...records.map((record) => record.state === 'ok' ? `- ok ${record.id} (${record.path})`
       : record.state === 'changed' ? `- changed ${record.id} (${record.path}): ${CHANGED}; after review run \`agentos brain verify ${record.id} --by <name>\``
         : `- invalid ${record.path}: ${record.problems.join('; ')} (file left as is; fix it by hand)`),
     ...groups.flatMap((group) => [...group.records.map((record) => `- ${record.state} ${record.id} (${record.path}): ${group.reason}`), ...(group.records.length ? [] : [`- ${group.reason}; no records known there`])]),
+    ...copies.map((warning) => `Warning: ${warning}`),
   ]);
 }
 

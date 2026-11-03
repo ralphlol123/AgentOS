@@ -96,7 +96,7 @@ test('D2 (A14): an absolute --cwd is compared canonically, so a root reached thr
 
 // --- D3: records outside the Obsidian vault folder ----------------------------------------------------
 
-test('D3: the vault index marks records outside the vault folder; a record registered inside it is not marked; no copies', async (t) => {
+test('D3: the vault index links records outside the vault folder to read-only copies; a record registered inside it is linked directly', async (t) => {
   const { root } = await project(t);
   ok(cli(['init', '--existing', '--yes'], root)); // `brain init` (workspace) was removed in 3.0.0; init runs the same Brain setup
   ok(cli(['obsidian', 'init'], root));
@@ -106,11 +106,12 @@ test('D3: the vault index marks records outside the vault folder; a record regis
   const lines = note.split('\n').filter((line) => line.startsWith('- ['));
   assert.ok(lines.length >= 2, note);
   for (const line of lines) {
-    if (line.includes('`brain:design`')) assert.doesNotMatch(line, /outside this vault/, line);
-    else assert.match(line, /\(<\.\.\/\.agentos\/.*>\) — `brain:[a-z0-9-]+` \([a-z]+, [a-z]+\) — outside this vault: edit in your editor$/, line);
+    if (line.includes('`brain:design`')) assert.match(line, /\(<design\.md>\) — `brain:design` \(note, accepted\)$/, line);
+    else assert.match(line, /\(<Records\/[a-z0-9-]+\.md>\) — `brain:[a-z0-9-]+` \([a-z]+, [a-z]+\) — read-only copy; the record is `\.agentos\/.*` in the project$/, line);
   }
-  assert.match(note, /Obsidian shows only records stored inside this vault folder/);
-  assert.deepEqual((await readdir(join(root, 'knowledge'))).sort(), ['design.md', 'index.md'], 'no copies or symlinks in the vault');
+  assert.match(note, /Obsidian opens only notes inside this vault/);
+  assert.deepEqual((await readdir(join(root, 'knowledge'))).sort(), ['Records', 'design.md', 'index.md'], 'no symlinks; copies only under Records/');
+  assert.equal(await exists(join(root, 'knowledge/Records/design.md')), false, 'a record inside the vault gets no copy');
   assert.match(cli(['brain', 'index'], root).stdout, /Unchanged: index note/, 'deterministic');
 });
 

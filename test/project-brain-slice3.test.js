@@ -259,7 +259,7 @@ test('F10/A11: obsidian init --dir outside the workspace keeps the host path mac
 
 // --- A12: both vault setup paths ---------------------------------------------------------------------
 
-test('A12: existing vault: one labelled navigation note; unrelated notes and .obsidian/ untouched; no symlinks or copies; re-run is a no-op', async (t) => {
+test('A12: existing vault: one labelled index note plus read-only copies under Records/; unrelated notes and .obsidian/ untouched; no symlinks; re-run is a no-op', async (t) => {
   const dir = await base(t);
   const root = await project(dir);
   const v = await vault(dir);
@@ -268,14 +268,14 @@ test('A12: existing vault: one labelled navigation note; unrelated notes and .ob
   const after = await snapshot(v);
   for (const [key, value] of Object.entries(before)) assert.deepEqual(after[key], value, `${key} untouched`);
   const added = Object.keys(after).filter((key) => !(key in before));
-  assert.deepEqual(added, ['Projects/Demo', 'Projects/Demo/My Ws AgentOS Index.md']);
+  assert.deepEqual(added, ['Projects/Demo', 'Projects/Demo/My Ws AgentOS Index.md', 'Projects/Demo/Records', ...['architecture', 'conventions', 'decisions', 'glossary'].map((id) => `Projects/Demo/Records/${id}.md`)]);
   assert.ok(!Object.values(after).includes('link'), 'no symlinks');
   const note = await read(v, 'Projects/Demo/My Ws AgentOS Index.md');
   const fm = note.match(/^---\n([\s\S]*?)\n---\n/);
   assert.ok(fm, 'frontmatter first');
   assert.deepEqual(parseYaml(fm[1]), { tags: ['agentos-navigation'] });
-  assert.match(note, /\*\*Navigation only\.\*\*/);
-  assert.ok(!note.includes(UNKNOWN), 'links only: no record body copied into the vault');
+  assert.match(note, /\*\*Read-only copies\.\*\*/);
+  assert.ok(!note.includes(UNKNOWN), 'the note holds links: record bodies only in the read-only copies');
 
   const ws = await snapshot(join(root, '.agentos'));
   ok(cli(['obsidian', 'link', '--vault', v, '--dest', DEST, '--create'], root));
@@ -293,7 +293,7 @@ test('A12: new knowledge folder opened as its own vault: its .obsidian/ settings
   await mkdir(join(root, KNOW, '.obsidian'));
   await writeFile(join(root, KNOW, '.obsidian/workspace.json'), '{"sentinel":true}\n');
   await writeFile(join(root, KNOW, 'My idea.md'), '# My idea\n\nKeep me.\n');
-  const keep = async () => Object.fromEntries(Object.entries(await snapshot(join(root, KNOW))).filter(([key]) => key !== 'index.md'));
+  const keep = async () => Object.fromEntries(Object.entries(await snapshot(join(root, KNOW))).filter(([key]) => key !== 'index.md' && !key.startsWith('Records')));
   const before = await keep();
   ok(cli(['brain', 'register', 'docs/adr/0001-db.md', '--kind', 'adr'], root));
   assert.match(await read(root, `${KNOW}/index.md`), /0001-db\.md>\)/, 'index refreshed');
