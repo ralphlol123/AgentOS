@@ -12,8 +12,7 @@
 
 ## Next
 
-- [ ] Prose edited after the checkpoint: mark the checkpoint's Next as older in `context` instead of showing two unlabelled next actions.
-- [ ] Release only after the Claude Code interruption trial (carried over from `reliable-engine-handoffs`).
+- [ ] Next-action truncation in the managed handoff block (300 characters) and `status` across several tasks: tracked separately.
 
 ## Later
 
