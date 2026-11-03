@@ -58,21 +58,27 @@ test('a function-word-only --about query matches no Brain record', async (t) => 
   assert.equal(out.omitted.find((item) => item.id === 'brain:stale-rates')?.reason, 'no-match');
 });
 
-test('under a tight budget a Brain record with a real --about hit is packed before the always-relevant items', async (t) => {
+test('under a tight budget a Brain record with a real --about hit is packed first, but not at the cost of an always-relevant item', async (t) => {
   const root = await workspace(t);
   const about = ['--about', 'webhook'];
   const full = context(root, about);
   const record = full.included.find((item) => item.id === 'brain:delivery');
   assert.ok(record, `the webhook decision matches at the default budget: ${JSON.stringify(full.included)}`);
   assert.match(record.reason, /webhook/);
-  // Room for that one record above the mandatory-only minimum, not for the always-relevant items as well.
   const needed = context(root, [...about, '--budget', '1']).overflow.needed;
+  const always = full.included.filter((item) => ALWAYS.has(item.id)).reduce((sum, item) => sum + item.tokens, 0);
+  // Room for the record and the always-relevant items: the record is packed first.
+  const roomy = context(root, [...about, '--budget', String(needed + record.tokens + always)]);
+  assert.equal(roomy.ok, true, roomy.text);
+  assert.ok(roomy.budget.estimate <= roomy.budget.limit, `estimate ${roomy.budget.estimate} within ${roomy.budget.limit}`);
+  assert.equal(optional(roomy)[0]?.id, 'brain:delivery', `packed first: ${JSON.stringify(optional(roomy))}`);
+  // Room for that one record only: the always-relevant items that fit without the promotion keep their place.
   const tight = context(root, [...about, '--budget', String(needed + record.tokens)]);
   assert.equal(tight.ok, true, tight.text);
   assert.ok(tight.budget.estimate <= tight.budget.limit, `estimate ${tight.budget.estimate} within ${tight.budget.limit}`);
-  assert.equal(optional(tight)[0]?.id, 'brain:delivery', `packed first: ${JSON.stringify(optional(tight))}`);
-  const dropped = tight.omitted.filter((item) => ALWAYS.has(item.id) && item.reason === 'budget');
-  assert.ok(dropped.length, `an always-relevant item is omitted for budget instead: ${JSON.stringify(tight.omitted)}`);
+  // In the usual order the always-relevant items come first and fill this room; promoting the record would drop one.
+  assert.ok(optional(tight).some((item) => ALWAYS.has(item.id)), `always-relevant items fit: ${JSON.stringify(tight.omitted)}`);
+  assert.equal(tight.omitted.find((item) => item.id === 'brain:delivery')?.reason, 'budget', `not promoted: ${JSON.stringify(optional(tight))}`);
 });
 
 test('without --about the packing order is unchanged: always-relevant items first, Brain by task terms after', async (t) => {
