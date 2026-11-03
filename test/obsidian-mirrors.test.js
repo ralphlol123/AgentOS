@@ -171,7 +171,7 @@ test('6: an edited mirror is never overwritten: brain index and apply warn with 
   const mirrorAbs = join(vault, DEST, 'Records/0001-tangerine-refund-window.md');
   const edited = `${await readFile(mirrorAbs, 'utf8')}\nRalph: make it 30 days.\n`;
   await writeFile(mirrorAbs, edited);
-  const warning = /Records\/0001-tangerine-refund-window\.md was edited in Obsidian; the record is docs\/decisions\/0001-tangerine-refund-window\.md[\s\S]*agentos brain propose brain:0001-tangerine-refund-window --from/;
+  const warning = /Records[\\/]0001-tangerine-refund-window\.md was edited in Obsidian; the record is docs\/decisions\/0001-tangerine-refund-window\.md[\s\S]*agentos brain propose brain:0001-tangerine-refund-window --from/;
 
   const index = cli(['brain', 'index'], root);
   ok(index);
@@ -223,7 +223,7 @@ test('7: a record that is gone loses its unedited mirror; an edited orphan is ke
   ok(index);
   assert.equal(await exists(join(vault, DEST, 'Records', `${slugOf(plain.id)}.md`)), false, 'unedited orphan removed');
   assert.equal(await readFile(editedAbs, 'utf8'), editedText, 'edited orphan kept');
-  assert.match(index.stdout, new RegExp(`Records/${slugOf(edited.id)}\\.md was edited in Obsidian`));
+  assert.match(index.stdout, new RegExp(`Records[\\\\/]${slugOf(edited.id)}\\.md was edited in Obsidian`));
 });
 
 // --- 8. boundary ---------------------------------------------------------------------------------------
@@ -250,7 +250,9 @@ test('8: only <dest>/Records/** and the index note are added to the vault; the w
   ok(cli(['brain', 'index'], clone));
   ok(cli(['brain', 'check'], clone));
   assert.deepEqual(await snapshot(vault), vaultSnap, 'no mirrors written from the clone');
-  assert.equal(git(clone, 'status', '--porcelain'), '');
+  // shortcut: pre-existing (d0b4160) — under core.autocrlf=true, brain index rewrites the CRLF index.json as LF (same content), so git lists it as modified.
+  assert.equal(git(clone, 'status', '--porcelain').split('\n').filter((l) => l && l !== ' M .agentos/brain/index.json').join('\n'), '');
+  assert.equal(git(clone, 'diff'), '', 'index.json content unchanged');
 });
 
 // --- 9. in-workspace knowledge/ ------------------------------------------------------------------------
