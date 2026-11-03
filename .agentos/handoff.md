@@ -2,28 +2,28 @@
 
 ## Current objective
 
-`context --about` ranks Brain records better with exactly two changes: common English function words are not match terms, and a Brain record that matched an `--about` term is packed before the always-relevant optional items. Mandatory items, scope/status filters, the PR #76 budget guarantee and behaviour without `--about` stay unchanged. Title/heading weighting, term frequency, stemming, date tie-breaks and skip-and-continue packing are out of scope.
+Cap Brain-first packing for `context --about`: at most three Brain `--about` hits (the top three in rank order) move ahead of the other optional records, and only while every always-relevant item (acceptance, handoff state, repo note, verification, read paths) that fits in the usual order still fits. Everything else keeps the usual order (score, freshness, source order). The stoplist, the PR #76 budget guarantee, scope/status filters and behaviour without `--about` stay unchanged. Title weighting, stemming, other tie-breaks, #71 and #72 are out of scope.
 
 ## Scope
 
 - Repo: `agentos-for-projects`, single-repo workspace.
-- Baseline: `313107b` on `fix/context-budget-accounting` (PR #76, not merged), package 3.2.0. Unreleased changes; no version bump or release is requested.
-- Branch: `feat/brain-ranking-stoplist-packing` (stacked on PR #76); task id: `brain-ranking-stoplist-packing`.
-- Allowed changes: `STOPWORDS` and the rank order in `src/context-builder.ts`, tests, docs/context-builder.md, CHANGELOG Unreleased and this repository's AgentOS state.
+- Baseline: `main` at `d54ec30` (PRs #76 and #78 merged), package 3.2.0. Unreleased changes; no version bump or release is requested.
+- Branch: `fix/brain-first-cap`; task id: `brain-first-cap`.
+- Allowed changes: the rank/packing step in `src/context-builder.ts`, tests, docs/context-builder.md, CHANGELOG Unreleased and this repository's AgentOS state.
 
 ## Current state
 
-- `82b9a17`: RED test `test/brain-ranking-stoplist-packing.test.js` (3 tests). At `313107b` 2 failed (a function-word-only `--about` matched `brain:stale-rates` on how, long, time; under a tight budget `acceptance` was packed before the `--about` Brain hit) and the no-`--about` order guard passed.
-- `1a71fc4`: `STOPWORDS` gains 67 function-word entries (the evaluation's 69-word simulate list minus `get`, `make`, `about`, with `doe` covered by `does`; plus `time`, `long`); entries go through the same `words()` normalisation as terms, so `does` matches and the old `this` entry now takes effect. Ranked records sort Brain `--about` hits first, then the old order. 833/833 tests; no existing test changed.
-- `821f926`: docs/context-builder.md (stopwords, selection step 5, budget line) and a CHANGELOG Unreleased `### Changed` line.
-- 18-query re-run with the real CLI, 313107b vs this branch (evidence outside the repo, in the task folder): hit@1 5→7/18, hit@1 without a tie 4→4, hit@3 11→11, present at tight 10→13, present at tighter 5→10; F2-para and F3-para lose their only (function-word) match and become no-match. At tight budgets acceptance, handoff current state and verification are dropped in some rows (F3-broad, F3-question, F4-*). No `ok:true` over its limit; without `--about` all 54 baseline outputs are byte-identical.
-- Verification at `821f926` (local WSL, npm), TMPDIR=/tmp and a 207-character TMPDIR: `npm run check` clean; `npm test` 833/833; `npm run smoke` exit 0; `npm run test:metadata` 3/3. Bun not run (not installed here).
+- `b0becf6`: RED. New `test/brain-first-cap.test.js` (3 tests: F3-question-style fixture at ceil(needed x 1.15) keeps the target, acceptance, current state and next action; a long-reference variant at needed + target + always-relevant tokens keeps them all; only the top three hits are promoted and the 4th and later follow the task sections in their usual order). In `test/brain-ranking-stoplist-packing.test.js` the #78 test that required an always-relevant item to be dropped now requires the opposite (record first when there is room; not promoted when that would drop an always-relevant item). At `d54ec30`: 4 of the 6 tests fail. With a plain cap of three (no guard), 2 still fail (long references; the webhook case), so the plain cap was not enough.
+- `49b0aa5`: fix. Packing is a `pack(order)` helper (same greedy fill and trailer loop as before); the usual order is packed, then the top 3, 2, 1 Brain `--about` hits are tried first and the first try that keeps every always-relevant item of the usual packing wins. Without `--about` there is nothing to try, so it is the old single pass. 836/836 tests.
+- `96f2a9b`: docs/context-builder.md (selection step 5, budget line) and a CHANGELOG Unreleased `### Changed` line.
+- Real CLI, ledgerline case, F3-question at `--budget 3952`: 313107b, d54ec30 and the fix are all ok; acceptance, current state, next action, verification and repo note are included at 313107b and with the fix, all omitted for budget at d54ec30 (11 Brain records); the fix includes 6 Brain records, the target among them. 18-query re-run: task sections lost at tight 15 (313107b) / 30 (d54ec30) / 15 (fix). No `ok:true` over its limit; without `--about` all 54 baseline outputs are byte-identical d54ec30 vs fix. Evidence outside the repo, in the task folder.
+- Verification at `96f2a9b` (local WSL, npm), TMPDIR=/tmp and a 211-character TMPDIR: `npm run check` clean; `npm test` 836/836; `npm run smoke` exit 0; `npm run test:metadata` 3/3. Bun not run (not installed here).
 - All commits are local; nothing pushed.
-- Previous state: `.agentos/runs/2026-11-03-before-brain-ranking-stoplist-packing.md`.
+- Previous state: `.agentos/runs/2026-11-03-before-brain-first-cap.md`.
 
 ## Next exact action
 
-Phynceon reviews the local commits on `feat/brain-ranking-stoplist-packing`, then pushes and opens a draft PR stacked on #76.
+Phynceon reviews the local commits on `fix/brain-first-cap`, then pushes and opens a PR against `main`.
 
 ## Protected files / do not touch
 
@@ -33,9 +33,9 @@ Phynceon reviews the local commits on `feat/brain-ranking-stoplist-packing`, the
 
 ## Open decisions
 
-- Release version and merge remain separate from this implementation; PR #76 keeps its own merge gate.
-- Whether Brain-first packing should wait for title/heading weighting (#2): with noisy single-word `--about` queries it packs unrelated Brain records before acceptance and handoff state at tight budgets.
-- Whether `time` and `long` should stay stopwords (named in the task; they can be project terms).
+- Release version and merge remain separate from this implementation.
+- The guard protects every always-relevant item, read paths included; a narrower set (acceptance, handoff, verification only) would let a promoted hit displace read-path pointers.
+- Whether `time` and `long` should stay stopwords (from #78; they can be project terms).
 
 <!-- agentos:checkpoint:start -->
 ## Checkpoint (managed)
