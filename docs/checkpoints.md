@@ -48,6 +48,7 @@ The record id is `<created_at with : and . as ->-<first 8 hex of sha256 of the r
 | `repos[]` | `{name, path, worktree, available, reason?, branch, head, fingerprint, changed_paths, omitted_paths}` per repo in project.yaml |
 | `state` | sha256 over every repo's name, availability, HEAD and fingerprint |
 | `progress`, `blockers[]`, `next` | from `--progress`, `--blocker`, `--next` (`"(none recorded)"` when absent) |
+| `supersedes` | only when `--next` is saved: `{"handoff:current-state": sha256, "handoff:next-exact-action": sha256}` of handoff.md § Current state / § Next exact action text at save time (managed block excluded; empty sections left out) |
 | `knowledge_refs[]` | `{id, source}` of the decisions and linked notes `agentos context` selects for the task |
 | `receipts[]` | see below |
 
@@ -120,6 +121,8 @@ The block is replaced in place on every checkpoint (inserted once at the end of 
 
 - Every non-recovered checkpoint output asks the engine to review durable knowledge, stage a focused proposal with `--task`, and inspect `agentos brain policy`. Manual review is the default; an owner-enabled policy permits `brain apply --auto --by <self>` for eligible updates. Refusals stay pending. This is an instruction the engine may follow, not a runtime hook; the checkpoint itself never stages or applies a proposal. See [Brain approval policy](brain.md#optional-automatic-application).
 - `agentos context` adds the current checkpoint for its task (`--task`, else the objective slug) as a mandatory record, source `.agentos/checkpoints/<task>/current.json`. It uses the same reconciliation and receipt freshness calculation as `resume`; the saved passing count is never presented as current verification. Drift and unavailable evidence are warnings; incomplete checkpoints are Missing and fail `--require-complete`. A budget that cannot hold the active checkpoint produces overflow instead of omitting it. Inspection remains read-only.
+- One current next action: when the active checkpoint saved a `--next`, `context` shows each handoff.md § Current state / § Next exact action whose text still matches the record's `supersedes` digest as `## <section> [superseded by checkpoint <id>]`. The section keeps its text and is marked as history. The checkpoint's Next is the current next action. A section edited after the checkpoint is newer than it and is shown unlabelled. Recovered records and records without `supersedes` mark nothing. tasks.md § Now is not yet reconciled with the checkpoint.
+- `agentos status` (no `--task`) prints `Current next action (task <id>, checkpoint <id>): <next>` from the newest valid checkpoint of any task, by `created_at`. Incomplete checkpoints are skipped here (`doctor` and `resume` report them). It writes nothing.
 - `agentos doctor` reports a `current.json` that points at a missing or invalid record as a problem (exit 1).
 
 ## Not done (backlog)

@@ -7,7 +7,7 @@ import { assertRelativeBoundaryPath, isWithin, validateTaskScope } from './task-
 import { buildContextBundle, findAcceptance } from './context-builder.js';
 import { applyBrain, splitFrontmatter, brainContextRecords, brainDoctor, brainMissing, checkBrain, dirState, EMPTY_BRAIN_WARNING, indexBrain, initBrain, ioReason, listBrain, logBrain, newIndexNote, loadBrain, previewBrain, revertBrain, proposeBrain, policyBrain, registerBrain, searchBrain, showBrain, verifyBrain, type BrainCtx, type VaultBinding } from './brain.js';
 import { approvalGuidance, isAutonomous } from './brain-policy.js';
-import { checkpointContextRecord, checkpointProblems, listCheckpoints, resolveTask, resumeCheckpoint, showCheckpoint, writeCheckpoint, type CheckpointContext } from './checkpoint.js';
+import { checkpointContextRecord, checkpointProblems, listCheckpoints, newestCheckpoint, resolveTask, resumeCheckpoint, showCheckpoint, writeCheckpoint, type CheckpointContext } from './checkpoint.js';
 import { planCompactRewrite } from './compact-rewrite.js';
 import { STATE_SIZE_WARN_CHARS, largestSections, sectionSizes, tasksShapeWarnings } from './state-size.js';
 import { dumpYaml, patchProjectYaml } from './project-yaml-edit.js';
@@ -965,6 +965,7 @@ export async function statusAgentOS(options: any = {}) {
   const { binding, off } = obsidianIntegration(root, project);
   const knowledge = await brainDoctor(root, brainScopes(project), binding, off);
   const warnings = [...sizeWarnings, ...knowledge.problems, ...knowledge.warnings];
+  const checkpoint = await newestCheckpoint(root);
   return {
     ok,
     text: [
@@ -976,6 +977,7 @@ export async function statusAgentOS(options: any = {}) {
       '',
       'Current handoff:',
       objective.selected?.text || `- ${objective.diagnostic}`,
+      ...(checkpoint ? [`Current next action (task ${checkpoint.task.id}, checkpoint ${checkpoint.id}): ${checkpoint.next}`] : []),
       '',
       missing.length ? `Missing files:\n${missing.map((f) => `- ${f}`).join('\n')}` : 'Required files: all present',
       ...(warnings.length ? ['', 'Warnings:', ...warnings.map((warning) => `- ${warning}`)] : []),
@@ -4042,12 +4044,13 @@ export async function contextAgentOS(options: any = {}) {
     return { ok: false, text: `AgentOS context: FAIL\n${gateLines}\nNo context was rendered. Without the flags, the edit scope is delivered with the ADVISORY lines (see \`agentos doctor --engines\`).` };
   }
   const input = await contextInputFor(root, engine, options);
-  const objective = resolveObjective(await safeRead(join(root, '.agentos/handoff.md')));
+  const handoffText = await safeRead(join(root, '.agentos/handoff.md'));
+  const objective = resolveObjective(handoffText);
   let checkpointTask: string | null = null;
   try { checkpointTask = resolveTask(options.task, objective.selected ?? null).id; } catch { /* no task id: no checkpoint record */ }
   // Lazy: exclusions are validated only when a loaded checkpoint is reconciled, so a bad handoff.exclude_paths
   // cannot break context when no checkpoint exists (it still fails context, like resume, once one loads).
-  const checkpoint = checkpointTask ? await checkpointContextRecord({ root, repos: input.repos, get excluded() { return checkpointExcludedPaths(input.project); } }, checkpointTask) : null;
+  const checkpoint = checkpointTask ? await checkpointContextRecord({ root, repos: input.repos, handoffText, get excluded() { return checkpointExcludedPaths(input.project); } }, checkpointTask) : null;
   const bundle = await buildContextBundle({ ...input, checkpoint: checkpoint ?? undefined,
     missing: [...input.missing, ...(checkpoint?.missing ?? [])], warnings: [...input.warnings, ...(checkpoint?.warnings ?? [])] });
   const advisoryLines = bundle.ok ? advisories(adapter) : [];

@@ -132,6 +132,71 @@ test('invalid handoff.exclude_paths still fails context and resume when a checkp
   }
 });
 
+// The 2026-11-03 handoff: the checkpoint was current, the prose around it still described the earlier state.
+const OLD_STATE = '809 passed, 6 skipped; the continuation trial is outstanding.';
+const OLD_NEXT = 'Run the continuation trial.';
+async function earlierProse(root) {
+  const handoff = join(root, '.agentos/handoff.md'), tasks = join(root, '.agentos/tasks.md');
+  await writeFile(handoff, (await readFile(handoff, 'utf8')).replace(/(## Current state\n\n).*/, `$1${OLD_STATE}`).replace(/(## Next exact action\n\n).*/, `$1${OLD_NEXT}`));
+  await writeFile(tasks, (await readFile(tasks, 'utf8')).replace(/(## Now\n\n).*/, `$1- [ ] ${OLD_NEXT}`));
+}
+const sections = (text) => text.split(/\n(?=## )/).filter((part) => part.startsWith('## '));
+const superseded = (part) => /^## [^\n]*\[superseded by checkpoint /.test(part);
+const titles = (parts) => parts.map((part) => part.split('\n')[0].replace(/ \[.*/, ''));
+
+test('after a checkpoint saves a next action, context presents it as the one current next action and marks older handoff prose superseded', async t => {
+  const root = await fixture(t);
+  await earlierProse(root);
+  run(root, ['checkpoint', '--task', 'feature', '--engine', 'claude-code', '--progress', 'Continuation trial passed', '--next', 'Confirm CI on the new head', '--check', 'node -e process.exit(0)']);
+  const { id } = JSON.parse(await readFile(join(root, '.agentos/checkpoints/feature/current.json'), 'utf8'));
+  const before = await snapshot(root);
+  const context = json(root, ['context', 'codex', '--task', 'feature']);
+  const current = sections(context.text).filter((part) => !superseded(part)).join('\n');
+  const older = sections(context.text).filter(superseded);
+  assert.equal(current.match(/Next: Confirm CI on the new head/g)?.length, 1, context.text);
+  assert.doesNotMatch(current, /continuation trial is outstanding|Run the continuation trial/, 'older next-action text must not read as current');
+  assert.deepEqual(titles(older), ['## Current state', '## Next exact action'], context.text);
+  for (const part of older) assert.ok(part.split('\n')[0].endsWith(`[superseded by checkpoint ${id}]`), part);
+  assert.match(older.join('\n'), /Run the continuation trial/, 'superseded text is still shown, not dropped');
+  assert.equal(json(root, ['resume', '--task', 'feature']).remaining.next, 'Confirm CI on the new head');
+  assert.deepEqual(await snapshot(root), before, 'context/resume must not rewrite the older prose');
+  assert.match(await readFile(join(root, '.agentos/tasks.md'), 'utf8'), /Run the continuation trial/);
+});
+
+test('handoff prose rewritten after the checkpoint, or a checkpoint without a saved next action, is not marked superseded', async t => {
+  const root = await fixture(t);
+  await earlierProse(root);
+  run(root, ['checkpoint', '--task', 'feature', '--progress', 'Drafted', '--next', 'Review the change']);
+  const handoff = join(root, '.agentos/handoff.md');
+  await writeFile(handoff, (await readFile(handoff, 'utf8')).replace(OLD_NEXT, 'Merge after review.'));
+  let context = json(root, ['context', 'codex', '--task', 'feature']);
+  assert.deepEqual(titles(sections(context.text).filter(superseded)), ['## Current state'], 'only prose unchanged since the checkpoint is older than it');
+  run(root, ['checkpoint', '--task', 'recovered', '--recover']);
+  context = json(root, ['context', 'codex', '--task', 'recovered']);
+  assert.deepEqual(sections(context.text).filter(superseded), [], 'a recovered checkpoint has no next action to supersede the prose with');
+});
+
+test('prose directly above the managed block is still superseded after the first checkpoint inserts the block', async t => {
+  const root = await fixture(t);
+  await writeFile(join(root, '.agentos/handoff.md'), `# Handoff\n\n## Current objective\n\nShip it.\n\n## Next exact action\n\n${OLD_NEXT}\n`);
+  run(root, ['checkpoint', '--task', 'feature', '--next', 'Review the change']);
+  assert.deepEqual(titles(sections(json(root, ['context', 'codex', '--task', 'feature']).text).filter(superseded)), ['## Next exact action']);
+});
+
+test('status presents the newest checkpoint\'s Next as the one current next action, without writing', async t => {
+  const root = await fixture(t);
+  await earlierProse(root);
+  run(root, ['checkpoint', '--task', 'older', '--next', 'Superseded task step']);
+  run(root, ['checkpoint', '--task', 'feature', '--engine', 'claude-code', '--next', 'Confirm CI on the new head']);
+  const { id } = JSON.parse(await readFile(join(root, '.agentos/checkpoints/feature/current.json'), 'utf8'));
+  const before = await snapshot(root);
+  const status = run(root, ['status']);
+  assert.equal(status.match(/^Current next action/gm)?.length, 1, status);
+  assert.match(status, new RegExp(`^Current next action \\(task feature, checkpoint ${id}\\): Confirm CI on the new head$`, 'm'), status);
+  assert.doesNotMatch(status, /Run the continuation trial|Superseded task step/, 'older next-action text must not read as current');
+  assert.deepEqual(await snapshot(root), before, 'status must not write');
+});
+
 test('generated startup instructions checkpoint milestones before limits and reuse the task id', async t => {
   const root = await fixture(t);
   for (const path of ['AGENTS.md', 'CLAUDE.md', '.hermes.md', '.agentos/guide.md']) {

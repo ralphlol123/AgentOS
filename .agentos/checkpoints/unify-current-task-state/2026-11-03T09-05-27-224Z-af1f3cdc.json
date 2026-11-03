@@ -1,0 +1,106 @@
+{
+  "schema": "agentos.checkpoint/1",
+  "id": "2026-11-03T09-05-27-224Z-af1f3cdc",
+  "created_at": "2026-11-03T09:05:27.224Z",
+  "recovered": false,
+  "project": {
+    "name": "agentos-for-projects",
+    "root": "/home/hermes/developer-workspace/agentos-unify-current-task-state/repo"
+  },
+  "task": {
+    "id": "unify-current-task-state",
+    "source": "--task"
+  },
+  "run_id": null,
+  "engine": "claude-code",
+  "role": "developer",
+  "objective": {
+    "id": "obj-2b048804cb",
+    "text": "After `agentos checkpoint --task <id> --next \"<action>\"`, the next agent's startup path (`agentos status`, `agentos context <engine> --task <id>`, `agentos resume --task <id>`) presents exactly one current next action: the most recently saved one. Older or contradicting next-action text in handoff.md or tasks.md is shown as superseded, never as current. Nothing is silently deleted."
+  },
+  "acceptance": {
+    "source": ".agentos/tasks.md#Acceptance criteria",
+    "text": "- After `agentos checkpoint --task <id> --next \"<action>\"`, `agentos status`, `agentos context <engine> --task <id>` and `agentos resume --task <id>` present exactly one current next action: the most recently saved one.\n- Older or contradicting next-action text in handoff.md or tasks.md is not presented as current; the next agent can tell it is superseded.\n- Nothing is silently deleted."
+  },
+  "scope": {
+    "repos": [
+      "agentos-for-projects=."
+    ],
+    "read": [
+      "."
+    ],
+    "edit": []
+  },
+  "repos": [
+    {
+      "name": "agentos-for-projects",
+      "path": ".",
+      "worktree": "/home/hermes/developer-workspace/agentos-unify-current-task-state/repo",
+      "branch": "feat/unify-current-task-state",
+      "head": "a16062dea26a56b204c8b75102e96dfb7969145c",
+      "fingerprint": "33d4fe776f582c5bfce8197c59675fdb4676d089ae84bc1f354ca098d9a14e20",
+      "changed_paths": [],
+      "omitted_paths": 0,
+      "available": true
+    }
+  ],
+  "state": "d7fee1985d83eb24f24f21bc3bb83abcabdc3785fbcbd021ac06b7305ff2cd69",
+  "progress": "Phase 1 (context): a checkpoint that saves --next records supersedes digests of handoff.md § Current state and § Next exact action; agentos context marks prose still matching as [superseded by checkpoint <id>] and keeps it as history. RED then GREEN in test/handoff-continuity.test.js (3 new tests). Committed a16062d locally, not pushed.",
+  "blockers": [],
+  "next": "In src/core.ts statusAgentOS, print one 'Current next action' line from the newest .agentos/checkpoints/*/current.json record (by updated_at: task id, checkpoint id, its Next), and add a test in test/handoff-continuity.test.js that status shows that Next exactly once after a checkpoint while handoff.md § Next exact action still holds older text.",
+  "supersedes": {
+    "handoff:current-state": "d90faea75b88f1e567c11001ddd77d90a98f0def0c85c35ab5f908ab2c7b86f1",
+    "handoff:next-exact-action": "1c1d4d5ac3ae99c696ab95d807f82003b1d7bdf69173b3774808929e43e44d42"
+  },
+  "knowledge_refs": [],
+  "receipts": [
+    {
+      "status": "observed-pass",
+      "command": "npm run check",
+      "cwd": ".",
+      "exit_code": 0,
+      "observed_at": "2026-11-03T09:03:37.556Z",
+      "evidence": ".agentos/checkpoints/unify-current-task-state/evidence/44e3289416c101b2.log",
+      "state_tested": "d7fee1985d83eb24f24f21bc3bb83abcabdc3785fbcbd021ac06b7305ff2cd69"
+    },
+    {
+      "status": "observed-pass",
+      "command": "npm test",
+      "cwd": ".",
+      "exit_code": 0,
+      "observed_at": "2026-11-03T09:03:38.114Z",
+      "evidence": ".agentos/checkpoints/unify-current-task-state/evidence/efe2655e2c09dca4.log",
+      "state_tested": "d7fee1985d83eb24f24f21bc3bb83abcabdc3785fbcbd021ac06b7305ff2cd69"
+    },
+    {
+      "status": "not-run",
+      "command": "bun run build",
+      "cwd": ".",
+      "exit_code": null,
+      "observed_at": null,
+      "evidence": null,
+      "state_tested": null,
+      "note": "declared agentos-for-projects.build_command"
+    },
+    {
+      "status": "not-run",
+      "command": "bun run test",
+      "cwd": ".",
+      "exit_code": null,
+      "observed_at": null,
+      "evidence": null,
+      "state_tested": null,
+      "note": "declared agentos-for-projects.test_command"
+    },
+    {
+      "status": "not-run",
+      "command": "bun run test:package-managers",
+      "cwd": ".",
+      "exit_code": null,
+      "observed_at": null,
+      "evidence": null,
+      "state_tested": null,
+      "note": "declared agentos-for-projects.package_manager_test_command"
+    }
+  ]
+}

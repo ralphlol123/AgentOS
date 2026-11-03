@@ -13,6 +13,7 @@ import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { lstat, readFile, readdir, readlink, realpath, stat } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { handoffProse } from './context-sections.js';
 import { collectRunHandoffGitState, runReadOnlyGit } from './git-evidence.js';
 import { assertRelativeBoundaryPath, isWithin } from './task-scope.js';
 import type { ContextBundle } from './context-builder.js';
@@ -48,6 +49,9 @@ export interface Checkpoint {
   engine: string | null; role: string | null; objective: { id: string; text: string } | null;
   acceptance: { source: string; text: string } | null; scope: { repos: string[]; read: string[]; edit: string[] };
   repos: RepoState[]; state: string; progress: string; blockers: string[]; next: string;
+  /** Handoff prose this record's `next` supersedes: section id -> sha256 of its text when saved. Absent on records
+   *  without a saved next action (and on records written before it existed). */
+  supersedes?: Record<string, string>;
   knowledge_refs: Array<{ id: string; source: string }>; receipts: Receipt[];
 }
 
@@ -260,6 +264,7 @@ export async function buildRecord(ctx: CheckpointContext, options: CheckpointOpt
     progress: options.recover ? UNKNOWN_PROGRESS : options.progress?.trim() || '(none recorded)',
     blockers: options.recover || !options.blocker?.trim() ? [] : [options.blocker.trim()],
     next: options.recover ? UNKNOWN_NEXT : options.next?.trim() || '(none recorded)',
+    ...(!options.recover && options.next?.trim() ? { supersedes: proseDigests(ctx.handoffText) } : {}),
     knowledge_refs: (ctx.bundle?.included ?? []).filter((item) => item.kind === 'decision' || item.kind === 'knowledge' || item.kind === 'brain').map((item) => ({ id: item.id, source: item.source })),
     receipts,
   };
@@ -271,6 +276,21 @@ export async function buildRecord(ctx: CheckpointContext, options: CheckpointOpt
 }
 
 // --- handoff.md managed section ---------------------------------------------------------------------
+
+/** Digests of the handoff prose (src/context-sections.ts HANDOFF_PROSE) outside the managed block, which a checkpoint
+ *  rewrites; the same text before and after the first checkpoint then has the same digest. */
+function proseDigests(handoffText: string): Record<string, string> {
+  const located = locateManagedBlock(handoffText, BLOCK_START, BLOCK_END);
+  const prose = located.kind === 'valid' ? handoffText.slice(0, located.startIdx) + handoffText.slice(located.endIdx + BLOCK_END.length) : handoffText;
+  return Object.fromEntries(handoffProse(prose).map((section) => [section.id, sha256(section.text)]));
+}
+
+/** Prose still byte-identical to what the record superseded was written before it; prose edited since is newer. */
+function supersededProse(record: Checkpoint, handoffText: string) {
+  const saved = record.supersedes ?? {};
+  const ids = Object.entries(proseDigests(handoffText)).filter(([id, digest]) => saved[id] === digest).map(([id]) => id);
+  return ids.length ? { id: record.id, at: record.created_at, ids } : undefined;
+}
 
 function repoLine(repos: RepoState[]) {
   return oneLine(repos.map((repo) => repo.available ? `${repo.name}${repo.state ? ' (enclosing work tree)' : ''} ${repo.branch ?? '?'}@${repo.head?.slice(0, 7) ?? '(no commits)'} (${repo.changed_paths.length + repo.omitted_paths} changed)` : `${repo.name} unavailable`).join('; ') || '(none)', 600);
@@ -405,6 +425,16 @@ export async function checkpointTasks(root: string) {
   return (await readdir(join(root, '.agentos/checkpoints'), { withFileTypes: true }).catch(() => [])).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
 }
 
+/** Status: the newest valid checkpoint (any task) is the one current next action. Read-only. */
+export async function newestCheckpoint(root: string) {
+  let newest: Checkpoint | null = null;
+  for (const task of await checkpointTasks(root)) {
+    const loaded = await loadCurrent(root, task);
+    if (loaded.kind === 'ok' && (!newest || loaded.record.created_at > newest.created_at)) newest = loaded.record;
+  }
+  return newest;
+}
+
 /** Doctor: a present current.json that does not lead to a valid record is a problem. */
 export async function checkpointProblems(root: string) {
   const problems: string[] = [];
@@ -417,7 +447,7 @@ export async function checkpointProblems(root: string) {
 }
 
 /** Context and resume use the same live evidence. Saved passing counts alone are not current verification. */
-export async function checkpointContextRecord(ctx: Pick<CheckpointContext, 'root' | 'repos' | 'excluded'>, task: string) {
+export async function checkpointContextRecord(ctx: Pick<CheckpointContext, 'root' | 'repos' | 'excluded' | 'handoffText'>, task: string) {
   const loaded = await loadCurrent(ctx.root, task);
   if (loaded.kind === 'none') return null;
   const source = `.agentos/checkpoints/${task}/current.json`;
@@ -427,7 +457,7 @@ export async function checkpointContextRecord(ctx: Pick<CheckpointContext, 'root
   }
   const { reconciliation, done, left, drift } = await reconcileCheckpoint(ctx, loaded.record);
   const warnings = reconciliation.status === 'clean' ? [] : [`Checkpoint ${task}: ${reconciliation.status}; inspect current files and recheck stale receipts before continuing.`];
-  return { source, missing: [], warnings, text: [
+  return { source, missing: [], warnings, supersedes: supersededProse(loaded.record, ctx.handoffText), text: [
     ...summaryLines(loaded.record, loaded.path, false),
     `Reconciliation: ${reconciliation.status}`, ...drift,
     `Current passing checks: ${done.length}`, ...done.map(receiptLine),
@@ -576,6 +606,7 @@ export function assertCheckpoint(value: any): asserts value is Checkpoint {
   if (!isStr(value.state)) fail('state', 'a string');
   if (!isStr(value.progress) || !isStr(value.next)) fail('progress/next', 'strings');
   if (!isStrings(value.blockers)) fail('blockers', 'a string list');
+  if (value.supersedes !== undefined && (!value.supersedes || typeof value.supersedes !== 'object' || Array.isArray(value.supersedes) || !Object.values(value.supersedes).every(isStr))) fail('supersedes', 'an object of section id -> sha256, when present');
   if (!Array.isArray(value.knowledge_refs) || !value.knowledge_refs.every((ref) => ref && isStr(ref.id) && isStr(ref.source))) fail('knowledge_refs', 'a list of {id, source}');
   if (!Array.isArray(value.receipts) || !value.receipts.every((receipt) => receipt && RECEIPT_STATUSES.includes(receipt.status) && isStr(receipt.command) && isStr(receipt.cwd)
     && (receipt.exit_code === null || Number.isInteger(receipt.exit_code)) && ['observed_at', 'evidence', 'state_tested'].every((key) => isOptStr(receipt[key])))) {
