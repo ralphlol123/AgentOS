@@ -425,6 +425,16 @@ export async function checkpointTasks(root: string) {
   return (await readdir(join(root, '.agentos/checkpoints'), { withFileTypes: true }).catch(() => [])).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
 }
 
+/** Status: the newest valid checkpoint (any task) is the one current next action. Read-only. */
+export async function newestCheckpoint(root: string) {
+  let newest: Checkpoint | null = null;
+  for (const task of await checkpointTasks(root)) {
+    const loaded = await loadCurrent(root, task);
+    if (loaded.kind === 'ok' && (!newest || loaded.record.created_at > newest.created_at)) newest = loaded.record;
+  }
+  return newest;
+}
+
 /** Doctor: a present current.json that does not lead to a valid record is a problem. */
 export async function checkpointProblems(root: string) {
   const problems: string[] = [];

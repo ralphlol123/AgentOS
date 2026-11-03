@@ -7,7 +7,7 @@ import { assertRelativeBoundaryPath, isWithin, validateTaskScope } from './task-
 import { buildContextBundle, findAcceptance } from './context-builder.js';
 import { applyBrain, splitFrontmatter, brainContextRecords, brainDoctor, brainMissing, checkBrain, dirState, EMPTY_BRAIN_WARNING, indexBrain, initBrain, ioReason, listBrain, logBrain, newIndexNote, loadBrain, previewBrain, revertBrain, proposeBrain, policyBrain, registerBrain, searchBrain, showBrain, verifyBrain, type BrainCtx, type VaultBinding } from './brain.js';
 import { approvalGuidance, isAutonomous } from './brain-policy.js';
-import { checkpointContextRecord, checkpointProblems, listCheckpoints, resolveTask, resumeCheckpoint, showCheckpoint, writeCheckpoint, type CheckpointContext } from './checkpoint.js';
+import { checkpointContextRecord, checkpointProblems, listCheckpoints, newestCheckpoint, resolveTask, resumeCheckpoint, showCheckpoint, writeCheckpoint, type CheckpointContext } from './checkpoint.js';
 import { planCompactRewrite } from './compact-rewrite.js';
 import { STATE_SIZE_WARN_CHARS, largestSections, sectionSizes, tasksShapeWarnings } from './state-size.js';
 import { dumpYaml, patchProjectYaml } from './project-yaml-edit.js';
@@ -965,6 +965,7 @@ export async function statusAgentOS(options: any = {}) {
   const { binding, off } = obsidianIntegration(root, project);
   const knowledge = await brainDoctor(root, brainScopes(project), binding, off);
   const warnings = [...sizeWarnings, ...knowledge.problems, ...knowledge.warnings];
+  const checkpoint = await newestCheckpoint(root);
   return {
     ok,
     text: [
@@ -976,6 +977,7 @@ export async function statusAgentOS(options: any = {}) {
       '',
       'Current handoff:',
       objective.selected?.text || `- ${objective.diagnostic}`,
+      ...(checkpoint ? [`Current next action (task ${checkpoint.task.id}, checkpoint ${checkpoint.id}): ${checkpoint.next}`] : []),
       '',
       missing.length ? `Missing files:\n${missing.map((f) => `- ${f}`).join('\n')}` : 'Required files: all present',
       ...(warnings.length ? ['', 'Warnings:', ...warnings.map((warning) => `- ${warning}`)] : []),
