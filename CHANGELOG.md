@@ -4,6 +4,12 @@ All notable changes to AgentOS for Projects are documented here.
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-11-03
+
+### Added
+
+- `status` prints one `Current next action (task <id>, checkpoint <id>): <next>` line from the newest valid checkpoint across tasks (`created_at`). It stays read-only and prints nothing extra when there is no valid checkpoint.
+
 ### Fixed
 
 - Startup `context` and `resume` share checkpoint reconciliation: code/HEAD/branch drift and unavailable Git evidence are shown, with stale receipts separated from current passing checks. The active checkpoint is mandatory context; damaged checkpoints are Missing and fail `--require-complete`.
@@ -13,7 +19,12 @@ All notable changes to AgentOS for Projects are documented here.
 - Refreshed this repository's stale live project state, preserved its prior state in a run archive, and registered local knowledge about the architecture and handoff workflow.
 - After `agentos checkpoint --next`, `context` no longer presents older handoff prose as a second current next action. A checkpoint that saves a next action records digests of handoff.md § Current state and § Next exact action (`supersedes`). Context shows a section whose text is unchanged since then under `[superseded by checkpoint <id>]`, as history, and still shows its text. Prose edited after the checkpoint, recovered checkpoints and records from before this change are shown as before. tasks.md § Now is not reconciled yet.
 - `context` keeps one current next action when handoff.md § Next exact action is edited after the checkpoint: the checkpoint's Next stays current, and the edited text is shown as `[edited after checkpoint <id>; not current]` with the `agentos checkpoint --task <id> --next "<this text>"` command that makes it current. Without a checkpoint, § Next exact action is shown unlabelled and is current, as before. Recovered checkpoints and records without `supersedes` are unchanged. The guide states this precedence.
-- `status` prints one `Current next action (task <id>, checkpoint <id>): <next>` line from the newest valid checkpoint across tasks (`created_at`). It stays read-only and prints nothing extra when there is no valid checkpoint.
+
+### Notes
+
+- Handoff verification: Codex → Hermes was continued from a fresh clone using repo artifacts only. In the Claude Code → Hermes trial, Claude Code was told to stop after one uncommitted edit made after its checkpoint, and the second engine continued in the **same worktree**. It was a controlled stop, not a real usage limit or crash. Records: `.agentos/runs/2026-11-03-codex-to-hermes-continuation-trial.md`, `.agentos/runs/2026-11-03-claude-code-controlled-interruption-trial.md`.
+- Limitation: superseded and not-current labels need the handoff digests (`supersedes`) that a checkpoint saved with `--next` records from 3.2.0 on. Checkpoints saved by earlier versions and `checkpoint --recover` records have no digests. For them, `context` labels nothing and shows handoff § Current state and § Next exact action unlabelled next to the checkpoint's Next, as in 3.1.1. Save a new checkpoint with `--next` to get the labels.
+- Known open: the next action is cut off at 300 characters in `context` and the managed handoff block (#71); `status` names only the newest checkpoint across tasks (#72). Existing workspaces refresh generated instructions (including child-repo pointers) with `agentos doctor --fix`.
 
 ## [3.1.1] - 2026-10-27
 
