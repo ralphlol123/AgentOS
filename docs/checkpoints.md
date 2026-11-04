@@ -21,6 +21,15 @@ Save after meaningful milestones (implementation, verification, decisions), not 
 
 Records are keyed by task id: the slug of `--task`, or, without `--task`, the slug of the first line of the current objective in `.agentos/handoff.md` (the output says which). `agentos context <engine> --task <id>` and `agentos resume --task <id>` find the same task.
 
+**Which task a read without `--task` uses** (`resume`, `context`; writes are unchanged): a task "has checkpoints" when `.agentos/checkpoints/<task>/` holds any file.
+
+1. The objective slug, when that task has checkpoints.
+2. Otherwise, the only task that has checkpoints — exactly what `--task <id>` prints (JSON `task.source: "checkpoint"`).
+3. Several tasks have checkpoints and the objective names none: `resume` lists each id with its latest checkpoint time and Next (or `incomplete: <reason>`) and `agentos resume --task <id>`, and exits **2**; JSON `{ok: false, status: "ambiguous", tasks: [...]}`. `context` loads no checkpoint and adds a warning naming the ids.
+4. No task has checkpoints: the objective slug, as before. `resume` labels it: `AgentOS resume: <slug> (derived from the current objective; no task has a checkpoint)`.
+
+`--task` is never second-guessed. `status` keeps its own rule (the newest valid checkpoint of any task): it summarises, it does not pick a task to continue.
+
 ## Files
 
 ```text
@@ -111,7 +120,9 @@ The block is replaced in place on every checkpoint (inserted once at the end of 
 - **Accomplished**: progress plus `observed-pass` receipts whose `state_tested` equals the current state.
 - **Remaining**: next action, blockers, and every other receipt, explicitly: `observed-fail`, `claimed`, `not-run`, `unavailable`, and passes that are `stale (recheck)` because they tested a different state.
 - **Next**: `agentos context <engine> --task <id>`.
-- `incomplete` (exit 1): `current.json` missing while files exist, unreadable, pointing at a missing record, or a record that fails `assertCheckpoint`. The output lists the files present with sizes and the parse/contract error. Nothing is skipped silently.
+- `incomplete` (exit 1): `current.json` missing while files exist, unreadable, pointing at a missing record, or a record that fails `assertCheckpoint`. The output lists the files present with sizes and the parse/contract error, then the **last usable checkpoint**: the newest record file that is valid, with its Progress, Next, Blockers and receipts as saved (not reconciled). When it is older than the newest record file the line reads `Showing OLDER state: last usable checkpoint <id> from <time>; it is not the newest record.`; with none, `Last usable checkpoint: none — no record of this task is readable.` JSON: `last_usable` (or `null`). `context` names the same record in its Missing line. Nothing is skipped silently.
+- Newer record not named by `current.json` (a save interrupted between the record and the pointer): the pointed record is shown as usual, with `Showing OLDER state: checkpoint <id> from <time> is what current.json names, but newer record <file> exists …` (JSON `newer_records`; exit unchanged). `context` adds it as a warning; `doctor` (exit 1) and `status` list it.
+- A check that fails or is `unavailable` does not make a save fail: the record is the newest checkpoint and its receipt stays visible in `resume`, `context` and `status` (`Checks not passing in that checkpoint: …`).
 - `recovered` (exit 0): no checkpoint yet, but `.agentos/runs/` has notes or a repo has changed files. The view is built from git evidence alone (`recovered: true`, progress `(unknown: engine stopped without a summary)`, next `(unknown)`, no receipts) and is not written; persist it with `agentos checkpoint --recover`.
 - `none` (exit 0): no checkpoint and no evidence of work — a clean start (`Status: clean start — no checkpoint for task <id> …`). No prior work is invented; the output names the `context` command to start with.
 
@@ -122,8 +133,8 @@ The block is replaced in place on every checkpoint (inserted once at the end of 
 - Every non-recovered checkpoint output asks the engine to review durable knowledge, stage a focused proposal with `--task`, and inspect `agentos brain policy`. Manual review is the default; an owner-enabled policy permits `brain apply --auto --by <self>` for eligible updates. Refusals stay pending. This is an instruction the engine may follow, not a runtime hook; the checkpoint itself never stages or applies a proposal. See [Brain approval policy](brain.md#optional-automatic-application).
 - `agentos context` adds the current checkpoint for its task (`--task`, else the objective slug) as a mandatory record, source `.agentos/checkpoints/<task>/current.json`. It uses the same reconciliation and receipt freshness calculation as `resume`; the saved passing count is never presented as current verification. Drift and unavailable evidence are warnings; incomplete checkpoints are Missing and fail `--require-complete`. A budget that cannot hold the active checkpoint produces overflow instead of omitting it. Inspection remains read-only.
 - One current next action: when the active checkpoint saved a `--next`, `context` shows each handoff.md § Current state / § Next exact action whose text still matches the record's `supersedes` digest as `## <section> [superseded by checkpoint <id>]`. The section keeps its text and is marked as history. The checkpoint's Next is the current next action. A § Next exact action edited after the checkpoint is shown as `## Next exact action [edited after checkpoint <id>; not current]`: a note that does not override the checkpoint's Next, with the command that makes it current (`agentos checkpoint --task <id> --next "<this text>"`). An edited § Current state is shown unlabelled. Recovered records and records without `supersedes` mark nothing. Without a checkpoint (or without `--task`), handoff.md § Next exact action is shown unlabelled and is the current next action. tasks.md § Now is not yet reconciled with the checkpoint.
-- `agentos status` (no `--task`) prints `Current next action (task <id>, checkpoint <id>): <next>` from the newest valid checkpoint of any task, by `created_at`. Incomplete checkpoints are skipped here (`doctor` and `resume` report them). It writes nothing.
-- `agentos doctor` reports a `current.json` that points at a missing or invalid record as a problem (exit 1).
+- `agentos status` (no `--task`) prints `Current next action (task <id>, checkpoint <id>): <next>` from the newest valid checkpoint of any task, by `created_at`, then `Checks not passing in that checkpoint: <status> \`<command>\`; …` when it has `observed-fail` or `unavailable` receipts. Incomplete checkpoints are skipped for that line but listed under Warnings, like `doctor`. It writes nothing.
+- `agentos doctor` reports, as a problem (exit 1): a `current.json` that is missing beside record files, unreadable, or points at a missing or invalid record; and newer record files than the one `current.json` names.
 
 ## Not done (backlog)
 

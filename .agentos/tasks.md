@@ -13,6 +13,8 @@
 ## Next
 
 - [ ] Next-action truncation in the managed handoff block (300 characters) and `status` across several tasks: tracked separately.
+- [ ] Bare `agentos checkpoint` (no `--task`) still writes under the objective slug while bare `resume`/`context` read the checkpoint task (docs/checkpoints.md); decide whether writes follow the same rule.
+- [ ] `.agentos/brain/index.json` rewritten with CRLF in a `core.autocrlf=true` checkout (`brain index --dry-run`: Would refresh; content-identical): tracked separately.
 
 ## Later
 

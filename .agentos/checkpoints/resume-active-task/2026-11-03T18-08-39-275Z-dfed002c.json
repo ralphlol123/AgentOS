@@ -1,0 +1,106 @@
+{
+  "schema": "agentos.checkpoint/1",
+  "id": "2026-11-03T18-08-39-275Z-dfed002c",
+  "created_at": "2026-11-03T18:08:39.275Z",
+  "recovered": false,
+  "project": {
+    "name": "agentos-for-projects",
+    "root": "/home/hermes/developer-workspace/agentos-resume-fix/repo"
+  },
+  "task": {
+    "id": "resume-active-task",
+    "source": "--task"
+  },
+  "run_id": null,
+  "engine": "claude-code",
+  "role": "developer",
+  "objective": {
+    "id": "obj-d1d2cd51a8",
+    "text": "`agentos resume` without `--task` must resume the real checkpoint task instead of a slug of the objective text (false \"no checkpoint\"): the objective's task when it has checkpoints, else the only task with checkpoints; several → list the ids with `--task` hints (exit 2); none → today's view with the derived id labelled. A checkpoint that failed to save must not hide the last usable one, and a failing check in a saved one must stay visible. `doctor` must not fail a clone with no vault bound when `canonical: workspace` (`canonical: vault` still fails). A `core.autocrlf=true` checkout must not report Brain records or agent cards as changed."
+  },
+  "acceptance": {
+    "source": ".agentos/tasks.md#Acceptance criteria",
+    "text": "- After `agentos checkpoint --task <id> --next \"<action>\"`, `agentos status`, `agentos context <engine> --task <id>` and `agentos resume --task <id>` present exactly one current next action: the most recently saved one.\n- Older or contradicting next-action text in handoff.md or tasks.md is not presented as current; the next agent can tell it is superseded.\n- Nothing is silently deleted."
+  },
+  "scope": {
+    "repos": [
+      "agentos-for-projects=."
+    ],
+    "read": [
+      "."
+    ],
+    "edit": []
+  },
+  "repos": [
+    {
+      "name": "agentos-for-projects",
+      "path": ".",
+      "worktree": "/home/hermes/developer-workspace/agentos-resume-fix/repo",
+      "branch": "fix/resume-active-task",
+      "head": "fb75a3e655c570d4c1a16fe2049d3157cb76ea4f",
+      "fingerprint": "33d4fe776f582c5bfce8197c59675fdb4676d089ae84bc1f354ca098d9a14e20",
+      "changed_paths": [],
+      "omitted_paths": 0,
+      "available": true
+    }
+  ],
+  "state": "c7f3734839b12a11b8773422049e38c0448fd1dce37c282ee5ed898d040be04e",
+  "progress": "Bare resume/context resolve the checkpoint task (one -> resumed as --task, several -> listed, exit 2, none -> labelled); failed saves show the last usable checkpoint as OLDER state; status shows failing checks and checkpoint problems; doctor unbound vault with canonical: workspace is a warning; CRLF-neutral Brain and agent-card hashes. RED commits f416995 290058b df3eab7 d31c6ed f9baf88 e90f2e5; fixes b9d2b2a 5249ee9 8ece7e9 4445723 e853e31; docs f03602d.",
+  "blockers": [],
+  "next": "Phynceon reviews the local commits on fix/resume-active-task, then pushes and opens a PR against main.",
+  "supersedes": {
+    "handoff:current-state": "3fef60503a48a458354bd002494e81d11147a7943086db3539b3947fce7519c7",
+    "handoff:next-exact-action": "e30aec8bc6650e9f36a0a75bf446669a1684a86259000a3990c405dd11d326cd"
+  },
+  "knowledge_refs": [],
+  "receipts": [
+    {
+      "status": "observed-pass",
+      "command": "npm run check",
+      "cwd": ".",
+      "exit_code": 0,
+      "observed_at": "2026-11-03T18:06:50.493Z",
+      "evidence": ".agentos/checkpoints/resume-active-task/evidence/bbbb15f8f52354a9.log",
+      "state_tested": "c7f3734839b12a11b8773422049e38c0448fd1dce37c282ee5ed898d040be04e"
+    },
+    {
+      "status": "observed-pass",
+      "command": "npm test",
+      "cwd": ".",
+      "exit_code": 0,
+      "observed_at": "2026-11-03T18:06:50.956Z",
+      "evidence": ".agentos/checkpoints/resume-active-task/evidence/7f453e8d4298e793.log",
+      "state_tested": "c7f3734839b12a11b8773422049e38c0448fd1dce37c282ee5ed898d040be04e"
+    },
+    {
+      "status": "not-run",
+      "command": "bun run build",
+      "cwd": ".",
+      "exit_code": null,
+      "observed_at": null,
+      "evidence": null,
+      "state_tested": null,
+      "note": "declared agentos-for-projects.build_command"
+    },
+    {
+      "status": "not-run",
+      "command": "bun run test",
+      "cwd": ".",
+      "exit_code": null,
+      "observed_at": null,
+      "evidence": null,
+      "state_tested": null,
+      "note": "declared agentos-for-projects.test_command"
+    },
+    {
+      "status": "not-run",
+      "command": "bun run test:package-managers",
+      "cwd": ".",
+      "exit_code": null,
+      "observed_at": null,
+      "evidence": null,
+      "state_tested": null,
+      "note": "declared agentos-for-projects.package_manager_test_command"
+    }
+  ]
+}
