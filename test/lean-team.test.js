@@ -152,3 +152,14 @@ test('team rejects missing and legacy cards before writing exports', async t => 
   assert.equal(missing.ok, false); assert.match(missing.text, /Missing card/);
   await assert.rejects(read(root, '.claude/agents/agentos-developer.md'), { code: 'ENOENT' });
 });
+
+test('doctor distinguishes OpenCode team definitions from task-scoped permissions', async t => {
+  const root = await workspace(t);
+  ok(await sync(root, 'opencode'));
+  const result = spawnSync(process.execPath, [resolve('dist/cli.js'), 'doctor', '--engines', '--json'], { cwd: root, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stderr);
+  const capabilities = JSON.parse(result.stdout).matrix.opencode;
+  assert.match(capabilities.native_agent_config.evidence, /agents sync opencode --team/);
+  assert.match(capabilities.native_agent_config.evidence, /task-scoped/i);
+  assert.equal(capabilities.permission_enforcement.status, 'unsupported');
+});

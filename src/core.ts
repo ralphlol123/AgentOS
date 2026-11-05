@@ -2166,7 +2166,7 @@ async function teamConfigPlan(root: string, engine: string, options: any) {
 async function syncAgentsUnlocked(root: string, options: any) {
   const engine = normalizeEngine(options.engine);
   const adapter = engineAdapter(engine);
-  if (!options.team && !adapter.nativeConfig) return { ok: false, text: `AgentOS agents sync: UNSUPPORTED\n${engine} has no native agent config (native_agent_config: ${adapter.capabilities.native_agent_config.status}). Supported: claude-code, codex.` };
+  if (!options.team && !adapter.nativeConfig) return { ok: false, text: `AgentOS agents sync: UNSUPPORTED\n${adapter.capabilities.native_agent_config.evidence} Supported for task-scoped sync: claude-code, codex.` };
   await assertProjectYamlWellFormed(join(root, '.agentos/project.yaml'));
   const plan = options.team ? await teamConfigPlan(root, engine, options) : await nativeConfigPlan(root, engine, adapter, options);
   if ('refused' in plan) return { ok: false, text: `AgentOS agents sync: REFUSED\n${plan.refused}\nNothing was written.` };
