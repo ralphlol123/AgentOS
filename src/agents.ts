@@ -29,13 +29,13 @@ export type PermissionIntent = typeof PERMISSION_INTENTS[number];
 /** Required manifest keys, in the order they are written. */
 export const MANIFEST_REQUIRED = ['id', 'name', 'purpose', 'responsibilities', 'knowledge_selectors', 'skills', 'tools_requested', 'permission_intent', 'expected_output', 'provenance', 'custom'];
 /** Optional: workspace paths/repo IDs the role asks to edit. Advisory; it can never widen the task's edit scope. */
-export const MANIFEST_OPTIONAL = ['edit_request'];
+export const MANIFEST_OPTIONAL = ['edit_request', 'model_preference', 'models'];
 export const MANIFEST_KEYS = [...MANIFEST_REQUIRED, ...MANIFEST_OPTIONAL];
 export const PROVENANCE_KEYS = ['installed_from', 'version', 'source_hash', 'installed_at'];
 const LIST_KEYS = ['responsibilities', 'knowledge_selectors', 'skills', 'tools_requested', 'edit_request'];
 const SOURCE = /^(catalog:[a-z0-9][a-z0-9-]*|template:\S.*|import:https?:\/\/\S+)$/;
 export const ROLE_ID = /^[a-z0-9][a-z0-9-]*$/;
-const READ_ONLY_CATALOG = new Set(['planner', 'reviewer', 'security-reviewer']);
+const READ_ONLY_CATALOG = new Set(['planner', 'reviewer', 'security-reviewer', 'researcher']);
 const EXPECTED_OUTPUT = 'Report files changed, verification run (real command output or inspected state), failures, and the next action.';
 
 export interface AgentManifest {
@@ -43,6 +43,8 @@ export interface AgentManifest {
   tools_requested: string[]; permission_intent: PermissionIntent; expected_output: string;
   provenance: 'unknown' | { installed_from: string; version: string; source_hash: string; installed_at: string };
   custom: boolean; edit_request?: string[];
+  model_preference?: 'economy' | 'standard' | 'deep';
+  models?: Partial<Record<'claude-code' | 'codex' | 'opencode', string>>;
 }
 export interface AgentCard {
   id: string; path: string; state: 'legacy' | 'manifest' | 'invalid'; manifest: AgentManifest | null; body: string;
@@ -68,6 +70,14 @@ export function validateAgentManifest(value: any, expectedId?: string): string[]
   for (const key of ['name', 'purpose', 'expected_output']) if (key in value && !isStr(value[key])) problems.push(`${key} must be a non-empty string`);
   for (const key of LIST_KEYS) if (key in value && !(Array.isArray(value[key]) && value[key].every(isStr))) problems.push(`${key} must be a list of non-empty strings`);
   if ('permission_intent' in value && !PERMISSION_INTENTS.includes(value.permission_intent)) problems.push(`permission_intent must be one of ${PERMISSION_INTENTS.join('|')}; a manifest cannot widen the task scope (got ${JSON.stringify(value.permission_intent)})`);
+  if ('model_preference' in value && !['economy', 'standard', 'deep'].includes(value.model_preference)) problems.push('model_preference must be economy, standard or deep');
+  if ('models' in value) {
+    if (!isPlain(value.models)) problems.push('models must be an engine-to-model mapping');
+    else for (const [engine, model] of Object.entries(value.models)) {
+      if (!['claude-code', 'codex', 'opencode'].includes(engine) || typeof model !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/.test(model)) problems.push(`invalid model mapping for ${engine}`);
+      else if (engine === 'opencode' && !model.includes('/')) problems.push('opencode model must use provider/model format');
+    }
+  }
   if ('custom' in value && typeof value.custom !== 'boolean') problems.push('custom must be true or false');
   if ('edit_request' in value && Array.isArray(value.edit_request)) {
     for (const entry of value.edit_request) if (typeof entry === 'string' && (entry.startsWith('/') || entry.includes('\\') || entry.split('/').includes('..'))) problems.push(`edit_request entry "${entry}" must be a repo id or a workspace-relative path`);
@@ -113,6 +123,7 @@ export function manifestFor(id: string, body: string, provenance: AgentManifest[
   return {
     id, name: id, purpose, responsibilities, knowledge_selectors: [], skills: [], tools_requested: [],
     permission_intent: options.catalog && READ_ONLY_CATALOG.has(id) ? 'read-only' : options.catalog && id === 'release-manager' ? 'release' : 'edit-in-scope',
+    ...(options.catalog ? { model_preference: id === 'writer' ? 'economy' as const : 'standard' as const } : {}),
     expected_output: EXPECTED_OUTPUT, provenance, custom: Boolean(options.custom),
   };
 }
@@ -139,7 +150,14 @@ export type InstallPlan = { action: 'create' | 'noop' | 'upgrade' | 'replace'; c
 
 /** What `agents add` may do to `.agentos/agents/<id>.md`. Throws (zero writes) when the card is owned by the user. */
 export function planCardInstall(id: string, existing: string | null, body: string, installedFrom: string, options: { catalog: boolean; replace: boolean; raw: string }): InstallPlan {
-  const fresh = () => renderCard(manifestFor(id, body, provenanceFor(installedFrom, body), { catalog: options.catalog }), body);
+  const previous = existing === null ? null : parseAgentCard(id, existing).manifest;
+  const fresh = () => {
+    const manifest = manifestFor(id, body, provenanceFor(installedFrom, body), { catalog: options.catalog });
+    // Model choices are owner configuration, not catalog defaults. Keep them during card upgrades.
+    if (previous?.model_preference) manifest.model_preference = previous.model_preference;
+    if (previous?.models) manifest.models = previous.models;
+    return renderCard(manifest, body);
+  };
   if (existing === null) return { action: 'create', content: fresh(), diff: [], reason: 'new card' };
   const card = parseAgentCard(id, existing);
   const generated = card.state === 'legacy' ? existing === body

@@ -36,7 +36,7 @@ custom: false
 | `knowledge_selectors` | yes | List of Brain kinds, ids or terms the role usually needs (empty for catalog cards; not yet used for selection). |
 | `skills` | yes | List of skill ids (empty for catalog cards; the card body names skills in prose). |
 | `tools_requested` | yes | List of engine tool names. Becomes the Claude Code subagent `tools:` list on `agents sync claude-code`. |
-| `permission_intent` | yes | `read-only`, `edit-in-scope` or `release`. Anything else is rejected: a manifest cannot widen the task scope. Catalog defaults: planner, reviewer, security-reviewer `read-only`; release-manager `release`; developer, tester `edit-in-scope`. |
+| `permission_intent` | yes | `read-only`, `edit-in-scope` or `release`. Anything else is rejected: a manifest cannot widen the task scope. Catalog defaults: researcher, planner, reviewer, security-reviewer `read-only`; release-manager `release`; developer, writer, tester `edit-in-scope`. |
 | `expected_output` | yes | What the role reports when it stops. |
 | `provenance` | yes | `unknown`, or `{installed_from: catalog:<id> \| template:<path> \| import:<url>, version, source_hash, installed_at}`. |
 | `custom` | yes | `true` = the owner owns this card (see preservation). |
@@ -89,3 +89,66 @@ Everything else is refused with exit 1 and zero writes: `custom: true`, a body e
 - `agents add <url|file>` writes a manifest card (`import:<url>` or `template:<path>`); cards imported by `templates import` before 3.0.0 are legacy cards (`agents manifest <id> --custom`).
 
 What the Claude Code deny rules written by `agents sync claude-code` cover and do not cover (siblings, listed paths, Bash redirects, residual new root files/dirs, `.agentos/` state, trust requirement): see [`docs/engines.md`](engines.md#what-the-claude-code-deny-rules-cover--do-not-cover).
+
+## Lean team
+
+New projects default to `core`: **Developer, Writer, Researcher**. Existing projects retain their configured agents. Explicit `init --agents minimal` retains the historical four-role team; it is a compatibility profile, not the new recommendation. Optional tester, reviewer, planner, release-manager and security-reviewer cards remain available.
+
+| Role | Assignments | Default model preference |
+| --- | --- | --- |
+| Developer | Implement, debug, refactor, test, plan; independent review in a fresh session | standard |
+| Writer | README, guides, examples, changelog; validate claims against code | economy |
+| Researcher | Investigate a bounded question, compare options, return sources and uncertainties; read-only | standard |
+
+The engine's main session coordinates. Do not invoke all three for every task. A small code fix can stay in one session. Delegate only when a bounded assignment benefits from separate context or different capabilities. Review requires a fresh session that did not author the change; it does not require a permanent Reviewer identity. Security-sensitive work can use an optional specialist and stronger review. Publishing remains an authorized workflow, not an autonomous role entitlement.
+
+Each assignment needs a workspace, task ID, objective, read/edit scope, acceptance criteria and expected result. The coordinator owns shared checkpoints and handoff updates. Workers return evidence; they do not concurrently rewrite shared state. Roles share the Project Brain and load relevant records on demand. Sequential work remains supported when an engine cannot spawn subagents.
+
+### Native team definitions
+
+```sh
+agentos agents sync claude-code --team --dry-run
+agentos agents sync claude-code --team
+agentos agents sync codex --team
+agentos agents sync opencode --team
+```
+
+This opt-in export requires validated manifests (for legacy custom cards, review and use `agents manifest <id> --custom`). It writes **all enabled cards**, including custom ones, as coexisting `agentos-<role>` definitions:
+
+| Engine | Files | Limits |
+| --- | --- | --- |
+| Claude Code | `.claude/agents/agentos-<role>.md` | Read-only roles get a read/web tool allowlist; inherited settings still apply |
+| Codex | `.codex/agents/agentos-<role>.toml` | Permissions inherit from the parent; read-only intent is advisory unless the parent sandbox enforces it |
+| OpenCode | `.opencode/agents/agentos-<role>.md` | Read-only roles deny edit and bash; custom tools still need session-level review |
+| Other engines | Portable `.agentos/agents/<role>.md` | No native team export; load the card in the main or a fresh session |
+
+Schemas follow the documented formats ([Claude Code](https://code.claude.com/docs/en/sub-agents), [Codex](https://learn.chatgpt.com/docs/agent-configuration/subagents), [OpenCode](https://opencode.ai/docs/agents/)). **Live discovery, delegation, model selection and permission behavior for these exports have not yet been verified.** They are not covered by older task-scoped engine trials. Restart/reload the engine as its documentation requires, confirm each definition is discovered, and run a bounded assignment before relying on it.
+
+Team export does not start engines, schedule workers, alter project task scope, edit global settings, or prove enforcement. Existing task-scoped `agents sync <engine> --role <role> --scope <paths>` remains separate. `--team` rejects `--role` and `--scope`; assign those boundaries when delegating. Legacy Claude settings may still restrict team agents. Team export leaves those settings intact. `tools_requested` is not exported in team mode; configure additional tools in the engine session. No role file grants approval to use unavailable or forbidden tools.
+
+Ownership is recorded separately in `.agentos/synced/team-<engine>.json`. Re-export after changing enabled roles, cards or model mappings. `--dry-run` reports what would change, without writing. Unmodified owned exports are updated/removed transactionally; unrelated files remain untouched. Edited exports cause a refusal, unless `--replace` is explicitly supplied (overwritten content is backed up). Edit source cards rather than generated files. Team records do not satisfy `context --require-synced-config`, which checks the older task-scoped configuration. Use team dry-run to inspect team drift; doctor’s engine matrix continues to describe task-scoped adapters.
+
+### Model selection
+
+Optional manifest fields:
+
+```yaml
+model_preference: economy  # economy | standard | deep; advisory
+models:
+  claude-code: haiku       # example: configure an available model/alias
+  # codex: <an actual model available to your Codex installation>
+  # opencode: <provider/model available in your installation>
+```
+
+An explicit mapping is exported only for that engine. Without one, the field is omitted and the engine/session default is inherited; sync prints that fact. AgentOS neither probes accounts nor silently substitutes a different model. If an explicit model is unavailable, resolve the engine error by choosing a supported model or removing the mapping, then re-export. The preference alone does not route requests. No names such as Luna/Terra are assumed to be public or supported engine model IDs.
+
+Use economy for routine, well-specified writing; escalate technical synthesis and ambiguous work when needed. Research can also be simple or difficult. A role name is insufficient to determine model quality or price. Compare total task cost (including repeated context, failed attempts and review), correctness and elapsed time on representative assignments before claiming savings.
+
+### Adopting the core team in an existing project
+
+1. Preserve current custom cards and review capability mappings in `project.yaml`.
+2. Install missing roles with `agentos agents add writer` and `agentos agents add researcher`.
+3. Explicitly set `agents.profile: core` and `agents.enabled: [developer, writer, researcher]`. Map implementation/qa/review/planning to developer, documentation to writer and research to researcher. Remove mappings to disabled roles or retain those roles if still needed. Review occurs in a fresh session; the mapping does not automate that requirement.
+4. Keep optional cards until their references are resolved; do not bulk-delete existing cards. Refresh generated definitions with `agents sync <engine> --team --dry-run`, review, then export.
+
+Do not change an existing team by rerunning `init`: preserving the owner's configuration is intentional.

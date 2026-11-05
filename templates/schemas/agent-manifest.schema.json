@@ -42,6 +42,15 @@
       ]
     },
     "custom": { "type": "boolean", "description": "true: the owner owns this card; agents add and doctor --fix never overwrite it without --replace." },
+    "model_preference": { "enum": ["economy", "standard", "deep"], "description": "Advisory; no automatic model routing." },
+    "models": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "claude-code": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$" },
+        "codex": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$" },
+        "opencode": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*/[A-Za-z0-9._:/-]*$" }
+      }
+    },
     "edit_request": { "type": "array", "items": { "type": "string", "minLength": 1 }, "description": "Optional, advisory. Entries outside the task's edit scope are ignored with a warning; never widens." }
   }
 }

@@ -1,0 +1,82 @@
+# State before lean-agent-team
+
+Preserved verbatim before replacing active handoff/task state.
+
+## Previous handoff.md
+
+# Handoff
+
+## Current objective
+
+`agentos resume` without `--task` must resume the real checkpoint task instead of a slug of the objective text (false "no checkpoint"): the objective's task when it has checkpoints, else the only task with checkpoints; several → list the ids with `--task` hints (exit 2); none → today's view with the derived id labelled. A checkpoint that failed to save must not hide the last usable one, and a failing check in a saved one must stay visible. `doctor` must not fail a clone with no vault bound when `canonical: workspace` (`canonical: vault` still fails). A `core.autocrlf=true` checkout must not report Brain records or agent cards as changed.
+
+## Scope
+
+- Repo: `agentos-for-projects`, single-repo workspace.
+- Baseline: `main` at `65b06c6` (PR #81 merged), package 3.2.0. Unreleased; no version bump or release.
+- Branch: `fix/resume-active-task`; task id: `resume-active-task`.
+- Allowed changes: `src/checkpoint.ts`, `src/core.ts` (resume/context/status/doctor wiring), `src/cli.ts` (resume exit code), `src/brain.ts` and `src/agents.ts` (CRLF-neutral hashes), tests, `docs/checkpoints.md`, `docs/obsidian.md`, `docs/brain.md`, `docs/agents.md`, CHANGELOG Unreleased and this repository's AgentOS state.
+
+## Current state
+
+- RED commits (each fails before its fix): `f416995` bare resume with one task gives a false "no checkpoint"; `290058b` zero/several tasks, bare context, risk A views; `df3eab7` doctor with an unbound vault; `d31c6ed` Brain records in a CRLF checkout; `f9baf88` records without `current.json`; `e90f2e5` agent cards in a CRLF checkout.
+- Fixes: `b9d2b2a` doctor (`canonical: workspace` + unbound vault = warning with bind hint, exit 0); `5249ee9` Brain `source_hash` reads CRLF as LF; `8ece7e9` `resolveReadTask` for bare resume/context, `ambiguousResume` (exit 2), last usable checkpoint and `Showing OLDER state` lines, `status` failing checks and checkpoint problems; `4445723` records without `current.json` are reported; `e853e31` agent-card hash CRLF-neutral.
+- Docs and CHANGELOG Unreleased `### Fixed` entries; the read rule is in docs/checkpoints.md.
+- Real CLI runs on copies of the Phase 5 tasktracker project and on fixture projects, old build vs new. Evidence and report are outside the repo, in the task folder (`agentos-resume-fix/report.md`).
+- All commits are local; nothing pushed.
+- Previous state: `.agentos/runs/2026-11-04-before-resume-active-task.md`.
+
+## Next exact action
+
+Phynceon reviews the local commits on `fix/resume-active-task`, then pushes and opens a PR against `main`.
+
+## Protected files / do not touch
+
+- Secrets, .env files, migrations and production config.
+- `.github/workflows/`, client workspaces, external Obsidian vaults and Hermes configuration.
+- `package.json` version and CHANGELOG release headings (release PR).
+
+## Open decisions
+
+- Release version and merge remain separate from this implementation.
+- Bare `agentos checkpoint` (a write) still keys a new record by the objective slug; only reads use the checkpoint task (tasks.md § Next).
+- `status` keeps "newest valid checkpoint across tasks" while bare `resume` refuses to guess between several tasks. This is deliberate: status summarises, resume continues.
+- `brain propose --from <copy>` refuses the copy (frontmatter); the `obsidian link` failure label says `--no-index`; WSL rejects `C:\` paths. Out of scope here.
+
+<!-- agentos:checkpoint:start -->
+## Checkpoint (managed)
+
+- Task: resume-active-task
+- Record: `.agentos/checkpoints/resume-active-task/2026-11-03T18-08-39-275Z-dfed002c.json`
+- Repos: agentos-for-projects fix/resume-active-task@fb75a3e (0 changed)
+- Progress: Bare resume/context resolve the checkpoint task (one -> resumed as --task, several -> listed, exit 2, none -> labelled); failed saves show the last usable checkpoint as OLDER state; status shows failing checks and checkpoint problems; doctor unbound vault with canonical: workspace is a warning; CRL…
+- Blockers: none
+- Next: Phynceon reviews the local commits on fix/resume-active-task, then pushes and opens a PR against main.
+- Receipts: observed-pass 2, observed-fail 0, claimed 0, not-run 3, unavailable 0
+- Resume: `agentos resume --task resume-active-task`
+<!-- agentos:checkpoint:end -->
+
+## Previous tasks.md
+
+# Tasks
+
+## Now
+
+- [ ] tasks.md § Now: mark items written before the checkpoint as superseded in `context` and in child-repo `status` ("Open tasks (Now)") (task id `unify-current-task-state`).
+
+## Acceptance criteria
+
+- After `agentos checkpoint --task <id> --next "<action>"`, `agentos status`, `agentos context <engine> --task <id>` and `agentos resume --task <id>` present exactly one current next action: the most recently saved one.
+- Older or contradicting next-action text in handoff.md or tasks.md is not presented as current; the next agent can tell it is superseded.
+- Nothing is silently deleted.
+
+## Next
+
+- [ ] Next-action truncation in the managed handoff block (300 characters) and `status` across several tasks: tracked separately.
+- [ ] Bare `agentos checkpoint` (no `--task`) still writes under the objective slug while bare `resume`/`context` read the checkpoint task (docs/checkpoints.md); decide whether writes follow the same rule.
+- [ ] `.agentos/brain/index.json` rewritten with CRLF in a `core.autocrlf=true` checkout (`brain index --dry-run`: Would refresh; content-identical): tracked separately.
+
+## Later
+
+- [ ] Body-text retrieval beyond Brain records: `brain search` and `decisions.md` section bodies (`context --about` covers Brain record bodies; the task id stays separate from the phrase).
+- [ ] `brain propose --from <read-only copy>`: strip the copy's frontmatter and banner (today it is refused).

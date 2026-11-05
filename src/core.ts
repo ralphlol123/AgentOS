@@ -1,3 +1,4 @@
+import { renderTeamAgent, teamPathAllowed } from './team-agents.js';
 import { SKILL_CATALOG, SKILL_BY_ID, SKILL_CATEGORIES, TEMPLATE_ENTRIES, AGENT_DEFINITIONS, renderSkillTemplate, type SkillCategory, type SkillDefinition } from './catalog.js';
 import { withWorkspaceWriter } from './workspace-lock.js';
 import { readImportSource } from './import-source.js';
@@ -877,7 +878,7 @@ async function initAgentOSUnlocked(options: any = {}) {
   await assertRepoBoundaries(cwd, repos);
   const workspaceKind = refreshed?.workspace_kind ?? (repos.some(repo => repo.path !== '.') ? 'multi-repo' : 'single-repo');
   const projectName = basename(cwd);
-  const agentSelection = existing ? await agentSelectionFromProject(existingText, repos, cwd) : resolveAgentSelection(options.agents ?? 'detected', repos);
+  const agentSelection = existing ? await agentSelectionFromProject(existingText, repos, cwd) : resolveAgentSelection(options.agents ?? 'core', repos);
   if (existing && options.agents && JSON.stringify([...resolveAgentSelection(options.agents, repos).enabled].sort()) !== JSON.stringify([...agentSelection.enabled].sort())) throw new Error('Existing agent configuration is preserved. Use agents add to extend it, or edit project.yaml explicitly.');
   const policy = adapterPolicy(existingText);
   const childRepos = repos.filter(repo => repo.path !== '.');
@@ -2142,17 +2143,37 @@ function planSyncedFile(path: string, abs: string, file: NativeFile | null, reco
 /** `agentos agents sync <engine>`: the only path that writes engine-native agent config. Plans every target against
  *  the sync record first; any refusal leaves the workspace unchanged. Files, backups and the record are written in one
  *  mutation transaction. Never called by context/checkpoint. */
+async function teamConfigPlan(root: string, engine: string, options: any) {
+  if (!['claude-code', 'codex', 'opencode'].includes(engine)) return { refused: `Team export is unsupported for ${engine}. Use portable .agentos/agents cards.` };
+  if (options.role !== undefined || options.scope !== undefined) return { refused: '--team cannot be combined with --role or --scope. Assign scope per task in the engine session.' };
+  const project = parseProjectYaml(await readFile(join(root, '.agentos/project.yaml'), 'utf8'));
+  const enabled = project.agents?.enabled;
+  if (!Array.isArray(enabled) || !enabled.length || enabled.some(id => typeof id !== 'string' || !ROLE_ID.test(id))) return { refused: 'agents.enabled must be a non-empty list of valid role IDs.' };
+  const files: NativeFile[] = [];
+  for (const id of [...new Set<string>(enabled)]) {
+    const path = `.agentos/agents/${id}.md`;
+    await assertBoundaryTarget(root, path);
+    const text = await safeRead(join(root, path));
+    if (!text) return { refused: `Missing card ${path}; install it before exporting the team.` };
+    const card = parseAgentCard(id, text);
+    if (card.state === 'invalid') return { refused: card.problems.join('; ') };
+    if (card.state === 'legacy') return { refused: `${path} needs a validated manifest. Review it, then use agentos agents manifest ${id} --custom.` };
+    files.push(renderTeamAgent(engine, card));
+  }
+  return { role: 'team', bundle: { scope: { edit: [], read: [] } }, files };
+}
+
 async function syncAgentsUnlocked(root: string, options: any) {
   const engine = normalizeEngine(options.engine);
   const adapter = engineAdapter(engine);
-  if (!adapter.nativeConfig) return { ok: false, text: `AgentOS agents sync: UNSUPPORTED\n${engine} has no native agent config (native_agent_config: ${adapter.capabilities.native_agent_config.status}). Supported: claude-code, codex.` };
+  if (!options.team && !adapter.nativeConfig) return { ok: false, text: `AgentOS agents sync: UNSUPPORTED\n${engine} has no native agent config (native_agent_config: ${adapter.capabilities.native_agent_config.status}). Supported: claude-code, codex.` };
   await assertProjectYamlWellFormed(join(root, '.agentos/project.yaml'));
-  const plan = await nativeConfigPlan(root, engine, adapter, options);
+  const plan = options.team ? await teamConfigPlan(root, engine, options) : await nativeConfigPlan(root, engine, adapter, options);
   if ('refused' in plan) return { ok: false, text: `AgentOS agents sync: REFUSED\n${plan.refused}\nNothing was written.` };
   const { role, bundle, files } = plan;
   const replace = Boolean(options.replace), dryRun = Boolean(options.dryRun);
   const readOrNull = (abs: string) => readFile(abs, 'utf8').catch((error) => { if (error.code === 'ENOENT') return null; throw error; });
-  const recordRel = syncRecordPath(engine);
+  const recordRel = options.team ? syncRecordPath(`team-${engine}`) : syncRecordPath(engine);
   await assertBoundaryTarget(root, recordRel);
   const recordCurrent = await readOrNull(join(root, recordRel));
   const refusals: string[] = [], overridable: string[] = [];
@@ -2160,6 +2181,7 @@ async function syncAgentsUnlocked(root: string, options: any) {
   if (recordCurrent !== null) {
     try { record = parseSyncRecord(recordCurrent, engine); } catch (error) { if (!replace) overridable.push(`${recordRel}: ${error.message}; no ownership can be read from it`); }
   }
+  if (options.team && record?.files.some(file => file.merge !== 'whole-file' || !teamPathAllowed(engine, file.path))) return { ok: false, text: 'Invalid team ownership path; nothing was written.' };
   // One record per engine: paths recorded for the previous role that are no longer generated are removed (when unedited).
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const backupRel = (path: string) => `.agentos/runs/replaced-synced/${stamp}/${path}`;
@@ -2176,7 +2198,7 @@ async function syncAgentsUnlocked(root: string, options: any) {
     if (filePlan.backup) await assertBoundaryTarget(root, backupRel(path));
     plans.push(filePlan);
   }
-  const head = [`AgentOS agents sync ${engine}${dryRun ? ' dry run' : ''}`, `Role: ${role}; edit scope: ${bundle.scope.edit.join(', ') || '(none; read-only)'}`, ...files.flatMap((file) => file.warnings ?? []).map((warning) => `Warning: ${warning}`)];
+  const head = [`AgentOS agents sync ${engine}${options.team ? ' --team' : ''}${dryRun ? ' dry run' : ''}`, options.team ? 'Team definitions only; task scope and permissions remain the engine session’s responsibility.' : `Role: ${role}; edit scope: ${bundle.scope.edit.join(', ') || '(none; read-only)'}`, ...[...new Set(files.flatMap((file) => file.warnings ?? []))].map((warning) => `Warning: ${warning}`)];
   if (refusals.length || overridable.length) {
     return { ok: false, conflicts: [...refusals, ...overridable], text: [...head, 'REFUSED:', ...[...refusals, ...overridable].map((c) => `- ${c}`),
       ...(overridable.length ? ['These would overwrite content the sync record does not own. Preview with `--dry-run --replace`; `--replace` overwrites only that content (without a record it takes over the generated keys, e.g. permissions.allow/deny, wholesale) and backs up each overwritten file once under .agentos/runs/replaced-synced/.'] : []),
@@ -2201,11 +2223,11 @@ async function syncAgentsUnlocked(root: string, options: any) {
   }
   const verb = (action: string) => action === 'unchanged' ? 'Unchanged' : dryRun ? `Would ${action}` : ({ create: 'Created', update: 'Updated', remove: 'Removed' } as Record<string, string>)[action];
   const enforcement = adapter.capabilities.permission_enforcement;
-  const caveat = [`Generated configuration is not proof of enforcement on its own: permission_enforcement is ${enforcement.status} for ${engine}${enforcement.edit_scope ? `; edit scope is ${enforcement.edit_scope}` : ''} (agentos doctor --engines).`, ...(adapter.syncNote ? [adapter.syncNote] : [])].join('\n');
+  const caveat = options.team ? 'Team discovery, delegation and model selection are unverified in live engines. Team files do not establish an edit sandbox.' : [`Generated configuration is not proof of enforcement on its own: permission_enforcement is ${enforcement.status} for ${engine}${enforcement.edit_scope ? `; edit scope is ${enforcement.edit_scope}` : ''} (agentos doctor --engines).`, ...(adapter.syncNote ? [adapter.syncNote] : [])].join('\n');
   return { ok: true, dryRun, files: plans.map(({ path, action }) => ({ path, action })), text: [...head,
     ...plans.flatMap((p) => [`${verb(p.action)}: ${p.path}${p.backup ? ` (--replace; old file ${dryRun ? 'would be ' : ''}backed up to ${dryRun ? '.agentos/runs/replaced-synced/' : backupRel(p.path)})` : ''}`, ...(dryRun ? p.diff.map((line) => `  ${line}`) : [])]),
     `${verb(recordAction)}: ${recordRel} (sync record)`,
-    `The sync record tracks one role per engine (now: ${role})${record && record.role !== role ? `; it replaced role ${record.role}, whose generated files are replaced or removed above` : '; syncing another role replaces these files'}.`,
+    options.team ? 'Team definitions coexist. Re-run --team after card or enabled-role changes; --dry-run checks for drift. This does not satisfy context --require-synced-config (task-scoped sync).' : `The sync record tracks one role per engine (now: ${role})${record && record.role !== role ? `; it replaced role ${record.role}, whose generated files are replaced or removed above` : '; syncing another role replaces these files'}.`,
     caveat].join('\n') };
 }
 
@@ -2830,7 +2852,7 @@ async function checkAgentAndSkillConfig(root, project, warnings) {
     if (!/Policy:\s*on-demand/i.test(skills)) warnings.push('.agentos/skills.md should declare Policy: on-demand');
   }
 
-  if (!agents.profile) warnings.push('.agentos/project.yaml agents.profile missing; expected minimal, detected, or custom');
+  if (!agents.profile) warnings.push('.agentos/project.yaml agents.profile missing; expected core, minimal, detected, or custom');
   if (!enabled.size) warnings.push('.agentos/project.yaml agents.enabled is empty or missing');
   for (const id of enabled) {
     if (!await exists(join(root, '.agentos/agents', `${id}.md`))) warnings.push(`agents.enabled references ${id}, but .agentos/agents/${id}.md is missing`);
@@ -3856,11 +3878,12 @@ function architectureMd() { return '# Architecture\n\nDefine stack, boundaries, 
 function runsReadmeMd() { return '# Runs\n\nStore per-task briefs, results, verification logs, and diff summaries here.\n'; }
 
 
+const CORE_AGENT_IDS = ['developer', 'writer', 'researcher'];
 const MINIMAL_AGENT_IDS = ['developer', 'tester', 'reviewer', 'release-manager'];
 
 function collectAgentDeprecationNotices(requested) {
   const raw = String(requested || '').trim().toLowerCase();
-  if (!raw || raw === 'minimal' || raw === 'detected') return [];
+  if (!raw || raw === 'core' || raw === 'minimal' || raw === 'detected') return [];
   const notices = [];
   for (const item of raw.split(',').map((s) => s.trim()).filter(Boolean)) {
     const { id, deprecated, from } = resolveAgentAlias(item);
@@ -3871,6 +3894,7 @@ function collectAgentDeprecationNotices(requested) {
 
 function resolveAgentSelection(requested, repos) {
   const raw = String(requested || 'detected').trim().toLowerCase();
+  if (raw === 'core') return buildAgentSelection('core', CORE_AGENT_IDS);
   if (raw === 'minimal') return buildAgentSelection('minimal', MINIMAL_AGENT_IDS);
   if (raw === 'detected') return buildAgentSelection('detected', [...MINIMAL_AGENT_IDS, ...detectedSpecialistIds(repos)]);
   const requestedIds = raw.split(',').map((item) => item.trim()).filter(Boolean);
@@ -3933,6 +3957,9 @@ function agentCapabilities(enabled) {
   const set = new Set(enabled);
   const capabilities: Record<string, string> = {};
   if (set.has('developer')) { capabilities.implementation = 'developer'; capabilities.frontend = 'developer'; capabilities.backend = 'developer'; }
+  if (set.has('writer')) capabilities.documentation = 'writer';
+  if (set.has('researcher')) capabilities.research = 'researcher';
+  if (set.has('developer')) { capabilities.qa = 'developer'; capabilities.review = 'developer'; if (set.has('writer') && set.has('researcher')) capabilities.planning = 'developer'; }
   if (set.has('tester')) capabilities.qa = 'tester';
   if (set.has('reviewer')) capabilities.review = 'reviewer';
   if (set.has('release-manager')) capabilities.release = 'release-manager';

@@ -140,6 +140,7 @@ async function main() {
       return;
     }
     if (command === 'agents') {
+      if (flags.team && args[0] !== 'sync') throw new Error('--team is only supported by agents sync.');
       const [sub, ...rest] = args;
       if (sub === 'list') {
         const result = await agentsAgentOS({ cwd: process.cwd(), list: true, installed: flags.installed });
@@ -158,7 +159,7 @@ async function main() {
         ? await agentsAgentOS({ cwd: process.cwd(), add: positionals[0], name: subFlags.name, replace: subFlags.replace, dryRun: subFlags['dry-run'], yes: subFlags.yes, expectedSha256: subFlags['expected-sha256'] })
         : await agentsAgentOS({
           cwd: process.cwd(), command: sub, id: sub === 'sync' ? undefined : positionals[0], engine: sub === 'sync' ? positionals[0] : undefined,
-          role: subFlags.role, scope: subFlags.scope, json: subFlags.json, dryRun: subFlags['dry-run'], replace: subFlags.replace, custom: subFlags.custom,
+          team: subFlags.team, role: subFlags.role, scope: subFlags.scope, json: subFlags.json, dryRun: subFlags['dry-run'], replace: subFlags.replace, custom: subFlags.custom,
         });
       console.log(result.text);
       process.exitCode = result.ok ? 0 : 1;
@@ -246,6 +247,7 @@ const AGENTS_USAGE = [
   '       agentos agents enable|disable <id> [--dry-run]',
   '       agentos agents remove <id> [--dry-run]',
   '       agentos agents manifest <id> --custom [--dry-run]',
+  '       agentos agents sync claude-code|codex|opencode --team [--dry-run] [--replace]',
   '       agentos agents sync claude-code|codex [--role <id>] [--scope <repo-or-path>,...] [--dry-run] [--replace]',
 ].join('\n');
 
@@ -298,7 +300,7 @@ const HELP = [
   'Usage:',
   '',
   'Setup & health',
-  '  agentos init [--new|--existing] [--agents minimal|<agent-id>,...] [--refresh] [--dry-run] [--yes]',
+  '  agentos init [--new|--existing] [--agents core|minimal|<agent-id>,...] [--refresh] [--dry-run] [--yes]',
   '  agentos status [--full]',
   '  agentos doctor [--fix] [--dry-run] [--json]',
   '  agentos doctor --explain <file>',
@@ -321,6 +323,7 @@ const HELP = [
   '  agentos agents show <id> [--json] | enable <id> | disable <id> | remove <id> [--dry-run]',
   '  agentos agents add <agent-id|file|url> [--name id] [--dry-run] [--replace] [--yes] [--expected-sha256 hash]',
   '  agentos agents manifest <id> --custom [--dry-run]',
+  '  agentos agents sync <claude-code|codex|opencode> --team [--dry-run] [--replace]',
   '  agentos agents sync claude-code|codex [--role <id>] [--scope <repo-or-path>,...] [--dry-run] [--replace]',
   '  agentos skills list [--installed]',
   '  agentos skills show <skill-id>',

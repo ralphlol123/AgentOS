@@ -256,3 +256,7 @@ The trial also found D2 (child directories of one root work tree were `unavailab
 ## Repeating the trial
 
 Use a disposable fixture (never a client workspace), record engine version, exact command, transcript and `git status --short` before and after. A row becomes `verified` only for the engine, version and mode observed, with the report section as evidence; a failed observation becomes `unsupported`. The prompts used on 2026-10-25 are in the evidence folder (`claude-prompt*.txt`, `codex-prompt*.txt`), and the engine flags were `claude -p --output-format json --no-session-persistence --allowedTools …` and `codex exec -a never [--sandbox read-only]`. The closure probe prompt is `closure/b2.txt` (14 items). The subagent `tools:` re-trial (T9) result is `closure/b6-subagent-tools.json`, with the rendered agent file `closure/claude-agent-developer-with-tools.md.generated`.
+
+## Opt-in team exports
+
+`agents sync claude-code|codex|opencode --team` exports all enabled roles as coexisting native definitions. This is separate from the task-scoped adapters and their capability matrix above. Team runtime behavior is **unverified** until a live trial is recorded. See [lean teams](agents.md#lean-team) for file locations, model mappings, inherited permissions, migration and ownership protections.

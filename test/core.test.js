@@ -68,7 +68,7 @@ test('init --existing detects a multi-repo workspace from child package.json fil
 });
 
 
-test('init --existing uses detected agent profile with core delivery team, detected specialists, and skills index', async () => {
+test('init --existing uses core agent profile with three roles and skills index', async () => {
   const root = await tempProject();
   await mkdirp(join(root, 'frontend'));
   await writeFile(join(root, 'frontend/package.json'), JSON.stringify({ scripts: { build: 'vite build' }, dependencies: { vite: '^5.0.0', react: '^18.0.0' } }, null, 2));
@@ -78,14 +78,14 @@ test('init --existing uses detected agent profile with core delivery team, detec
   await initAgentOS({ cwd: root, mode: 'existing', yes: true });
 
   const projectYaml = await readFile(join(root, '.agentos/project.yaml'), 'utf8');
-  assert.match(projectYaml, /profile: detected/);
+  assert.match(projectYaml, /profile: core/);
   assert.match(projectYaml, /capabilities:/);
   assert.match(projectYaml, /implementation: developer/);
   assert.match(projectYaml, /frontend: developer/);
   assert.match(projectYaml, /backend: developer/);
-  assert.match(projectYaml, /qa: tester/);
+  assert.match(projectYaml, /qa: developer/);
   assert.match(projectYaml, /enabled:/);
-  for (const id of ['developer', 'tester', 'reviewer', 'release-manager']) {
+  for (const id of ['developer', 'writer', 'researcher']) {
     assert.equal(await exists(join(root, '.agentos/agents', `${id}.md`)), true, `${id} agent file should exist`);
     assert.match(projectYaml, new RegExp(`- ${id}`));
   }
@@ -129,7 +129,7 @@ test('init rejects unknown custom agent aliases', async () => {
 
 test('doctor warns when agent capabilities or skills index are inconsistent', async () => {
   const root = await tempProject();
-  await initAgentOS({ cwd: root, mode: 'new', yes: true });
+  await initAgentOS({ cwd: root, mode: 'new', yes: true, agents: 'minimal' });
   const { rm } = await import('node:fs/promises');
   await rm(join(root, '.agentos/skills.md'), { force: true });
   await rm(join(root, '.agentos/agents/tester.md'), { force: true });
