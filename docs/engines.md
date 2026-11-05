@@ -52,7 +52,7 @@ Generated from `src/engines.ts` (a test keeps this table in step with it).
 | codex | launch | unsupported | AgentOS never launches an engine process; the user starts the engine. |
 | codex | native_session_resume | unsupported | AgentOS resume is engine-neutral checkpoint text (`agentos resume`); it does not drive the engine's own session resume. |
 | opencode | context_rendering | advisory | Rendered as text (AGENTS.md + `agentos context`); the engine may ignore instructions. |
-| opencode | native_agent_config | unsupported | AgentOS generates no native OpenCode agent config. |
+| opencode | native_agent_config | unsupported | Task-scoped native config is unsupported. Use agentos agents sync opencode --team to export enabled roles to .opencode/agents/. Team export does not enforce task edit scope. |
 | opencode | tool_restrictions | unsupported | No enforcement wiring for this engine; edit scope and tool rules are instruction text only. |
 | opencode | permission_enforcement | unsupported | No enforcement wiring for this engine; edit scope and tool rules are instruction text only. |
 | opencode | launch | unsupported | AgentOS never launches an engine process; the user starts the engine. |

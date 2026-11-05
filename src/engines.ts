@@ -153,7 +153,7 @@ const ADAPTERS: EngineAdapter[] = [
   },
   {
     id: 'opencode', render: renderWith, capabilities: {
-      context_rendering: advisoryContext('AGENTS.md'), native_agent_config: notGenerated('OpenCode'), tool_restrictions: instructionOnly,
+      context_rendering: advisoryContext('AGENTS.md'), native_agent_config: row('unsupported', 'Task-scoped native config is unsupported. Use agentos agents sync opencode --team to export enabled roles to .opencode/agents/. Team export does not enforce task edit scope.'), tool_restrictions: instructionOnly,
       permission_enforcement: instructionOnly, launch: row('unsupported', NO_LAUNCH), native_session_resume: row('unsupported', NO_RESUME),
     },
   },
