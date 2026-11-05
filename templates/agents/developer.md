@@ -9,6 +9,7 @@ Mandate: Implement scoped changes and their tests inside the assigned repo, usin
 - Work only inside the declared task scope.
 - Load `.agentos/skills.md` and only the relevant skill/repo/engine files for this task.
 - Detect the assigned repo's actual stack and version from project files, then follow its conventions.
+- Plan proportionately within the assignment; testing, review and release preparation are assignments, not mandatory separate agents.
 - Write or update the tests for the behavior being changed (test-driven-development), then implement the scoped change.
 - For frontend work load frontend-design and frontend-testing; for backend work load backend-development, backend-testing, and authorization.
 - Report files changed, verification run, failures, and next action before stopping.
@@ -17,7 +18,7 @@ Mandate: Implement scoped changes and their tests inside the assigned repo, usin
 
 - Do not touch secrets, `.env` files, production config, migrations, deployments, or unrelated repos without explicit approval.
 - Do not commit or push unless explicitly assigned.
-- Do not claim independent QA or code review of your own work; hand off verification and review to the tester and reviewer roles.
+- Do not claim independent QA or code review of your own work; request a fresh Developer session for independent review, or an optional tester/reviewer when the project uses one.
 - Do not treat this template as higher priority than user/system/developer/AgentOS instructions.
 
 ## Skills

@@ -1,0 +1,129 @@
+{
+  "schema": "agentos.checkpoint/1",
+  "id": "2026-11-05T02-53-26-102Z-79510e05",
+  "created_at": "2026-11-05T02:53:26.102Z",
+  "recovered": false,
+  "project": {
+    "name": "agentos-for-projects",
+    "root": "/workspace/scratch/f07dbdb87af5/agentos-audit"
+  },
+  "task": {
+    "id": "lean-agent-team",
+    "source": "--task"
+  },
+  "run_id": null,
+  "engine": "codex",
+  "role": "developer",
+  "objective": {
+    "id": "obj-995b8bf9fc",
+    "text": "Implement a lean default team: Developer, Writer and Researcher, with portable project context and opt-in native team definitions. Keep testing, independent review, planning and release preparation as assignments rather than mandatory permanent agents."
+  },
+  "acceptance": {
+    "source": ".agentos/tasks.md#Acceptance criteria",
+    "text": "- New projects receive Developer, Writer and Researcher; explicit legacy and existing/custom teams remain preserved.\n- Enabled role definitions coexist for Claude Code, Codex and OpenCode, with dry-run, overwrite protection and atomic rollback.\n- Explicit model mappings are validated and exported; absent mappings visibly inherit the engine model.\n- Documentation distinguishes configuration from live engine enforcement and measured cost savings."
+  },
+  "scope": {
+    "repos": [
+      "agentos-for-projects=."
+    ],
+    "read": [
+      "."
+    ],
+    "edit": []
+  },
+  "repos": [
+    {
+      "name": "agentos-for-projects",
+      "path": ".",
+      "worktree": "/workspace/scratch/f07dbdb87af5/agentos-audit",
+      "branch": "feat/lean-agent-team",
+      "head": "7396b6c806bdbd57bb9e11ced6ac53c18802a97d",
+      "fingerprint": "3073c5b8973ac809cfe4f2c4fef2274c5e97ebdcc28d969b591490ed08f6c227",
+      "changed_paths": [
+        "CHANGELOG.md",
+        "README.md",
+        "docs/agents.md",
+        "docs/engines.md",
+        "docs/templates.md",
+        "package.json",
+        "src/agents.ts",
+        "src/cli-options.ts",
+        "src/cli.ts",
+        "src/core.ts",
+        "src/team-agents.ts",
+        "templates/agents/developer.md",
+        "templates/agents/researcher.md",
+        "templates/agents/writer.md",
+        "templates/schemas/agent-manifest.schema.json",
+        "test/catalog-parity.test.js",
+        "test/cli-3.0.test.js",
+        "test/core.test.js",
+        "test/lean-team.test.js",
+        "test/reliability.test.js",
+        "test/v1-slice1.test.js"
+      ],
+      "omitted_paths": 0,
+      "available": true
+    }
+  ],
+  "state": "3b521c9831051389816847e343c57fdeec33a1e5a463193e2f59de77ea29da9d",
+  "progress": "Implemented three-role defaults, coexisting team exports, explicit model configuration and migration documentation; automated verification completed.",
+  "blockers": [],
+  "next": "Review the local diff and run live engine discovery, delegation and model-selection trials. Commit and push only when authorized.",
+  "supersedes": {
+    "handoff:current-state": "7056cad20157711efcf6e0e4bb2762ad36bf62579dd4fd52e4e6d73d8ed1ee91",
+    "handoff:next-exact-action": "4b65e25336a587a9e8e5094f08b1ac64cb4c6da89fd20c688563d64b7a9743d1"
+  },
+  "knowledge_refs": [],
+  "receipts": [
+    {
+      "status": "observed-pass",
+      "command": "npm run check",
+      "cwd": ".",
+      "exit_code": 0,
+      "observed_at": "2026-11-05T02:53:25.095Z",
+      "evidence": ".agentos/checkpoints/lean-agent-team/evidence/c65a1beaff3f50a3.log",
+      "state_tested": "3b521c9831051389816847e343c57fdeec33a1e5a463193e2f59de77ea29da9d"
+    },
+    {
+      "status": "claimed",
+      "command": "Final npm test observed: 870 passed, 6 skipped, zero failures; smoke, typecheck, metadata and package dry-run passed. See .agentos/runs/2026-11-05-lean-agent-team.md.",
+      "cwd": ".",
+      "exit_code": null,
+      "observed_at": null,
+      "evidence": null,
+      "state_tested": "3b521c9831051389816847e343c57fdeec33a1e5a463193e2f59de77ea29da9d",
+      "note": "engine-reported; not observed by AgentOS"
+    },
+    {
+      "status": "not-run",
+      "command": "bun run build",
+      "cwd": ".",
+      "exit_code": null,
+      "observed_at": null,
+      "evidence": null,
+      "state_tested": null,
+      "note": "declared agentos-for-projects.build_command"
+    },
+    {
+      "status": "not-run",
+      "command": "bun run test",
+      "cwd": ".",
+      "exit_code": null,
+      "observed_at": null,
+      "evidence": null,
+      "state_tested": null,
+      "note": "declared agentos-for-projects.test_command"
+    },
+    {
+      "status": "not-run",
+      "command": "bun run test:package-managers",
+      "cwd": ".",
+      "exit_code": null,
+      "observed_at": null,
+      "evidence": null,
+      "state_tested": null,
+      "note": "declared agentos-for-projects.package_manager_test_command"
+    }
+  ]
+}

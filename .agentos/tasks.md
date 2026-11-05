@@ -2,15 +2,21 @@
 
 ## Now
 
-- [ ] tasks.md § Now: mark items written before the checkpoint as superseded in `context` and in child-repo `status` ("Open tasks (Now)") (task id `unify-current-task-state`).
+- [ ] Independent review and live-engine validation for `lean-agent-team`; local implementation and automated verification are complete.
 
 ## Acceptance criteria
 
-- After `agentos checkpoint --task <id> --next "<action>"`, `agentos status`, `agentos context <engine> --task <id>` and `agentos resume --task <id>` present exactly one current next action: the most recently saved one.
-- Older or contradicting next-action text in handoff.md or tasks.md is not presented as current; the next agent can tell it is superseded.
-- Nothing is silently deleted.
+- New projects receive Developer, Writer and Researcher; explicit legacy and existing/custom teams remain preserved.
+- Enabled role definitions coexist for Claude Code, Codex and OpenCode, with dry-run, overwrite protection and atomic rollback.
+- Explicit model mappings are validated and exported; absent mappings visibly inherit the engine model.
+- Documentation distinguishes configuration from live engine enforcement and measured cost savings.
 
 ## Next
+
+- [ ] Run bounded live-engine discovery/delegation/model trials; keep exports marked unverified until evidence exists.
+- [ ] Review and commit/push the lean-team changes when authorized; no release is part of this task.
+- [ ] Prior task: mark tasks.md § Now entries predating the checkpoint as superseded in context/child status (`unify-current-task-state`).
+
 
 - [ ] Next-action truncation in the managed handoff block (300 characters) and `status` across several tasks: tracked separately.
 - [ ] Bare `agentos checkpoint` (no `--task`) still writes under the objective slug while bare `resume`/`context` read the checkpoint task (docs/checkpoints.md); decide whether writes follow the same rule.

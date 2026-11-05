@@ -4,6 +4,12 @@ All notable changes to AgentOS for Projects are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- Three-role `core` default for new projects: Developer, Writer and Researcher. Existing enabled teams and the explicit legacy `minimal` profile are preserved.
+- Opt-in `agents sync <engine> --team` exports coexisting role definitions for Claude Code, Codex and OpenCode, with owned-file protection, dry-run and transactional updates. Team exports do not alter task-scoped permission settings or claim live engine enforcement.
+- Optional advisory model preferences and explicit per-engine model mappings in agent manifests. No automatic price or availability claims.
+
 ## [3.3.0] - 2026-11-04
 
 ### Added

@@ -134,7 +134,7 @@ AgentOS is a TypeScript CLI/package that supports:
 - child repo pointer files for parent-managed multi-repo workspaces;
 - `.agentos/guide.md`, one engine-agnostic command map (which `agentos` command for which job, and what to do from a child repo), loaded on demand from the root and child pointers;
 - generated `.agentos/project.yaml`, `memory.md`, `handoff.md`, `tasks.md`, `decisions.md`, `status.md`, `skills.md`, `guide.md`, `agents/`, `repos/`, and `runs/`;
-- agent selection profiles: `minimal`, `detected`, and custom comma lists;
+- agent selection profiles: `core` (default), `minimal` (legacy), and custom comma lists;
 - optional planning-only `planner` role;
 - local project skills under `.agentos/skills/`;
 - local custom agents under `.agentos/agents/`;
@@ -280,7 +280,7 @@ What is enforced and what is only instruction, per engine: [docs/engines.md](doc
 
 ```bash
 # Setup & health
-agentos init [--new|--existing] [--agents minimal|<agent-id>,...] [--refresh] [--dry-run] [--yes]
+agentos init [--new|--existing] [--agents core|minimal|<agent-id>,...] [--refresh] [--dry-run] [--yes]
 agentos status [--full]
 agentos doctor [--fix] [--dry-run] [--json]
 agentos doctor --explain <file>
@@ -320,7 +320,7 @@ agentos compact [--objective <id>] --dry-run [--diff]
 agentos compact --archive-only [--dry-run]
 ```
 
-- `init --yes` (`-y`) skips the confirmation prompt. `--agents minimal` gives developer, tester, reviewer and release-manager, the same team as no `--agents`.
+- `init --yes` (`-y`) skips the confirmation prompt. `--agents core` (the default) gives developer, writer and researcher. Explicit `--agents minimal` preserves the legacy developer, tester, reviewer and release-manager team.
 - `context --strict` is `--require-synced-config --require-enforcement --require-complete` together; the individual flags still work.
 - `status --full` appends the full handoff and the reading list; `context --brief` prints the short generic start prefix.
 - `skills add <file|url>` and `agents add <file|url>` run the safe import (hash pin, safety review, quarantine, `--yes` to write); `--dry-run` is the template structure check (exit 1 with the findings when it fails). An imported skill keeps a summary excerpt of its source.
@@ -420,10 +420,11 @@ agentos init --existing --agents developer,tester,reviewer,release-manager
 
 Profiles:
 
-- `minimal`: `developer`, `tester`, `reviewer`, `release-manager`.
+- `core` (default): `developer`, `writer`, `researcher`.
+- `minimal` (legacy): `developer`, `tester`, `reviewer`, `release-manager`.
 - custom comma list: friendly aliases such as `review`, `release`, `planning`, and `pm`.
 
-Without `--agents`, `init` enables the same team as `minimal` (frontend/backend specialists were absorbed into the single `developer` role). `planner` is optional and planning-only; it is not enabled by default.
+New projects use three roles. Testing, independent review in a fresh Developer session, planning and release preparation are assignments, not mandatory extra agents. Existing projects keep their configured roles and custom cards. Optional specialist cards remain available. See [agent teams and model configuration](docs/agents.md#lean-team).
 
 ### Task scope (optional)
 

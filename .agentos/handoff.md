@@ -2,50 +2,48 @@
 
 ## Current objective
 
-`agentos resume` without `--task` must resume the real checkpoint task instead of a slug of the objective text (false "no checkpoint"): the objective's task when it has checkpoints, else the only task with checkpoints; several → list the ids with `--task` hints (exit 2); none → today's view with the derived id labelled. A checkpoint that failed to save must not hide the last usable one, and a failing check in a saved one must stay visible. `doctor` must not fail a clone with no vault bound when `canonical: workspace` (`canonical: vault` still fails). A `core.autocrlf=true` checkout must not report Brain records or agent cards as changed.
+Implement a lean default team: Developer, Writer and Researcher, with portable project context and opt-in native team definitions. Keep testing, independent review, planning and release preparation as assignments rather than mandatory permanent agents.
 
 ## Scope
 
-- Repo: `agentos-for-projects`, single-repo workspace.
-- Baseline: `main` at `65b06c6` (PR #81 merged), package 3.2.0. Unreleased; no version bump or release.
-- Branch: `fix/resume-active-task`; task id: `resume-active-task`.
-- Allowed changes: `src/checkpoint.ts`, `src/core.ts` (resume/context/status/doctor wiring), `src/cli.ts` (resume exit code), `src/brain.ts` and `src/agents.ts` (CRLF-neutral hashes), tests, `docs/checkpoints.md`, `docs/obsidian.md`, `docs/brain.md`, `docs/agents.md`, CHANGELOG Unreleased and this repository's AgentOS state.
+- Task: `lean-agent-team`; branch: `feat/lean-agent-team`; baseline: `7396b6c` (3.3.0).
+- AgentOS source, role templates, tests, docs and state records. No release/version change, remote writes or Hermes work.
+- Existing project role selections, custom cards and task-scoped sync behavior remain supported.
 
 ## Current state
 
-- RED commits (each fails before its fix): `f416995` bare resume with one task gives a false "no checkpoint"; `290058b` zero/several tasks, bare context, risk A views; `df3eab7` doctor with an unbound vault; `d31c6ed` Brain records in a CRLF checkout; `f9baf88` records without `current.json`; `e90f2e5` agent cards in a CRLF checkout.
-- Fixes: `b9d2b2a` doctor (`canonical: workspace` + unbound vault = warning with bind hint, exit 0); `5249ee9` Brain `source_hash` reads CRLF as LF; `8ece7e9` `resolveReadTask` for bare resume/context, `ambiguousResume` (exit 2), last usable checkpoint and `Showing OLDER state` lines, `status` failing checks and checkpoint problems; `4445723` records without `current.json` are reported; `e853e31` agent-card hash CRLF-neutral.
-- Docs and CHANGELOG Unreleased `### Fixed` entries; the read rule is in docs/checkpoints.md.
-- Real CLI runs on copies of the Phase 5 tasktracker project and on fixture projects, old build vs new. Evidence and report are outside the repo, in the task folder (`agentos-resume-fix/report.md`).
-- All commits are local; nothing pushed.
-- Previous state: `.agentos/runs/2026-11-04-before-resume-active-task.md`.
+- New init defaults to `core`: developer, writer, researcher. Explicit `minimal` and existing enabled teams remain compatible.
+- `agents sync claude-code|codex|opencode --team` exports all enabled manifest cards into separate `agentos-<role>` files. Uses existing transactional sync protection and a separate ownership record.
+- Model preference is advisory. Explicit per-engine model mappings are exported; absence inherits the session model. No automatic availability, price or fallback-model guesses.
+- Coordinator owns shared handoff/checkpoint writes. Fresh Developer sessions can perform independent review; Researcher is read-only by intent, with engine-specific limits documented.
+- `docs/agents.md` contains responsibilities, migration, native format references and limitations; it is now packaged.
+- Final consolidated regression run: 876 tests, 870 passed, 6 skipped (root-permission tests), zero failures. Includes ten new team tests. Typecheck, smoke, metadata and package dry-run passed. Codex exports also parsed with Python tomllib. Results recorded in .agentos/runs/2026-11-05-lean-agent-team.md.
+- Codex exports parsed with Python tomllib. No Claude Code, Codex or OpenCode executable is installed here; live discovery, invocation, permissions, model routing and cost savings remain unverified.
+- Local uncommitted changes only. No push, PR, publish or live-engine trial.
 
 ## Next exact action
 
-Phynceon reviews the local commits on `fix/resume-active-task`, then pushes and opens a PR against `main`.
+Review the local diff and run bounded live-engine team trials before treating the new exports as verified. Commit/push only when authorized.
 
 ## Protected files / do not touch
 
-- Secrets, .env files, migrations and production config.
-- `.github/workflows/`, client workspaces, external Obsidian vaults and Hermes configuration.
-- `package.json` version and CHANGELOG release headings (release PR).
+Secrets, production configuration, migrations, external vaults/client projects, workflow configuration and release version.
 
 ## Open decisions
 
-- Release version and merge remain separate from this implementation.
-- Bare `agentos checkpoint` (a write) still keys a new record by the objective slug; only reads use the checkpoint task (tasks.md § Next).
-- `status` keeps "newest valid checkpoint across tasks" while bare `resume` refuses to guess between several tasks. This is deliberate: status summarises, resume continues.
-- `brain propose --from <copy>` refuses the copy (frontmatter); the `obsidian link` failure label says `--no-index`; WSL rejects `C:\` paths. Out of scope here.
+- Live trial should check role discovery, model actually selected, read-only behavior, one shared-state writer, and independent review; measure cost and retries before claiming savings.
+- Team exports intentionally do not satisfy task-scoped `context --require-synced-config`; inspect team drift via `agents sync <engine> --team --dry-run`.
+- Previous unfinished tasks are preserved in tasks.md and the archived state.
 
 <!-- agentos:checkpoint:start -->
 ## Checkpoint (managed)
 
-- Task: resume-active-task
-- Record: `.agentos/checkpoints/resume-active-task/2026-11-03T18-08-39-275Z-dfed002c.json`
-- Repos: agentos-for-projects fix/resume-active-task@fb75a3e (0 changed)
-- Progress: Bare resume/context resolve the checkpoint task (one -> resumed as --task, several -> listed, exit 2, none -> labelled); failed saves show the last usable checkpoint as OLDER state; status shows failing checks and checkpoint problems; doctor unbound vault with canonical: workspace is a warning; CRL…
+- Task: lean-agent-team
+- Record: `.agentos/checkpoints/lean-agent-team/2026-11-05T02-53-26-102Z-79510e05.json`
+- Repos: agentos-for-projects feat/lean-agent-team@7396b6c (21 changed)
+- Progress: Implemented three-role defaults, coexisting team exports, explicit model configuration and migration documentation; automated verification completed.
 - Blockers: none
-- Next: Phynceon reviews the local commits on fix/resume-active-task, then pushes and opens a PR against main.
-- Receipts: observed-pass 2, observed-fail 0, claimed 0, not-run 3, unavailable 0
-- Resume: `agentos resume --task resume-active-task`
+- Next: Review the local diff and run live engine discovery, delegation and model-selection trials. Commit and push only when authorized.
+- Receipts: observed-pass 1, observed-fail 0, claimed 1, not-run 3, unavailable 0
+- Resume: `agentos resume --task lean-agent-team`
 <!-- agentos:checkpoint:end -->

@@ -17,7 +17,7 @@ async function workspace(t, agents = 'minimal') {
 test('every public agent uses the same role contract for init and add', async t => {
   const added = await workspace(t);
   const entries = registry.entries.filter(e => e.type === 'agent');
-  const ids = ['planner', 'developer', 'tester', 'reviewer', 'release-manager', 'security-reviewer'];
+  const ids = ['writer', 'researcher', 'planner', 'developer', 'tester', 'reviewer', 'release-manager', 'security-reviewer'];
   assert.deepEqual(entries.map(e => e.name).sort(), [...ids].sort());
   for (const entry of entries) await t.test(entry.name, async () => {
     const source = await readFile(entry.absPath, 'utf8');

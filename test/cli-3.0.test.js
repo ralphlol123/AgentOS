@@ -214,7 +214,7 @@ test('agents|skills list/show cover the catalog; skills show (installed, catalog
   assert.equal(run(['skills', 'show', 'no-such-skill'], root).status, 1);
 });
 
-test('init --agents minimal is the default team (what --agents detected gave before 3.0.0)', async (t) => {
+test('init defaults to core; explicit minimal preserves the legacy team', async (t) => {
   const { base } = await workspace(t);
   const enabled = async (dir) => (await readFile(join(dir, '.agentos/project.yaml'), 'utf8')).match(/enabled:\n((?: {4}- .+\n)+)/)[1];
   const teams = [];
@@ -224,7 +224,7 @@ test('init --agents minimal is the default team (what --agents detected gave bef
     ok(run(['init', '--existing', '--yes', ...extra], dir));
     teams.push(await enabled(dir));
   }
-  assert.equal(teams[0], teams[1]);
+  assert.equal(teams[0], '    - developer\n    - writer\n    - researcher\n');
   assert.equal(teams[1], '    - developer\n    - tester\n    - reviewer\n    - release-manager\n');
 });
 

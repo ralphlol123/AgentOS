@@ -1,5 +1,5 @@
 export type FlagValue = string | boolean;
-const booleans = new Set(['new', 'existing', 'dry-run', 'yes', 'y', 'detected', 'replace', 'fix', 'json', 'create', 'refresh', 'installed', 'diff', 'include-superseded', 'recover', 'append', 'custom', 'require-enforcement', 'require-synced-config', 'require-complete', 'adopt', 'auto', 'last', 'force', 'full', 'brief', 'strict', 'engines', 'no-index', 'archive-only']);
+const booleans = new Set(['team', 'new', 'existing', 'dry-run', 'yes', 'y', 'detected', 'replace', 'fix', 'json', 'create', 'refresh', 'installed', 'diff', 'include-superseded', 'recover', 'append', 'custom', 'require-enforcement', 'require-synced-config', 'require-complete', 'adopt', 'auto', 'last', 'force', 'full', 'brief', 'strict', 'engines', 'no-index', 'archive-only']);
 const values = new Set(['agents', 'engine', 'role', 'vault', 'dest', 'name', 'expected-sha256', 'objective', 'expect-state', 'task', 'scope', 'budget', 'progress', 'blocker', 'next', 'check', 'cwd', 'claim', 'kind', 'status', 'by', 'from', 'summary', 'supersedes', 'canonical', 'dir', 'location', 'to', 'explain', 'note', 'about']);
 /** `--check` and `--claim` repeat; each `--cwd` belongs to the `--check` right before it. */
 export function parseFlagsAndPositionals(args: string[], extraBooleans: string[] = []): { flags: Record<string, FlagValue>; positionals: string[]; checks: Array<{ command: string; cwd?: string }>; claims: string[] } {
@@ -37,7 +37,7 @@ export function validateCommandFlags(command: string, flags: Record<string, Flag
     brain: ['kind', 'scope', 'status', 'by', 'from', 'summary', 'supersedes', 'append', 'task', 'json', 'dry-run', 'location', 'adopt', 'auto', 'to', 'last', 'force'],
     doctor: ['fix', 'json', 'dry-run', 'explain', 'engines'], upgrade: ['check', 'to', 'dry-run', 'yes', 'y', 'json'], compact: ['dry-run', 'archive-only', 'objective', 'expect-state', 'diff'],
     obsidian: ['vault', 'dest', 'create', 'dry-run', 'canonical', 'dir', 'note', 'no-index'],
-    skills: ['detected', 'dry-run', 'replace', 'installed', 'name', 'yes', 'expected-sha256'], agents: ['name', 'dry-run', 'replace', 'installed', 'json', 'custom', 'role', 'scope', 'yes', 'expected-sha256'],
+    skills: ['detected', 'dry-run', 'replace', 'installed', 'name', 'yes', 'expected-sha256'], agents: ['team', 'name', 'dry-run', 'replace', 'installed', 'json', 'custom', 'role', 'scope', 'yes', 'expected-sha256'],
   };
   for (const key of Object.keys(flags)) if (allowed[command] && !allowed[command].includes(key)) throw new Error(`--${key} is not supported by ${command}.`);
   if (flags.new && flags.existing) throw new Error('Choose either --new or --existing.');

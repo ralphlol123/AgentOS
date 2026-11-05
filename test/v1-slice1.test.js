@@ -120,14 +120,14 @@ test('a workspace without task_scope gets no scope lines in its prompt', async (
 
 // --- 6. built-in alias pairs are equivalents ------------------------------------------------------
 
-test('agent profile minimal enables the default team (--agents detected, removed in 3.0.0, was the same); only the profile label differs', async (t) => {
+test('legacy minimal and detected profiles retain the same team; only the profile label differs', async (t) => {
   const yaml = async (agents) => {
     const root = await mkdtemp(join(tmpdir(), 'agentos-v1s1-prof-'));
     t.after(() => rm(root, { recursive: true, force: true }));
     await initAgentOS({ cwd: root, mode: 'new', yes: true, agents });
     return (await readFile(join(root, '.agentos/project.yaml'), 'utf8')).replace(/^name: .*$/m, 'name: x');
   };
-  assert.equal((await yaml('minimal')).replace('profile: minimal', 'profile: detected'), await yaml(undefined));
+  assert.equal((await yaml('minimal')).replace('profile: minimal', 'profile: detected'), await yaml('detected'));
 });
 
 // --- 7. docs truth: derived facts are checked against their source --------------------------------
