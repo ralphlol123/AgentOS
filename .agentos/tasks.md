@@ -2,9 +2,22 @@
 
 ## Now
 
-- [ ] Independent review and live-engine validation for `lean-agent-team`; local implementation and automated verification are complete.
+- [ ] Review the opt-in Unified Brain contract implementation on `feat/unified-brain-contract`.
+- [ ] Run actual two-engine retrieval/write/restart/handoff trials, including unavailable MCP and stale repository evidence (docs/shared-memory.md).
 
 ## Acceptance criteria
+
+- Portable project mapping is shared across engines and never implies verified connectivity.
+- Setup is additive and repeatable; existing configuration, notes and local recovery remain intact.
+- Existing/new project and unavailable-connection automated cases pass; live engine acceptance is recorded separately.
+
+## Previous open work (not revalidated in this task)
+
+
+
+- [ ] Independent review and live-engine validation for `lean-agent-team`; local implementation and automated verification are complete.
+
+## Previous team acceptance criteria
 
 - New projects receive Developer, Writer and Researcher; explicit legacy and existing/custom teams remain preserved.
 - Enabled role definitions coexist for Claude Code, Codex and OpenCode, with dry-run, overwrite protection and atomic rollback.

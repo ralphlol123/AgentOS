@@ -1,0 +1,117 @@
+{
+  "schema": "agentos.checkpoint/1",
+  "id": "2026-11-08T17-00-01-709Z-abd4a21c",
+  "created_at": "2026-11-08T17:00:01.709Z",
+  "recovered": false,
+  "project": {
+    "name": "agentos-for-projects",
+    "root": "/workspace/scratch/aa1c5916141c/AgentOS"
+  },
+  "task": {
+    "id": "unified-brain-contract",
+    "source": "--task"
+  },
+  "run_id": null,
+  "engine": "codex",
+  "role": "developer",
+  "objective": {
+    "id": "obj-e4c65def6d",
+    "text": "Add an opt-in engine-neutral Unified Brain mapping and setup workflow while preserving generic Brain, checkpoints, handoffs and legacy Obsidian behavior."
+  },
+  "acceptance": {
+    "source": ".agentos/tasks.md#Acceptance criteria",
+    "text": "- Portable project mapping is shared across engines and never implies verified connectivity.\n- Setup is additive and repeatable; existing configuration, notes and local recovery remain intact.\n- Existing/new project and unavailable-connection automated cases pass; live engine acceptance is recorded separately."
+  },
+  "scope": {
+    "repos": [
+      "agentos-for-projects=."
+    ],
+    "read": [
+      "."
+    ],
+    "edit": []
+  },
+  "repos": [
+    {
+      "name": "agentos-for-projects",
+      "path": ".",
+      "worktree": "/workspace/scratch/aa1c5916141c/AgentOS",
+      "branch": "feat/unified-brain-contract",
+      "head": "a96729c831217f1caf76f8a5929f92cf205d7432",
+      "fingerprint": null,
+      "changed_paths": [
+        "CHANGELOG.md",
+        "README.md",
+        "docs/shared-memory.md",
+        "package.json",
+        "scripts/",
+        "src/core.ts",
+        "src/shared-memory.ts",
+        "test/package-metadata.js",
+        "test/shared-memory.test.js"
+      ],
+      "omitted_paths": 0,
+      "available": true
+    }
+  ],
+  "state": "636c3e90b625b27318b8b2cf10900e7657e987690b501d6b62c258f8b2526268",
+  "progress": "Implemented opt-in shared-memory mapping, setup guide/script and diagnostics; automated verification passed.",
+  "blockers": [],
+  "next": "Review diff, fix upstream Unified Brain issues and run actual two-engine pilot before legacy deprecation.",
+  "supersedes": {
+    "handoff:current-state": "f70fa5ececcbd2aa0674f25718079ec1cafdc3691ddd0f411f60e89443a8cf50",
+    "handoff:next-exact-action": "4bc3ef582fcbe0e2e66e416ddf0c482bf9c1b5877680c2dbb4465dac73b1c211"
+  },
+  "knowledge_refs": [],
+  "receipts": [
+    {
+      "status": "observed-pass",
+      "command": "node --test test/shared-memory.test.js",
+      "cwd": ".",
+      "exit_code": 0,
+      "observed_at": "2026-11-08T16:59:51.831Z",
+      "evidence": ".agentos/checkpoints/unified-brain-contract/evidence/a2efa6b2fecbb2c3.log",
+      "state_tested": "636c3e90b625b27318b8b2cf10900e7657e987690b501d6b62c258f8b2526268"
+    },
+    {
+      "status": "claimed",
+      "command": "Full regression suite: 883 passed; Unified Brain: 26 passed; smoke, metadata and package checks passed; see run report.",
+      "cwd": ".",
+      "exit_code": null,
+      "observed_at": null,
+      "evidence": null,
+      "state_tested": "636c3e90b625b27318b8b2cf10900e7657e987690b501d6b62c258f8b2526268",
+      "note": "engine-reported; not observed by AgentOS"
+    },
+    {
+      "status": "not-run",
+      "command": "bun run build",
+      "cwd": ".",
+      "exit_code": null,
+      "observed_at": null,
+      "evidence": null,
+      "state_tested": null,
+      "note": "declared agentos-for-projects.build_command"
+    },
+    {
+      "status": "not-run",
+      "command": "bun run test",
+      "cwd": ".",
+      "exit_code": null,
+      "observed_at": null,
+      "evidence": null,
+      "state_tested": null,
+      "note": "declared agentos-for-projects.test_command"
+    },
+    {
+      "status": "not-run",
+      "command": "bun run test:package-managers",
+      "cwd": ".",
+      "exit_code": null,
+      "observed_at": null,
+      "evidence": null,
+      "state_tested": null,
+      "note": "declared agentos-for-projects.package_manager_test_command"
+    }
+  ]
+}

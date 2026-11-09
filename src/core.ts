@@ -1,3 +1,5 @@
+import { sharedMemoryStatus, sharedMemoryRules, type SharedMemoryConfig } from './shared-memory.js';
+import { isDeepStrictEqual } from 'node:util';
 import { renderTeamAgent, teamPathAllowed } from './team-agents.js';
 import { SKILL_CATALOG, SKILL_BY_ID, SKILL_CATEGORIES, TEMPLATE_ENTRIES, AGENT_DEFINITIONS, renderSkillTemplate, type SkillCategory, type SkillDefinition } from './catalog.js';
 import { withWorkspaceWriter } from './workspace-lock.js';
@@ -960,12 +962,13 @@ export async function statusAgentOS(options: any = {}) {
     if (!await exists(join(root, file))) missing.push(file);
   }
   const objective = resolveObjective(handoff);
-  const ok = missing.length === 0 && objective.kind === 'resolved';
+  const sharedMemory = sharedMemoryStatus(parseProjectYaml(project));
+  const ok = missing.length === 0 && objective.kind === 'resolved' && sharedMemory.state !== 'invalid';
   const childSection = await childRepoStatusSection(root, options.cwd ?? process.cwd(), project);
   const sizeWarnings = await stateSizeWarnings(root);
   const { binding, off } = obsidianIntegration(root, project);
   const knowledge = await brainDoctor(root, brainScopes(project), binding, off);
-  const warnings = [...sizeWarnings, ...knowledge.problems, ...knowledge.warnings, ...await checkpointProblems(root)];
+  const warnings = [...sizeWarnings, ...knowledge.problems, ...knowledge.warnings, ...await checkpointProblems(root), ...sharedMemory.problems, ...sharedMemory.warnings];
   const checkpoint = await newestCheckpoint(root);
   const failing = (checkpoint?.receipts ?? []).filter((receipt) => receipt.status === 'observed-fail' || receipt.status === 'unavailable');
   return {
@@ -976,6 +979,7 @@ export async function statusAgentOS(options: any = {}) {
       `Root: ${root}`,
       firstYamlValue(project, 'name') ? `Project: ${firstYamlValue(project, 'name')}` : null,
       firstYamlValue(project, 'workspace_kind') ? `Workspace kind: ${firstYamlValue(project, 'workspace_kind')}` : null,
+      sharedMemory.state !== 'not-configured' ? `Shared memory: ${sharedMemory.state}${sharedMemory.config ? ` (${sharedMemory.config.project_id})` : ''}` : null,
       '',
       'Current handoff:',
       objective.selected?.text || `- ${objective.diagnostic}`,
@@ -2756,6 +2760,9 @@ async function doctorAgentOSUnlocked(options: any = {}) {
   problems.push(...cards.problems);
   diagnostics.push(...cards.diagnostics);
   const doctorProject = await safeRead(join(root, '.agentos/project.yaml'));
+  const sharedMemory = sharedMemoryStatus(parseProjectYaml(doctorProject));
+  problems.push(...sharedMemory.problems);
+  warnings.push(...sharedMemory.warnings);
   const { binding, off, config: obsidianConfig } = obsidianIntegration(root, doctorProject);
   // No vault on this machine is a problem only when Brain records live there (canonical: vault). With canonical:
   // workspace the records are in the project and the vault is an optional view (a fresh clone has no local.yaml).
@@ -2778,6 +2785,7 @@ async function doctorAgentOSUnlocked(options: any = {}) {
   }
 
   const result = doctorResult({ root, fix: Boolean(options.fix), problems, warnings, diagnostics, migration, synced_config });
+  if (sharedMemory.state !== 'not-configured') Object.assign(result, { shared_memory: sharedMemory });
   return options.json ? withJsonText(result) : result;
 }
 
@@ -3763,7 +3771,7 @@ const GUIDE_POINTER_LINE = 'Commands and workflows: `.agentos/guide.md` (load on
 const MANUAL_LOOP = 'Durable knowledge: `agentos brain propose <record> --from <file> --task <id>`; `agentos brain policy` is manual by default. Apply only with `--auto --by <self>` if permitted; otherwise leave pending.';
 const AUTONOMOUS_LOOP = 'If the work changed durable knowledge (Brain policy: autonomous): stage one focused proposal, `agentos brain propose <record> --from <file> --task <id>`, then `agentos brain apply <proposal> --auto --by <self>`. Cite only facts from files you read; leave unknowns unknown. On refusal leave it pending.';
 // The startup loop, in each engine's own bootloader. The task id is the shared identity across engines.
-const startupLoop = (engine: string, autonomous = false) => `Startup loop: \`agentos status\` → \`agentos context ${engine} --task <id>\` → work → \`agentos checkpoint --task <id> --progress "<done>" --next "<remaining>"\`. Checkpoint at milestones, before limits interrupt work. ${autonomous ? AUTONOMOUS_LOOP : MANUAL_LOOP} Next engine: repeat context with the same task id; \`agentos resume --task <id>\` for details or recovery.`;
+const startupLoop = (engine: string, autonomous = false) => `Startup loop: \`agentos status\` → \`agentos context ${engine} --task <id>\` → work → \`agentos checkpoint --task <id> --progress "<done>" --next "<remaining>"\`. Checkpoint at milestones, before limits interrupt work. If project.yaml declares knowledge.shared_memory, follow its mapping and the shared-memory workflow in .agentos/guide.md before planning. ${autonomous ? AUTONOMOUS_LOOP : MANUAL_LOOP} Next engine: repeat context with the same task id; \`agentos resume --task <id>\` for details or recovery.`;
 
 // Shared by the AGENTS.md and CLAUDE.md child pointers. The CLI comes first on purpose: some engines
 // (observed: OpenCode run non-interactively) refuse reads outside their start directory, and a refused
@@ -3793,9 +3801,10 @@ function guideMd(autonomous = false) {
     '',
     '## Setup and project knowledge',
     '',
-    '- `agentos init` (or `--existing`) also sets up the Brain: missing templates in `.agentos/brain/` mark unknowns; existing records and docs are adopted, never duplicated or rewritten. Safe to re-run.',
+    '- `agentos init` (or `--existing`) creates missing Brain templates with unknowns; preserves existing records/docs. Safe to re-run.',
     '- Context opens with a bounded overview (`.agentos/memory.md`); Brain records follow by reference when relevant (`agentos brain search <terms>`).',
-    '- Obsidian is optional: `agentos obsidian init` (folder to open as its own vault) or `agentos obsidian link --vault <abs-path> --dest <sub/folder> --create` (navigation note in an existing vault). The vault path is machine-local: `.agentos/local.yaml`.',
+    '- Shared memory: follow `knowledge.shared_memory` via context (not external retrieval). Setup: packaged `docs/shared-memory.md`.',
+    '- Optional Obsidian: `agentos obsidian init` (new folder) or `agentos obsidian link --vault <abs-path> --dest <sub/folder> --create` (existing vault). Host path: `.agentos/local.yaml`.',
     '',
     '## If you started inside a child repo',
     '',
@@ -4051,6 +4060,7 @@ async function contextInputFor(root: string, engine: string, options: any) {
   const projectText = await readCoreProjectYaml(root);
   const project = parseProjectYaml(projectText);
   const obsidian = obsidianIntegration(root, projectText);
+  const sharedMemory = sharedMemoryStatus(project);
   const binding = obsidian.binding;
   // An optional viewer folder that is gone (canonical: workspace) is an integration warning, not missing knowledge.
   const viewerGone = binding && binding.canonical === 'workspace' && !await exists(binding.dir) ? `optional Obsidian folder unavailable: ${binding.dir} (canonical: workspace; no Brain record lives there)` : null;
@@ -4058,16 +4068,16 @@ async function contextInputFor(root: string, engine: string, options: any) {
   const brainRecords = await loadBrain(root, brainScopes(projectText), binding);
   const missing = await brainMissing(root, brainRecords, binding, obsidian.off);
   return {
-    root, engine, project, projectText,
+    root, engine, project, projectText, sharedMemory,
     repos: parseReposFromProjectYaml(projectText, { includeRoot: true }),
     enabledAgents: Array.isArray(agents.enabled) ? agents.enabled.map((id) => normalizeAgentAlias(String(id))) : [],
     defaultRole: agents.capabilities?.implementation ? normalizeAgentAlias(String(agents.capabilities.implementation)) : undefined,
     header: promptHeaderLines(engine, root, projectText),
-    rules: [PROMPT_RULES, ...engineSpecificRules(engine), obsidianPromptLine(root, projectText), approvalGuidance(project.knowledge?.brain?.approval)].filter(Boolean),
+    rules: [PROMPT_RULES, ...engineSpecificRules(engine), obsidianPromptLine(root, projectText), sharedMemoryRules(sharedMemory), approvalGuidance(project.knowledge?.brain?.approval)].filter(Boolean),
     task: options.task, about: options.about, role: options.role ? normalizeAgentAlias(String(options.role)) : undefined, scope: options.scope, budget: options.budget, includeSuperseded: Boolean(options.includeSuperseded),
     brain: brainContextRecords(brainRecords),
-    missing,
-    warnings: [obsidian.off, viewerGone, ...(!brainRecords.length && !missing.length ? [EMPTY_BRAIN_WARNING] : [])].filter(Boolean),
+    missing: [...missing, ...sharedMemory.missing],
+    warnings: [...sharedMemory.problems, ...sharedMemory.warnings, obsidian.off, viewerGone, ...(!brainRecords.length && !missing.length ? [EMPTY_BRAIN_WARNING] : [])].filter(Boolean),
   };
 }
 
@@ -4097,6 +4107,7 @@ export async function contextAgentOS(options: any = {}) {
   const checkpoint = checkpointTask ? await checkpointContextRecord({ root, repos: input.repos, handoffText, get excluded() { return checkpointExcludedPaths(input.project); } }, checkpointTask) : null;
   const bundle = await buildContextBundle({ ...input, checkpoint: checkpoint ?? undefined, trailer: advisoryTrailer(adapter),
     missing: [...input.missing, ...(checkpoint?.missing ?? [])], warnings: [...input.warnings, ...ambiguity, ...(checkpoint?.warnings ?? [])] });
+  if (input.sharedMemory.state !== 'not-configured') Object.assign(bundle, { shared_memory: input.sharedMemory });
   const advisoryLines = bundle.ok ? advisories(adapter) : [];
   // --require-complete: a bundle with Missing items (e.g. an unavailable vault) exits 1; the bundle itself stays `ok`.
   const incomplete = Boolean(options.requireComplete && bundle.ok && bundle.missing.length);
@@ -4113,6 +4124,7 @@ function renderEnginePrompt({ engine, root, project, objective, tasks, scope }) 
     ...promptHeaderLines(engine, root, project),
     `Commands and workflows: ${GUIDE_PATH} (load on demand; run \`agentos status\` first).`,
     obsidianLine,
+    sharedMemoryRules(sharedMemoryStatus(parseProjectYaml(project))),
     PROMPT_RULES,
     ...engineSpecificRules(engine),
     ...(scope ? [
@@ -4538,6 +4550,40 @@ function legacySubrepoClaudePointer(repo) {
   ].join('\n');
 }
 
+
+/** Opt-in setup entry point for the packaged agent-guided script. Preview is the default. */
+export async function setupSharedMemoryAgentOS(options: { cwd?: string; apply?: boolean; config: SharedMemoryConfig }) {
+  const root = await findAgentOSRoot(options.cwd ?? process.cwd());
+  if (!root) throw new Error('No AgentOS workspace found. Initialize the project first.');
+  const inspect = async () => {
+    await assertWorkspaceBoundaries(root);
+    const path = join(root, '.agentos/project.yaml');
+    await assertBoundaryTarget(root, '.agentos/project.yaml');
+    await assertProjectYamlWellFormed(path);
+    const original = await readFile(path, 'utf8');
+    const data = parseProjectYaml(original);
+    const proposed = sharedMemoryStatus({ knowledge: { shared_memory: options.config } });
+    if (proposed.problems.length) throw new Error(proposed.problems.join('\n'));
+    const existing = data.knowledge?.shared_memory;
+    if (existing !== undefined && !isDeepStrictEqual(existing, options.config)) throw new Error('A different shared-memory mapping already exists. Nothing changed; reconcile the project identity and registry before editing it explicitly.');
+    if (data.knowledge !== undefined && (!data.knowledge || typeof data.knowledge !== 'object' || Array.isArray(data.knowledge))) throw new Error('knowledge must be a mapping; nothing changed.');
+    const patched = patchProjectYaml(original, draft => {
+      draft.knowledge ??= {};
+      draft.knowledge.shared_memory = options.config;
+    });
+    const changed = patched !== original;
+    if (options.apply && changed) await withMutationTransaction(() => writeFileAtomic(path, patched));
+    return { ok: true, changed, applied: Boolean(options.apply), text: [
+      `Shared memory setup: ${changed ? options.apply ? 'mapping saved' : 'preview (no writes)' : 'mapping already matches (no writes)'}`,
+      `Workspace: ${root}`,
+      ...Object.entries(options.config).map(([key, value]) => `${key}: ${value}`),
+      'Connection and registry are not verified by this script. No vault files, engine configuration or instructions were changed.',
+      'Next: follow docs/shared-memory.md; inspect agentos context <engine> and refresh managed instructions with agentos doctor --fix only after reviewing its changes.',
+      ...sharedMemoryStatus({ ...data, knowledge: { ...data.knowledge, shared_memory: options.config } }).warnings,
+    ].join('\n') };
+  };
+  return options.apply ? withWorkspaceWriter(root, inspect) : inspect();
+}
 
 export async function initAgentOS(options: any = {}) {
   const root = resolve(options.cwd ?? process.cwd());

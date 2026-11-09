@@ -1,0 +1,20 @@
+$ node --test test/shared-memory.test.js
+(cwd .)
+--- stdout ---
+✔ setup previews, preserves legacy configuration and instructions, and is repeatable from a child directory (1069.222246ms)
+✔ new project mapping gives both engine contexts the same instructions but never claims MCP retrieval (2618.962335ms)
+✔ invalid mapping is diagnosed without breaking local continuity; disabled mapping stays inactive (3638.369746ms)
+✔ setup refuses malformed YAML, symlink targets and active writer locks without modifying the target (740.160507ms)
+✔ mapping is portable to another checkout and its rules remain mandatory under a tight budget (1164.415784ms)
+✔ new bootloaders and guide explain shared memory without silently enabling it (381.530713ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 9752.483839
+
+--- stderr ---
+

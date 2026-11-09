@@ -1,0 +1,108 @@
+{
+  "schema": "agentos.checkpoint/1",
+  "id": "2026-11-09T02-43-55-048Z-b18a829a",
+  "created_at": "2026-11-09T02:43:55.048Z",
+  "recovered": false,
+  "project": {
+    "name": "agentos-for-projects",
+    "root": "/workspace/scratch/aa1c5916141c/AgentOS"
+  },
+  "task": {
+    "id": "unified-brain-contract",
+    "source": "--task"
+  },
+  "run_id": null,
+  "engine": "codex",
+  "role": "developer",
+  "objective": {
+    "id": "obj-e4c65def6d",
+    "text": "Add an opt-in engine-neutral Unified Brain mapping and setup workflow while preserving generic Brain, checkpoints, handoffs and legacy Obsidian behavior."
+  },
+  "acceptance": {
+    "source": ".agentos/tasks.md#Acceptance criteria",
+    "text": "- Portable project mapping is shared across engines and never implies verified connectivity.\n- Setup is additive and repeatable; existing configuration, notes and local recovery remain intact.\n- Existing/new project and unavailable-connection automated cases pass; live engine acceptance is recorded separately."
+  },
+  "scope": {
+    "repos": [
+      "agentos-for-projects=."
+    ],
+    "read": [
+      "."
+    ],
+    "edit": []
+  },
+  "repos": [
+    {
+      "name": "agentos-for-projects",
+      "path": ".",
+      "worktree": "/workspace/scratch/aa1c5916141c/AgentOS",
+      "branch": "feat/unified-brain-contract",
+      "head": "a96729c831217f1caf76f8a5929f92cf205d7432",
+      "fingerprint": null,
+      "changed_paths": [
+        "CHANGELOG.md",
+        "README.md",
+        "docs/shared-memory.md",
+        "package.json",
+        "scripts/",
+        "src/core.ts",
+        "src/shared-memory.ts",
+        "test/package-metadata.js",
+        "test/shared-memory.test.js"
+      ],
+      "omitted_paths": 0,
+      "available": true
+    }
+  ],
+  "state": "636c3e90b625b27318b8b2cf10900e7657e987690b501d6b62c258f8b2526268",
+  "progress": "Prepared opt-in shared-memory PR and v0.2.1 guidance. Typecheck, 883 tests, smoke and metadata pass.",
+  "blockers": [],
+  "next": "Review PR and CI; run actual two-engine pilot. Bun compatibility and npm publication remain pending.",
+  "supersedes": {
+    "handoff:current-state": "bd2404e96fd2d3b024ff280d3970d12b21c96c38b05d060f658c3ab9ec02270a",
+    "handoff:next-exact-action": "cabe41da3b11ddcac1f0295c21a00b54c699300ee25010f14aba781c68f60014"
+  },
+  "knowledge_refs": [],
+  "receipts": [
+    {
+      "status": "claimed",
+      "command": "883 regression tests passed; typecheck, smoke and 3 metadata checks passed. Bun unavailable; actual-engine trial pending.",
+      "cwd": ".",
+      "exit_code": null,
+      "observed_at": null,
+      "evidence": null,
+      "state_tested": "636c3e90b625b27318b8b2cf10900e7657e987690b501d6b62c258f8b2526268",
+      "note": "engine-reported; not observed by AgentOS"
+    },
+    {
+      "status": "not-run",
+      "command": "bun run build",
+      "cwd": ".",
+      "exit_code": null,
+      "observed_at": null,
+      "evidence": null,
+      "state_tested": null,
+      "note": "declared agentos-for-projects.build_command"
+    },
+    {
+      "status": "not-run",
+      "command": "bun run test",
+      "cwd": ".",
+      "exit_code": null,
+      "observed_at": null,
+      "evidence": null,
+      "state_tested": null,
+      "note": "declared agentos-for-projects.test_command"
+    },
+    {
+      "status": "not-run",
+      "command": "bun run test:package-managers",
+      "cwd": ".",
+      "exit_code": null,
+      "observed_at": null,
+      "evidence": null,
+      "state_tested": null,
+      "note": "declared agentos-for-projects.package_manager_test_command"
+    }
+  ]
+}

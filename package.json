@@ -59,6 +59,8 @@
     "docs/obsidian.md",
     "docs/migration-project-brain.md",
     "docs/engines.md",
-    "docs/agents.md"
+    "docs/agents.md",
+    "docs/shared-memory.md",
+    "scripts/setup-shared-memory.mjs"
   ]
 }
