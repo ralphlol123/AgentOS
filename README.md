@@ -728,3 +728,7 @@ GitHub Actions uses Bun as the primary dogfood package manager. The package-mana
 ## Reliability and recovery
 
 See [reliability contracts and acceptance](https://github.com/ralphlol123/AgentOS/blob/main/docs/reliability-acceptance.md) for preview/replacement behavior, additive `init --refresh`, installed inventories, writer-lock recovery, protected handoff evidence, reviewed import hashes, and verification limits.
+
+## Optional Unified Brain pilot
+
+Use the [agent-guided shared-memory setup](docs/shared-memory.md) to connect an existing or new AgentOS workspace to a separately installed Unified Brain service. The packaged setup script previews a portable project mapping; engines handle MCP calls. Existing Obsidian integration stays supported. Configuration is not proof of retrieval, and the documented v0.2 limitations and real-engine trials remain rollout gates.

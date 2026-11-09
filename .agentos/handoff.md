@@ -2,28 +2,27 @@
 
 ## Current objective
 
-Implement a lean default team: Developer, Writer and Researcher, with portable project context and opt-in native team definitions. Keep testing, independent review, planning and release preparation as assignments rather than mandatory permanent agents.
+Add an opt-in engine-neutral Unified Brain mapping and setup workflow while preserving generic Brain, checkpoints, handoffs and legacy Obsidian behavior.
 
 ## Scope
 
-- Task: `lean-agent-team`; branch: `feat/lean-agent-team`; baseline: `7396b6c` (3.3.0).
-- AgentOS source, role templates, tests, docs and state records. No release/version change, remote writes or Hermes work.
-- Existing project role selections, custom cards and task-scoped sync behavior remain supported.
+- Task: `unified-brain-contract`; branch: `feat/unified-brain-contract`; baseline: `a96729c831217f1caf76f8a5929f92cf205d7432` (3.3.0).
+- Developer role: AgentOS source, setup script, tests, documentation and local state only.
+- No external vault, global engine configuration, release, commit or push changes.
 
 ## Current state
 
-- New init defaults to `core`: developer, writer, researcher. Explicit `minimal` and existing enabled teams remain compatible.
-- `agents sync claude-code|codex|opencode --team` exports all enabled manifest cards into separate `agentos-<role>` files. Uses existing transactional sync protection and a separate ownership record.
-- Model preference is advisory. Explicit per-engine model mappings are exported; absence inherits the session model. No automatic availability, price or fallback-model guesses.
-- Coordinator owns shared handoff/checkpoint writes. Fresh Developer sessions can perform independent review; Researcher is read-only by intent, with engine-specific limits documented.
-- `docs/agents.md` contains responsibilities, migration, native format references and limitations; it is now packaged.
-- Final consolidated regression run: 876 tests, 870 passed, 6 skipped (root-permission tests), zero failures. Includes ten new team tests. Typecheck, smoke, metadata and package dry-run passed. Codex exports also parsed with Python tomllib. Results recorded in .agentos/runs/2026-11-05-lean-agent-team.md.
-- Codex exports parsed with Python tomllib. No Claude Code, Codex or OpenCode executable is installed here; live discovery, invocation, permissions, model routing and cost savings remain unverified.
-- Local uncommitted changes only. No push, PR, publish or live-engine trial.
+- Implemented validated `knowledge.shared_memory` mapping, common engine instructions and explicit configured-unverified diagnostics.
+- Packaged docs/shared-memory.md and scripts/setup-shared-memory.mjs; preview default, additive YAML changes, conflict refusal, repeat no-op, existing writer/atomic protections.
+- Enabled external memory stays missing in context; `--require-complete` fails because this milestone cannot verify MCP retrieval. Normal local workflows remain usable.
+- Unified Brain v0.2.1 separately fixes the five audited backend issues (34 tests passed). AgentOS guidance now includes task_id, retained request_id and conservative behavior for older/unknown servers.
+- Full AgentOS suite: 883 passed, zero failures. Unified Brain: 26 passed. Smoke, metadata (3 tests) and npm package dry-run passed.
+- Real vault and actual engine handoffs are unverified. No CLI executable trial against the user's PC is claimed.
+- PR preparation authorized by the user; no merge or npm publication performed. Report: `.agentos/runs/2026-11-09-unified-brain-contract.md`.
 
 ## Next exact action
 
-Review the local diff and run bounded live-engine team trials before treating the new exports as verified. Commit/push only when authorized.
+Open the reviewed feature PR, then run the documented actual-engine pilot before legacy deprecation or broader rollout.
 
 ## Protected files / do not touch
 
@@ -31,19 +30,19 @@ Secrets, production configuration, migrations, external vaults/client projects, 
 
 ## Open decisions
 
-- Live trial should check role discovery, model actually selected, read-only behavior, one shared-state writer, and independent review; measure cost and retries before claiming savings.
-- Team exports intentionally do not satisfy task-scoped `context --require-synced-config`; inspect team drift via `agents sync <engine> --team --dry-run`.
-- Previous unfinished tasks are preserved in tasks.md and the archived state.
+- Keep legacy commands/configuration operational until record-level migration and actual engine validation succeed.
+- Declared store labels are not verified vault identity. Future receipts need an identity and freshness protocol.
+- Prior open tasks and original handoff/tasks are preserved in tasks.md and archived run notes.
 
 <!-- agentos:checkpoint:start -->
 ## Checkpoint (managed)
 
-- Task: lean-agent-team
-- Record: `.agentos/checkpoints/lean-agent-team/2026-11-05T02-53-26-102Z-79510e05.json`
-- Repos: agentos-for-projects feat/lean-agent-team@7396b6c (21 changed)
-- Progress: Implemented three-role defaults, coexisting team exports, explicit model configuration and migration documentation; automated verification completed.
+- Task: unified-brain-contract
+- Record: `.agentos/checkpoints/unified-brain-contract/2026-11-09T02-43-55-048Z-b18a829a.json`
+- Repos: agentos-for-projects feat/unified-brain-contract@a96729c (9 changed)
+- Progress: Prepared opt-in shared-memory PR and v0.2.1 guidance. Typecheck, 883 tests, smoke and metadata pass.
 - Blockers: none
-- Next: Review the local diff and run live engine discovery, delegation and model-selection trials. Commit and push only when authorized.
-- Receipts: observed-pass 1, observed-fail 0, claimed 1, not-run 3, unavailable 0
-- Resume: `agentos resume --task lean-agent-team`
+- Next: Review PR and CI; run actual two-engine pilot. Bun compatibility and npm publication remain pending.
+- Receipts: observed-pass 0, observed-fail 0, claimed 1, not-run 3, unavailable 0
+- Resume: `agentos resume --task unified-brain-contract`
 <!-- agentos:checkpoint:end -->

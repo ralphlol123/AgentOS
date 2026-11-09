@@ -58,6 +58,9 @@ test('packed npm tarball contains only publishable runtime files', async () => {
   assert.ok(files.includes('LICENSE'));
   assert.ok(files.includes('dist/cli.js'));
   assert.ok(files.includes('dist/core.js'));
+  assert.ok(files.includes('dist/shared-memory.js'));
+  assert.ok(files.includes('docs/shared-memory.md'));
+  assert.ok(files.includes('scripts/setup-shared-memory.mjs'));
   assert.ok(files.includes('dist/core.d.ts'));
   assert.ok(files.includes('dist/cli.d.ts'));
   assert.ok(files.every((file) => !file.startsWith('src/')));
