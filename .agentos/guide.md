@@ -13,9 +13,10 @@ How to operate: `agentos status` shows open tasks and verification; read `.agent
 
 ## Setup and project knowledge
 
-- `agentos init` (or `--existing`) also sets up the Brain: missing templates in `.agentos/brain/` mark unknowns; existing records and docs are adopted, never duplicated or rewritten. Safe to re-run.
+- `agentos init` (or `--existing`) creates missing Brain templates with unknowns; preserves existing records/docs. Safe to re-run.
 - Context opens with a bounded overview (`.agentos/memory.md`); Brain records follow by reference when relevant (`agentos brain search <terms>`).
-- Obsidian is optional: `agentos obsidian init` (folder to open as its own vault) or `agentos obsidian link --vault <abs-path> --dest <sub/folder> --create` (navigation note in an existing vault). The vault path is machine-local: `.agentos/local.yaml`.
+- Shared memory: follow `knowledge.shared_memory` via context (not external retrieval). Setup: packaged `docs/shared-memory.md`.
+- Optional Obsidian: `agentos obsidian init` (new folder) or `agentos obsidian link --vault <abs-path> --dest <sub/folder> --create` (existing vault). Host path: `.agentos/local.yaml`.
 
 ## If you started inside a child repo
 
