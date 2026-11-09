@@ -4,6 +4,8 @@ All notable changes to AgentOS for Projects are documented here.
 
 ## [Unreleased]
 
+## [3.4.0] - 2026-11-09
+
 ### Added
 
 - Opt-in Unified Brain mapping (`knowledge.shared_memory`), a preview-first setup script and an engine-guided setup playbook. Status, doctor and context distinguish configuration from unverified external retrieval; local Brain/checkpoint/resume and legacy Obsidian remain supported. No automatic MCP setup, note migration or live-engine verification is claimed.
